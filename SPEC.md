@@ -30,9 +30,12 @@ Section 6 contains both reference configs as ZON.
    pkg-config. No other runtime dependency is allowed.
 4. Use ztest and zig-benchmark as the test and benchmark helpers. Keep them
    lazy and test-only in `build.zig.zon`, following the ztls pattern.
-5. I/O model: Linux builds use io_uring for socket events. Use provided
-   buffer rings, multishot receive and accept, registered files, and linked
-   timeouts where the design allows. Where the std wrapper lacks a feature,
+5. I/O model: Linux builds require kernel 7.2.0 or newer and use io_uring
+   for socket events. There is no epoll fallback and no feature probing.
+   Every io_uring feature named in this document exists on that kernel.
+   Use provided buffer rings, multishot receive and accept, registered
+   files, and linked timeouts. An `io_uring_setup` failure is a startup
+   error, not a fallback trigger. Where the std wrapper lacks a feature,
    use the raw io_uring syscalls through `std.os.linux`. macOS builds use
    kqueue. Do not add an event-loop dependency.
 6. One binary, named `z53`.
@@ -56,6 +59,8 @@ Section 6 contains both reference configs as ZON.
 - Query rewriting, views, per-client routing.
 - Authoritative zone serving from zone files.
 - Config reload without restart.
+- epoll or select fallbacks on Linux. Kernel 7.2.0 or newer is a hard
+  requirement.
 
 ## 3. Behavior
 
