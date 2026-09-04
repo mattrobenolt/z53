@@ -59,17 +59,85 @@ RDLENGTH, the header counts. Rules:
   unbounded allocation.
 - Fuzz the decoder. `zig build test` green is not fuzz coverage.
 
-## Code Style
+## Code Style — Tiger Style
 
-- `zig fmt` is necessary but not sufficient. Run the full lint before you
-  commit.
-- `std.debug.assert` for invariants, never for input validation. Wire input
-  is validation, not assertion territory.
+Safety > performance > developer experience, in that order. The full guide:
+https://github.com/tigerbeetle/tigerbeetle/blob/main/docs/TIGER_STYLE.md.
+The rules that carry the most weight here:
+
+- No recursion. Hard limit: 70 lines per function. Keep control flow in the
+  parent; push pure logic into helpers.
+- Upper bounds on everything: loops, queues, buffers, allocations.
+- `std.debug.assert` for preconditions, invariants, and postconditions that
+  catch real bugs. Never for input validation — wire input is validation
+  territory. Split compound asserts; ziglint Z016 enforces this.
+- Explicitly-sized types (`u32`, `u16`), not `usize`, unless the value is
+  genuinely pointer-sized.
+- Split compound conditions into nested `if/else`. State invariants
+  positively: `if (index < length)`.
+- Names carry units last, sorted by descending significance
+  (`latency_ms_max`). Paired names get equal character length (`source` and
+  `target`). No abbreviations.
+- Comments are sentences. They say why, not what.
+- Construct large structs in place: `fn init(target: *T) !void`. Pass
+  arguments larger than 16 bytes as `*const`. Never alias state; compute
+  values close to their use.
 - Error sets are explicit. No `anyerror` in public functions.
-- Keep per-query memory bounded. An arena per query, or pools. Steady-state
-  memory must not grow with query count.
 - Less code is better code. A 10-line function that is obviously correct
   beats a 30-line one that might be.
+
+`zig fmt` and ziglint run in the devshell and in CI. Both must pass before
+ every commit. ziglint is the minimum bar, not the ceiling.
+
+### Booleans are a code smell
+
+Every `bool` must survive scrutiny. Before writing one, check in order:
+
+1. Does it encode anything? If every call site passes the same literal,
+   delete it and comment the invariant.
+2. Do two bools describe one thing with a meaningless combination? Use one
+   `enum` so the illegal state is unrepresentable.
+3. Several independent flags on a struct? Use `std.EnumSet`.
+   `flags.contains(.rotate)` reads, and the whole group packs into one byte.
+4. Presence of a thing? `?T`, not `has_thing: bool`.
+5. A two-valued parameter? A named `enum`, so call sites read `.udp`
+   instead of `false`.
+
+A function that takes two bools is a design error.
+
+## Performance Is a First-Class Goal
+
+This is a loopback resolver and the load is trivial. The systems work is
+still the point of the project. Correctness first — then speed, with
+evidence.
+
+- Allocation budget: zero heap allocations on the steady-state query path.
+  Static buffers, pools, or an arena per query. The cache and the hosts
+  table may allocate, on insert and on load. Both are bounded. No ad-hoc
+  heap use anywhere else.
+- io_uring: use what the kernel gives, or say why not in the design notes:
+  provided buffer rings (`io_uring_register_buf_ring`) with multishot
+  `RECV` on the UDP socket; multishot `ACCEPT` on the TCP listeners;
+  registered files where they pay; linked SQEs with `LINK_TIMEOUT` for
+  upstream read deadlines; `SINGLE_ISSUER` + `DEFER_TASKRUN` over
+  thread-pool shapes; zero-copy send for UDP responses when a measurement
+  says it pays. Where the std wrapper lacks a feature, use the raw
+  io_uring syscalls through `std.os.linux`. A plain submit/complete loop
+  that ignores provided buffers and multishot is a design failure, not a
+  simplification. macOS has no equivalent: plain `kevent`, no penalty.
+- Memory: every long-lived structure is bounded and pre-sized. Struct
+  layout is a deliberate choice — packing, padding, cache lines. The cache
+  entry is the hottest structure in the program; treat its size as a
+  budget.
+- Measurement: profile with `perf` or Instruments, disassemble with
+  `objdump -d` or `llvm-objdump`, benchmark with zig-benchmark. No
+  performance claim without a capture. Gut feelings are wrong until
+  measured.
+- SIMD: probably nowhere. std already vectorizes memcpy and memchr. The
+  honest candidates are case-insensitive name matching and label scanning.
+  Only with measured evidence — a forced `@Vector` is worse than none.
+- Tracy zones are optional. If they appear, vendor the zero-cost wrapper
+  that TigerBeetle uses. perf and disassembly are the required floor.
 
 ## Tests
 
@@ -84,6 +152,10 @@ Error path tests are not optional. A test is evidence only after you have
 seen it fail for the right reason: reproduce before fixing, or run a mutation
 check (revert the fix, confirm red, restore). Record the result in the commit
 or issue comment.
+
+Use the project helpers: ztest for readable test output (one line per test in
+CI logs), zig-benchmark for benchmarks. Both are lazy test-only dependencies
+in `build.zig.zon`.
 
 ## Nix
 

@@ -28,16 +28,23 @@ Section 6 contains both reference configs as ZON.
 3. Runtime dependencies: ztls and one libcrypto backend. Pin ztls at commit
    `1d72c53`. The default backend is OpenSSL from nixpkgs, linked through
    pkg-config. No other runtime dependency is allowed.
-4. Test-only dependencies must stay lazy in `build.zig.zon`. ztest, txtar,
-   and zig-benchmark follow the ztls pattern.
-5. I/O model: Linux builds use io_uring for socket events. macOS builds use
-   kqueue. Both come from Zig std. Do not add an event-loop dependency.
+4. Use ztest and zig-benchmark as the test and benchmark helpers. Keep them
+   lazy and test-only in `build.zig.zon`, following the ztls pattern.
+5. I/O model: Linux builds use io_uring for socket events. Use provided
+   buffer rings, multishot receive and accept, registered files, and linked
+   timeouts where the design allows. Where the std wrapper lacks a feature,
+   use the raw io_uring syscalls through `std.os.linux`. macOS builds use
+   kqueue. Do not add an event-loop dependency.
 6. One binary, named `z53`.
 7. Configuration is a ZON document. Parse it with `std.zon`. Default path:
    `/etc/z53/z53.zon`. The `-c` flag overrides the path.
 8. No in-process reload. The service manager restarts the process after a
    config change.
 9. ztls is pre-alpha. Bump the pin deliberately. Never bump it silently.
+10. Performance is a design goal. The steady-state query path performs zero
+    heap allocations. Static buffers, pools, or an arena per query.
+11. Every long-lived structure is bounded and pre-sized. Nothing grows
+    without a configured bound.
 
 ## 2. Non-goals
 
@@ -466,7 +473,13 @@ in-process queries:
 
 The wire decoder must have a fuzz target. The ztls fuzz pattern applies.
 
-### 9.4 Nix and CI
+### 9.4 Benchmarks
+
+Benchmarks cover the wire codec, the suffix matcher, and the cache lookup.
+zig-benchmark is the harness. Commit a capture for any performance claim.
+CI runs a short benchmark smoke run.
+
+### 9.5 Nix and CI
 
 - `nix build .#z53` succeeds on all three systems.
 - Both modules eval on their platforms.
@@ -477,7 +490,7 @@ The wire decoder must have a fuzz target. The ztls fuzz pattern applies.
 ## 10. What the implementer owns
 
 - Proctor design over io_uring and kqueue, thread model, and buffer
-  management.
+  layout, inside the constraints of section 1.
 - Exact ZON field names, types, and defaults syntax. The expressiveness in
   section 5 is fixed.
 - Internal module layout and file organization.
