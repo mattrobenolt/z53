@@ -5,6 +5,7 @@ pub const wire = @import("wire.zig");
 pub const config = @import("config.zig");
 pub const hosts = @import("hosts.zig");
 pub const rotation = @import("rotation.zig");
+pub const cache = @import("cache.zig");
 pub const Source = rotation.Source;
 const std = @import("std");
 

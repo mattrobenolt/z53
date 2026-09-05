@@ -270,6 +270,14 @@ Connections:
   Neither the unservable answer nor this generated failure enters the cache.
   This differs from terminal transport failure in section 3.7. Ordinary UDP
   payload-limit truncation remains unchanged.
+- An upstream response with a nonzero extended RCODE requires client EDNS.
+  Without client EDNS, z53 returns local SERVFAIL with no OPT and logs `src=servfail`.
+  The local answer does not substitute the low four bits for the complete error.
+  Clients with EDNS receive the complete upstream RCODE.
+
+  This local failure causes no failover or upstream health penalty.
+  Neither the upstream response nor the local failure enters the cache.
+  Existing cache entries remain unchanged. This path never serves stale data.
 
 ## 4. Observability
 

@@ -7,10 +7,12 @@ pub const Source = enum {
     nodata,
     hosts,
     cache,
+    stale,
+    servfail,
     forward,
 
     pub fn cacheable(self: Source) bool {
-        // Terminal transport failures are a separate responsibility of the cache slice.
+        // Terminal transport failures use Cache.terminalFailure, not generic insertion.
         return self == .forward;
     }
 
@@ -21,8 +23,8 @@ pub const Source = enum {
 
     pub fn rotatable(self: Source) bool {
         return switch (self) {
-            .hosts, .cache, .forward => true,
-            .rfc6761, .nodata => false,
+            .hosts, .cache, .stale, .forward => true,
+            .rfc6761, .nodata, .servfail => false,
         };
     }
 };

@@ -427,3 +427,120 @@ Later runtime work still owns these responsibilities:
 
 No event loop or service endpoint is introduced in this slice.
 Existing wire fuzz targets remain unchanged and continue to exercise safe record movement and malformed packets.
+
+## Per-zone cache (#1)
+
+`src/cache.zig` supplies synchronous cache seams, not a DNS service.
+The runtime creates one instance per validated zone and supplies monotonic whole seconds.
+An expired lookup returns a miss.
+Only `terminalFailure`, after transport exhaustion, serves stale data.
+An upstream SERVFAIL uses `forward`, without stale fallback.
+
+SERVFAIL entries expire after five seconds and are not stale candidates.
+The grace interval includes expiry and excludes expiry plus grace.
+Subtraction avoids overflow.
+
+Each enabled cache allocates two fixed entry arrays at startup.
+Positive and denial entries have independent capacities and intrusive LRU lists.
+SERVFAIL consumes denial capacity.
+A successful replacement removes the same key from the other bank.
+Lookup scans bounded arrays.
+Eviction and recency updates use links.
+
+This is a correctness implementation, not a measured lookup optimization.
+Each entry owns one rewritten packet, at most 65535 bytes.
+Entry metadata has a tested upper budget of 320 bytes.
+Live storage is bounded by `2 * capacity * (sizeof(Entry) + 65535)`, exclusive of allocator overhead.
+Transactional insertion briefly owns at most one additional packet of 65535 bytes.
+
+Insertion allocates before eviction.
+Exhaustion returns the already-encoded answer with `insertion=exhausted`.
+Startup failure rolls back its earlier allocation.
+The event thread supplies a fixed packet/rewrite workspace and disjoint output storage.
+These operations make no heap allocations:
+
+- Fresh lookup
+- Miss
+- Stale delivery
+
+The key retains these fields:
+
+- Framed name labels
+- Class
+- Type
+- Named DO state
+
+Name comparison folds ASCII case.
+Dots inside labels do not alias separators.
+Positive expiry is the smallest clamped non-OPT record TTL.
+Every non-OPT TTL is clamped and aged.
+OPT flags are not TTLs.
+
+NXDOMAIN and empty NOERROR use authority SOA TTL/MINIMUM, with a fixed five-second floor.
+CNAME and DNAME redirection chains with authority SOA also use denial policy when they lack terminal query data.
+Actual answers to these query types remain positive:
+
+- CNAME
+- DNAME
+- ANY
+
+The positive maximum also caps the denial maximum.
+These responses bypass insertion:
+
+- Denials without an SOA
+- Truncated responses
+- Error RCODEs other than NXDOMAIN and SERVFAIL
+
+`forward` accepts only responses already admitted by the future forward stage.
+It normalizes RA and clamps TTLs.
+It proves full-size client rewrite before cache insertion.
+The stored packet uses ID zero and the admitted query question, with no OPT.
+Each delivery reconstructs these client fields:
+
+- ID
+- Question
+- EDNS payload size
+- DO
+- COOKIE
+
+Delivery cannot reuse another client's COOKIE or upstream payload size.
+Stored header flags otherwise survive hits.
+Fresh deliveries age TTLs.
+Stale deliveries use TTL 30.
+Local parse/encoding errors return without publication or terminal-failure handling.
+A failed stale rewrite also leaves the stale candidate unchanged.
+
+### Extended RCODE delivery
+
+Approval: [#1](https://github.com/mattrobenolt/z53/issues/1#issuecomment-5550142068).
+
+RFC 6891 section 6.1.3 places the upper RCODE bits in OPT.
+A client without EDNS cannot receive a nonzero extended RCODE.
+The cache forward seam returns local SERVFAIL with no OPT and source `servfail` in this case.
+It never substitutes the low four RCODE bits for the complete error.
+Clients with EDNS retain the complete RCODE.
+
+This local failure bypasses cache insertion and stale fallback.
+Existing fresh and stale entries remain unchanged.
+The later runtime applies no failover or upstream health penalty.
+Deterministic regressions cover these cases:
+
+- BADVERS and nonzero low RCODE bits
+- Enabled and disabled caches
+- Fresh and stale positive and denial candidates
+- Client EDNS and COOKIE preservation
+
+Only the forward and terminal-transport seams can insert.
+The synthetic seams remain unchanged.
+`Source.stale` and `Source.servfail` identify later log sources.
+The runtime still owns these tasks:
+
+- Complete pipeline integration
+- Upstream attempts before stale fallback
+- Final answer rotation
+- Client UDP limits
+- Logs
+- Listener and transport I/O
+- Upstream health accounting
+
+No service endpoint is added here.
