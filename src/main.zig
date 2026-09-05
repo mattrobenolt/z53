@@ -1,5 +1,7 @@
 const std = @import("std");
 const config = @import("config.zig");
+const builtin = @import("builtin");
+const runtime = @import("runtime.zig");
 
 pub fn main(init: std.process.Init) void {
     startup(&init);
@@ -32,5 +34,22 @@ fn startup(init: *const std.process.Init) void {
         std.debug.print("{f}", .{&diagnostic});
         return;
     };
-    std.debug.print("z53: DNS service is not implemented yet\n", .{});
+    if (builtin.os.tag != .linux) {
+        std.debug.print("z53: DNS service is not implemented yet\n", .{});
+        return;
+    }
+    const service = init.gpa.create(runtime.Runtime) catch {
+        std.debug.print("z53: runtime allocation failed\n", .{});
+        return;
+    };
+    defer init.gpa.destroy(service);
+    service.init(init.gpa, init.io, &parsed) catch |err| {
+        std.debug.print("z53: startup: {s}\n", .{@errorName(err)});
+        return;
+    };
+    defer service.deinit();
+    while (service.step() catch |err| {
+        std.debug.print("z53: runtime: {s}\n", .{@errorName(err)});
+        return;
+    }) {}
 }

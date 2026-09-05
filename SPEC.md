@@ -1,8 +1,15 @@
 # z53 — Feature Specification
 
-**Stage: build foundation and configuration loading.
-The binary does not serve DNS yet.
-This document is the contract for the first implementation.**
+**Stage: Linux local client service.**
+Linux answers local queries over UDP and TCP.
+These features remain incomplete:
+
+- Forward transport
+- Listener hostname bootstrap
+- macOS runtime
+- Query logs
+
+This document is the contract for the first implementation.
 
 z53 is a DNS caching forwarder in Zig. It replaces CoreDNS on two machines.
 This document fixes behavior. The implementer owns every internal decision
@@ -53,6 +60,27 @@ Section 6 contains both reference configs as ZON.
     updates are exceptions. Established exchanges allocate nothing.
 11. Every long-lived structure is bounded and pre-sized. Nothing grows
     without a configured bound.
+
+### 1.1 Linux client runtime bounds
+
+The Linux event thread owns these fixed resources:
+
+- 256 submission entries and 512 completion entries.
+- 225 operation slots with completion generations.
+- 64 provided UDP buffers and 64 response slots, shared across listeners.
+- 128 TCP client slots, each with one request and one response buffer.
+- 160 registered files: 32 listener slots and 128 direct-accept slots.
+
+UDP response-slot exhaustion drops the datagram and returns its provided buffer.
+An empty provided ring terminates multishot receive with ENOBUFS.
+The listener rearms on terminal completion.
+TCP admission pauses after registered client slots fill and resumes after a close.
+No overflow queue or allocation fallback exists.
+
+An enabled hosts source loads before listeners start.
+An initial load failure aborts startup even when `reload_s` is zero.
+A monotonic io_uring timer schedules subsequent checks at whole-second intervals.
+Periodic failures preserve the active table and mtime for the next configured check.
 
 ## 2. Non-goals
 
@@ -254,6 +282,10 @@ Connections:
   query source.
 - A UDP response that does not fit the client payload limit gets TC set and
   is cut to the limit. Limit without EDNS: 512 bytes.
+  The transport also caps DNS payloads at 65507 bytes for IPv4 and 65527 bytes for IPv6.
+  These caps assume fixed IP headers without extra options or IPv6 jumbograms.
+  The smaller client or transport limit controls complete-RRset truncation.
+  The echoed OPT payload size remains unchanged.
 - TCP: standard two-byte length framing. A connection accepts queries until
   the client closes it.
 - Responses echo the client EDNS payload size and COOKIE when present.
@@ -395,7 +427,10 @@ A missing or defaulted field uses the position of its parent object.
 File I/O and workspace failures without a source token use position 1:1.
 Only the first error is reported, with a bounded 512-byte reason.
 
-No process reload or DNS service is implemented yet.
+Process reload remains unsupported.
+The Linux runtime serves local responses on literal listener addresses.
+Listener hostnames remain valid configuration, but startup returns `UnresolvedListener` until bootstrap exists.
+An unresolved forward stage returns uncached SERVFAIL, without stale fallback.
 
 ## 6. Reference configs
 

@@ -544,3 +544,140 @@ The runtime still owns these tasks:
 - Upstream health accounting
 
 No service endpoint is added here.
+
+## Linux local client runtime (#1)
+
+`src/runtime.zig` owns one event thread and one io_uring instance.
+Setup uses `SINGLE_ISSUER` and `DEFER_TASKRUN` unconditionally.
+Setup failure aborts startup without probes or fallback.
+SPEC §1.1 lists fixed resource bounds.
+The query path has no allocator calls.
+Cache instances and disjoint hosts tables allocate only at startup in this slice.
+
+Unconnected UDP listeners use multishot RECVMSG and a non-incremental provided buffer ring.
+Each completion retains the source address and the original listener identity.
+The decoder validates recvmsg metadata before the wire codec sees the payload.
+A response slot owns its output and destination until send completion.
+The provided input buffer returns immediately after synchronous response construction.
+Response-slot exhaustion drops the datagram without an overflow queue.
+
+The provided-ring helper receives `inc=false` unconditionally.
+Its incremental compatibility retry branch is unreachable with that argument.
+ENOBUFS ends the receive operation and triggers rearm with a new completion generation.
+Zero-copy send remains absent because no measurement justifies it.
+
+TCP listeners use multishot direct accept into 128 registered client slots.
+The registered allocation range bounds undispatched accepts without unbounded process-descriptor use.
+A full range pauses admission until a client close completes.
+Each connection reads one framed query and writes its complete response before the next query.
+Partial frame reads and response writes retain offsets in fixed buffers.
+Coalesced queries remain in the socket until their turn.
+
+Direct-close completion and a subsequent accept can reach userspace in either order.
+The client lifecycle records a replacement until the preceding close completion arrives.
+Operation generations advance only after terminal completion.
+Cancellation requires both the target completion and the cancel acknowledgement before slot reuse.
+A generation never wraps into an earlier token.
+
+The runtime stop API drains cancellation acknowledgements and target completions.
+Daemon signals still rely on process teardown rather than the stop API.
+Fatal teardown uses synchronous io_uring cancellation before storage release.
+After synchronous cancellation, teardown explicitly unregisters the file table before ring destruction.
+This releases listener and direct-accept references, even for unread accept completions.
+Ring close alone defers file release and prevented immediate UDP rebind in the native regression.
+
+Teardown accepts an absent file table when startup failed before registration.
+A failed cancellation or file-release barrier exits the process without release of kernel-visible memory.
+Startup rollback releases earlier tables and listener descriptors.
+
+TCP listeners set `SO_REUSEADDR` before bind so server-side close and TIME_WAIT do not block configuration restarts.
+UDP does not enable address reuse, and neither transport enables port reuse.
+Concurrent UDP and TCP listeners on the same endpoint remain rejected.
+
+Native regressions perform 16 same-port service cycles with server-side TCP close.
+Each restart is immediate, with alternate cycles for drained shutdown and direct teardown.
+Another 16-cycle regression fails a later listener's TCP bind.
+It immediately rebinds the registered earlier listener and the unregistered UDP socket.
+Neither restart regression sleeps or retries a failed bind.
+
+Both restart regressions failed before explicit file unregistration.
+With only that fix, the active-close regression still failed at TCP bind.
+TCP address reuse made both pass.
+
+### Pinned standard wrapper discrepancy
+
+The pinned `IoUring.register_file_alloc_range` passes `sizeof(io_uring_file_index_range)` as `nr_args`.
+Linux and liburing require zero for this opcode.
+The native transport tests initially failed with EINVAL through that wrapper.
+The proctor calls `std.os.linux.io_uring_register` directly with zero and initialized reserved fields.
+The same native direct-accept tests then passed.
+
+Installed source and dependency caches remain unchanged.
+Toolchain pins remain unchanged, and no compatibility fallback was added.
+
+### Local response pipeline and remaining scope
+
+The runtime routes first and returns REFUSED without a matching zone.
+A matching zone runs these stages in order:
+
+1. RFC 6761
+2. Cache lookup
+3. NODATA
+4. Hosts
+
+Local hits finish synchronously before buffer reuse or hosts replacement.
+Rotation precedes final UDP payload limits.
+Final UDP limits also cap IPv4 at 65507 DNS bytes and ordinary IPv6 at 65527 bytes.
+The socket uses fixed IP headers without extra options or jumbograms.
+The existing codec truncates whole RRsets and retains the client's OPT payload size.
+TCP retains the full representable answer.
+
+An unresolved forward stage returns uncached SERVFAIL without stale fallback or upstream health effects.
+
+Enabled hosts sources load before socket setup.
+Initial file failures abort startup even with zero reload interval.
+A monotonic io_uring timer schedules configured periodic checks.
+Failed checks preserve the active table and mtime.
+Zero disables periodic checks but not the initial load.
+
+Listener hostnames remain valid configuration.
+This slice rejects them with `UnresolvedListener` at startup.
+The rejection is temporary, not a schema restriction.
+Later bootstrap work must resolve both listener and upstream hostnames.
+No blocking socket I/O exists beneath the proctor.
+The accepted synchronous hosts file API remains on the event thread.
+
+Later slices retain these obligations:
+
+- Listener and upstream hostname bootstrap.
+- Forward transports and linked upstream read timeouts.
+- Upstream health and connection reuse.
+- Forward-cache publication and stale integration.
+- Per-query logs and upstream transition logs.
+- macOS kqueue runtime.
+- Remaining end-to-end SPEC acceptance.
+
+Native tests cover these behaviors:
+
+- Linux transport events
+- Timer reloads
+- Pool exhaustion
+- Malformed input
+- Cancellation
+
+Temporary mutations rejected defects in these areas:
+
+- Generations
+- Cancellation barriers
+- Framing bounds
+- Metadata bounds
+- Startup errors
+- Rollback
+- Reload disablement
+- UDP limits
+- Receive rearm
+
+A burst alone did not reliably exhaust provided buffers because completion handling recycled them.
+The deterministic depletion regression withholds the initial buffer batch before the first submission.
+It observes ENOBUFS, rearm, buffer publication, and a successful response.
+No resolver performance claim accompanies these checks.
