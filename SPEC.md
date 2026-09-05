@@ -1,7 +1,7 @@
 # z53 — Feature Specification
 
-**Stage: specification only. No implementation exists. This document is the
-contract for the first implementation.**
+**Stage: build foundation only. The binary does not serve DNS yet.
+This document is the contract for the first implementation.**
 
 z53 is a DNS caching forwarder in Zig. It replaces CoreDNS on two machines.
 This document fixes behavior. The implementer owns every internal decision
@@ -26,15 +26,17 @@ Section 6 contains both reference configs as ZON.
 1. Language: Zig 0.16.x. The flake pins the exact toolchain revision.
 2. Targets: aarch64-linux, x86_64-linux, aarch64-darwin. No other target.
 3. Runtime dependencies: ztls and one libcrypto backend. Pin ztls at commit
-   `1d72c53`. The default backend is OpenSSL from nixpkgs, linked through
+   `1d72c5331c6a9079279a27eede680534b74f596d`.
+   The default backend is OpenSSL from nixpkgs, linked through
    pkg-config. No other runtime dependency is allowed.
 4. Use ztest and zig-benchmark as the test and benchmark helpers. Keep them
    lazy and test-only in `build.zig.zon`, following the ztls pattern.
 5. I/O model: Linux builds require kernel 7.2.0 or newer and use io_uring
    for socket events. There is no epoll fallback and no feature probing.
    Every io_uring feature named in this document exists on that kernel.
-   Use provided buffer rings, multishot receive and accept, registered
-   files, and linked timeouts. An `io_uring_setup` failure is a startup
+   Use provided buffer rings, multishot `RECVMSG` on unconnected UDP
+   listeners, multishot accept, registered files, and linked timeouts.
+   Connected UDP upstreams can use `RECV`. An `io_uring_setup` failure is a startup
    error, not a fallback trigger. Where the std wrapper lacks a feature,
    use the raw io_uring syscalls through `std.os.linux`. macOS builds use
    kqueue. Do not add an event-loop dependency.
@@ -46,6 +48,8 @@ Section 6 contains both reference configs as ZON.
 9. ztls is pre-alpha. Bump the pin deliberately. Never bump it silently.
 10. Performance is a design goal. The steady-state query path performs zero
     heap allocations. Static buffers, pools, or an arena per query.
+    Bounded libcrypto allocations for connection setup and infrequent key
+    updates are exceptions. Established exchanges allocate nothing.
 11. Every long-lived structure is bounded and pre-sized. Nothing grows
     without a configured bound.
 
@@ -174,8 +178,9 @@ Connections:
 - One in-flight query per upstream connection. No pipelining toward the
   upstream.
 - TLS: ztls client handshake, SNI from `server_name`, chain and hostname
-  verification against the system trust store. A handshake failure is a
-  transport failure.
+  verification against the system trust store. Trust follows Zig's system
+  bundle scan. Custom Apple trust overrides are unsupported.
+  A handshake failure is a transport failure.
 - Upstream queries use a fresh random query ID.
 - Upstream queries carry EDNS0 with payload size 1232. Copy the client DO
   bit and all unknown EDNS options.
@@ -187,14 +192,17 @@ Connections:
 - Key: qclass, qtype, qname, and the client DO bit.
 - Positive answers: clamp each response TTL into [min_ttl, max_ttl].
   Defaults: 5 s and 3600 s.
-- Negative answers (NXDOMAIN, NODATA): derive the TTL from the SOA record.
-  Clamp into [5 s, 1800 s].
-- SERVFAIL answers cache for 5 seconds.
+- Negative answers (NXDOMAIN, NODATA): derive the TTL from
+  `min(SOA TTL, SOA.MINIMUM)`. Clamp into
+  [5 s, min(max_ttl_s, neg_max_ttl_s)]. Defaults: [5 s, 1800 s].
+- SERVFAIL answers cache for 5 seconds. This includes terminal forward-stage
+  transport failure. An eligible stale answer takes precedence.
+  A terminal failure never replaces its stale candidate.
 - Capacity: 10000 positive and 10000 negative entries. Evict the
   least-recently-used entry when full.
 - Rewrite the served TTL to the clamped value.
-- Only forwarded answers enter the cache. hosts, NODATA, and RFC 6761
-  answers bypass it.
+- Only forwarded answers and terminal forward-stage SERVFAIL enter the
+  cache. hosts, NODATA, and RFC 6761 answers bypass it.
 - Serve stale (RFC 8767), opt-in per zone, default off: a grace window in
   seconds. On an expired entry, z53 tries the upstreams first. If every
   upstream fails, return the expired entry with TTL 30, inside the grace
@@ -253,6 +261,8 @@ Validation rules:
 - A zone without upstreams fails the load.
 - A TLS upstream without `server_name` fails the load.
 - Duplicate zone suffixes fail the load.
+- Reject inconsistent TTL clamp intervals. `min_ttl_s` must not exceed
+  `max_ttl_s`. The effective denial maximum must be at least 5 seconds.
 - Normalize suffixes: accept `ts.net` and `ts.net.`. Store the canonical
   form with the trailing dot.
 
@@ -289,7 +299,7 @@ Replaces `hosts/nixos/launchpad/files/Corefile` in mattrobenolt/nix-darwin.
 
 ```zon
 .{
-    .listen = [_][]const u8{ "127.0.0.1:53" },
+    .listen = .{ "127.0.0.1:53" },
     .zones = .{
         .{
             .suffix = ".",
@@ -325,7 +335,7 @@ zone blocks AAAA. The `ts.net.` zone does not: the Mac has IPv6. The
 
 ```zon
 .{
-    .listen = [_][]const u8{ "127.0.0.1:53" },
+    .listen = .{ "127.0.0.1:53" },
     .zones = .{
         .{
             .suffix = ".",

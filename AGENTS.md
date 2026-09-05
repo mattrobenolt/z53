@@ -114,13 +114,16 @@ evidence.
 - Allocation budget: zero heap allocations on the steady-state query path.
   Static buffers, pools, or an arena per query. The cache and the hosts
   table may allocate, on insert and on load. Both are bounded. No ad-hoc
-  heap use anywhere else.
+  heap use anywhere else. Bounded libcrypto allocations for connection setup
+  and infrequent key updates are exceptions. Established exchanges allocate
+  nothing.
 - io_uring: the kernel floor is 7.2.0 — no epoll fallback, no feature
   probing, everything below exists on every supported kernel. An
   `io_uring_setup` failure is a startup error. Use what the kernel gives,
   or say why not in the design notes:
   provided buffer rings (`io_uring_register_buf_ring`) with multishot
-  `RECV` on the UDP socket; multishot `ACCEPT` on the TCP listeners;
+  `RECVMSG` on unconnected UDP listeners, to retain source addresses;
+  connected UDP upstreams can use `RECV`; multishot `ACCEPT` on TCP listeners;
   registered files where they pay; linked SQEs with `LINK_TIMEOUT` for
   upstream read deadlines; `SINGLE_ISSUER` + `DEFER_TASKRUN` over
   thread-pool shapes; zero-copy send for UDP responses when a measurement
