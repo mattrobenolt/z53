@@ -1,4 +1,5 @@
 const std = @import("std");
+const wire = @import("src/build/wire.zig");
 const benchmark = @import("src/build/benchmark.zig");
 
 pub fn build(b: *std.Build) void {
@@ -68,4 +69,12 @@ fn addTests(b: *std.Build, executable: *std.Build.Step.Compile, tls: *std.Build.
     startup.expectStdErrEqual("z53: DNS service is not implemented yet\n");
     unit_step.dependOn(&startup.step);
     benchmark.addSmoke(b, &target, test_step);
+    wire.add(
+        b,
+        &target,
+        executable.root_module.optimize.?,
+        ztest,
+        test_step,
+        test_compile,
+    );
 }

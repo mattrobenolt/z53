@@ -231,6 +231,13 @@ Connections:
 - Malformed input: answer FORMERR when the header parses, else drop. Input
   must never crash the process.
 - The codec must decode compressed names. Responses can compress names.
+- Rewrites preserve all records when the compliant result fits 65535 bytes.
+  If expansion cannot fit, the codec returns `RewriteTooLarge`. TCP is never
+  silently truncated. The resolver answers SERVFAIL and logs `src=servfail`.
+  This local encoding error causes no failover or upstream health penalty.
+  Neither the unservable answer nor this generated failure enters the cache.
+  This differs from terminal transport failure in section 3.7. Ordinary UDP
+  payload-limit truncation remains unchanged.
 
 ## 4. Observability
 
