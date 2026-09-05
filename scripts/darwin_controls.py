@@ -88,6 +88,10 @@ CONTROLS = [
             "self.pipeline.reload(self.io, try now());",
             QUOTA, "TestExpectedEqual",
             "try testing.expectEqual(generation + 1, harness.service.proctor.ownership[16].generation);"),
+    Control("connect-error", "tests/runtime_darwin.zig", "if (failure != 0) {",
+            "if (failure < 0) {",
+            "Darwin native client completion rejects peer reset", "TestExpectedError",
+            "try testing.expectError(error.ConnectFailed, finishConnect(descriptor));"),
 ]
 
 

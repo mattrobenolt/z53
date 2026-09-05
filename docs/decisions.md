@@ -766,7 +766,8 @@ Separate native events exercise stale identity and generation rejection.
 The accept-quota regression lowers the real descriptor limit after the client connects.
 Admission must remain unarmed after quota failure.
 The next real timer restores admission after the limit returns to its previous value.
-The accepted connection then serves a framed query.
+A fresh connection then serves a framed query after the timer restores admission.
+The fixture also records and checks the original client's terminal receive result.
 
 Each native command has a 180-second execution deadline and a separate process group.
 Bounded teardown follows that deadline.
@@ -799,6 +800,7 @@ The finite controls cover these paths:
 - External and embedded datagram metadata lengths
 - Buffered EOF delivery
 - Accept-quota pause and timer recovery
+- Nonzero `SO_ERROR` rejection after a controlled TCP reset
 
 The installed ast-grep Zig parser rejected the relevant control patterns or produced ERROR nodes.
 The controls therefore use exact byte replacements with unique-match checks, not approximate syntax rewrites.
@@ -809,3 +811,41 @@ Native linking, the full native suite, and all native controls remain pending th
 The unexplained Linux UDP `BindFailed` results remain blockers.
 The passing instrumented D1 run supplied no failed-endpoint ownership capture and remains inconclusive.
 No Linux runtime behavior, dependency pin, deployment module, or example changes accompany this preparation.
+
+### Native fixture semantics (#1)
+
+Run 33966889564 records 27 runtime passes, two failures, and four approved skips.
+The original TCP `NOTCONN` and retained UDP delivery cases pass in that run.
+Quota recovery still fails after four post-rearm steps, despite an armed accept filter and advanced timer generations.
+The new bound-port test reports `ConnectDeadline`, not its original expected `ConnectFailed`.
+Neither failure is classified as intermittent noise.
+
+Apple's public [XNU accept implementation](https://github.com/apple-oss-distributions/xnu/blob/xnu-11417.140.69/bsd/kern/uipc_syscalls.c#L551-L635)
+removes the connection from the queue before `falloc`.
+Allocation failure calls `soclose` instead of queue restoration.
+SPEC §1.2 requires timer-restored admission, not survival of that discarded client.
+The quota fixture preserves exact pause and generation assertions before a fresh recovery connection.
+A bounded receive on the original client requires EOF or `ECONNRESET` and records the actual result.
+The accepted descriptor flags and framed response remain required.
+
+The [TCP input path](https://github.com/apple-oss-distributions/xnu/blob/xnu-11417.140.69/bsd/netinet/tcp_input.c#L2465-L2469)
+drops packets for `TCPS_CLOSED` without a reset.
+TCP attachment starts in that state, and bind does not enter `LISTEN`.
+The reserved, non-listening endpoint therefore tests the helper's exact deadline result, not refusal or `SO_ERROR`.
+This is not a general contract for all unavailable endpoints.
+
+A separate fixture establishes TCP, accepts the connection, and closes the accepted peer with enabled zero linger.
+[XNU `tcp_disconnect`](https://github.com/apple-oss-distributions/xnu/blob/xnu-11417.140.69/bsd/netinet/tcp_usrreq.c#L3150-L3164)
+uses `tcp_drop` for this case.
+The fixture waits for read readiness without a receive, then requires rejection through the shared `finishConnect` check.
+[`SO_ERROR`](https://github.com/apple-oss-distributions/xnu/blob/xnu-11417.140.69/bsd/kern/uipc_socket.c#L6051-L6054)
+returns and clears the pending error.
+This tests a real asynchronous socket error, not necessarily a failed `EINPROGRESS` handshake.
+The seventeenth finite control ignores positive socket errors and requires the named assertion failure.
+The original 16 controls and their strict gate remain unchanged.
+
+The cited public tag is `xnu-11417.140.69`.
+The native runner reports `xnu-11417.140.69.711.44~1/RELEASE_ARM64_VMAPPLE`.
+Source inspection explains the fixture corrections but does not establish exact patch-level equivalence.
+The corrected native tests and all 17 native controls remain pending publication.
+No production runtime change accompanies these fixture corrections.

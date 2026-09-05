@@ -123,6 +123,10 @@ fn connectSocket(descriptor: system.fd_t, endpoint: *const runtime.address.Addre
         else => return error.ConnectFailed,
     }
     // #1: EINPROGRESS does not permit the first TCP send, even on loopback.
+    try finishConnect(descriptor);
+}
+
+fn finishConnect(descriptor: system.fd_t) !void {
     if (try socketReady(descriptor, system.POLL.OUT, 1000) == .expired)
         return error.ConnectDeadline;
     var failure: c_int = 0;
@@ -155,15 +159,15 @@ test "Darwin native client readiness deadline and invalid descriptor" {
     try testing.expectError(error.InvalidSocket, socketReady(closed, system.POLL.IN, 1));
 }
 
-// SPEC §1.2, #1: writable readiness alone does not establish a TCP connection.
-test "Darwin native client rejects refused connection" {
+// SPEC §1.2, #1: XNU drops packets for a bound TCPS_CLOSED socket without a reset.
+test "Darwin native client deadline on bound non-listening endpoint" {
     var endpoint: runtime.address.Address = undefined;
     try endpoint.parse("127.0.0.1:1");
     @as(*system.sockaddr.in, @ptrCast(&endpoint.storage)).port = 0;
     const reservation = system.socket(system.AF.INET, system.SOCK.STREAM, 0);
     try testing.expect(reservation >= 0);
     defer _ = system.close(reservation);
-    // A bound socket without listen reserves a port that refuses TCP connections.
+    // XNU tcp_input.c at xnu-11417.140.69 sends this TCPS_CLOSED case to drop, not reset.
     try testing.expectEqual(0, system.bind(
         reservation,
         @ptrCast(&endpoint.storage),
@@ -178,7 +182,44 @@ test "Darwin native client rejects refused connection" {
     try testing.expect(descriptor >= 0);
     defer _ = system.close(descriptor);
     try runtime.address.prepare(descriptor);
-    try testing.expectError(error.ConnectFailed, connectSocket(descriptor, &endpoint));
+    try testing.expectError(error.ConnectDeadline, connectSocket(descriptor, &endpoint));
+}
+
+// SPEC §1.2, #1: a real peer reset exercises SO_ERROR, not a failed handshake or a deadline.
+test "Darwin native client completion rejects peer reset" {
+    var endpoint: runtime.address.Address = undefined;
+    try endpoint.parse("127.0.0.1:1");
+    @as(*system.sockaddr.in, @ptrCast(&endpoint.storage)).port = 0;
+    const listener = try endpoint.bind(system.SOCK.STREAM);
+    defer _ = system.close(listener);
+    try testing.expectEqual(0, system.getsockname(
+        listener,
+        @ptrCast(&endpoint.storage),
+        &endpoint.length,
+    ));
+    const descriptor = system.socket(system.AF.INET, system.SOCK.STREAM, 0);
+    try testing.expect(descriptor >= 0);
+    defer _ = system.close(descriptor);
+    try runtime.address.prepare(descriptor);
+    try connectSocket(descriptor, &endpoint);
+    try testing.expectEqual(.ready, try socketReady(listener, system.POLL.IN, 1000));
+    {
+        const accepted = system.accept(listener, null, null);
+        try testing.expect(accepted >= 0);
+        defer _ = system.close(accepted);
+        // XNU tcp_disconnect calls tcp_drop for an established socket with zero linger.
+        const reset: system.linger = .{ .onoff = 1, .linger = 0 };
+        try testing.expectEqual(0, system.setsockopt(
+            accepted,
+            system.SOL.SOCKET,
+            system.SO.LINGER,
+            &reset,
+            @sizeOf(system.linger),
+        ));
+    }
+    // No recv or SO_ERROR read can consume the pending reset before the completion check.
+    try testing.expectEqual(.ready, try socketReady(descriptor, system.POLL.IN, 1000));
+    try testing.expectError(error.ConnectFailed, finishConnect(descriptor));
 }
 
 fn send(descriptor: system.fd_t, bytes: []const u8) !void {
@@ -834,14 +875,29 @@ test "Darwin native malformed datagram metadata" {
     try testing.expectError(error.InvalidDatagram, datagram.family(&source, source.len));
 }
 
+fn quotaDiscarded(descriptor: system.fd_t) !void {
+    const readiness = try socketReady(descriptor, system.POLL.IN, 1000);
+    var byte: [1]u8 = undefined;
+    const received = system.recv(descriptor, &byte, byte.len, system.MSG.DONTWAIT);
+    const failure = std.posix.errno(received);
+    std.debug.print("quota discarded client: readiness={t} recv={d} errno={t}\n", .{
+        readiness, received, failure,
+    });
+    try testing.expectEqual(.ready, readiness);
+    // soclose permits a FIN or a reset. Neither preserves a client for a later accept.
+    if (received == 0) return;
+    try testing.expectEqual(@as(isize, -1), received);
+    try testing.expectEqual(.CONNRESET, failure);
+}
+
 // SPEC §1.2, #1: kernel accept quota failure pauses admission until the real timer fires.
 test "Darwin native accept quota timer recovery" {
     var harness: Harness = undefined;
     try harness.init();
     try harness.start();
     defer harness.deinit();
-    const stream = try harness.socket(system.SOCK.STREAM);
-    defer _ = system.close(stream);
+    const discarded = try harness.socket(system.SOCK.STREAM);
+    defer _ = system.close(discarded);
     var previous: system.rlimit = undefined;
     try testing.expectEqual(0, system.getrlimit(.NOFILE, &previous));
     const limited: system.rlimit = .{ .cur = 0, .max = previous.max };
@@ -861,7 +917,11 @@ test "Darwin native accept quota timer recovery" {
     try testing.expectEqual(timer_generation + 1, harness.service.proctor.ownership[32].generation);
     try testing.expectEqual(generation + 1, harness.service.proctor.ownership[16].generation);
     try testing.expect(harness.service.proctor.registrations[16] != null);
-    // Rearm does not order accept ahead of the next timer or an interrupted kevent.
+    // XNU accept dequeues before falloc and closes that socket when allocation fails.
+    try quotaDiscarded(discarded);
+    const stream = try harness.socket(system.SOCK.STREAM);
+    defer _ = system.close(stream);
+    // Only a fresh client can exercise admission after the timer restores the accept filter.
     for (0..4) |_| {
         try testing.expect(try harness.service.step());
         if (harness.service.descriptors[0] != null) break;
