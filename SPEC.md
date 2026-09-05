@@ -1,6 +1,7 @@
 # z53 — Feature Specification
 
-**Stage: build foundation only. The binary does not serve DNS yet.
+**Stage: build foundation and configuration loading.
+The binary does not serve DNS yet.
 This document is the contract for the first implementation.**
 
 z53 is a DNS caching forwarder in Zig. It replaces CoreDNS on two machines.
@@ -293,6 +294,69 @@ exact field names, types, and ergonomics.
 | `cache` | zone | on | `.max_ttl_s` 3600, `.min_ttl_s` 5, `.neg_max_ttl_s` 1800, `.capacity` 10000 |
 | `serve_stale_s` | zone | 0 (off) | RFC 8767 grace window |
 | `rotate` | zone | false | Answer rotation |
+
+### 5.1 Finalized schema and bounds
+
+`zones` is required. An empty tuple is valid and matches no queries.
+
+`hosts = null` disables hosts (the default).
+`.hosts = .{}` enables its defaults.
+Hosts reload zero disables the periodic file check.
+
+`cache = null` disables the cache.
+Omitted `cache` or `.cache = .{}` enables defaults.
+Capacity applies separately to positive and denial entries.
+
+`nodata` accepts symbolic types, such as `.AAAA` and `.HTTPS`.
+It also accepts `.{ .number = 65280 }` for any numeric `u16` query type.
+
+These values use `u32`:
+
+- TTL values
+- Hosts reload seconds
+- Stale grace seconds
+- `max_fails`
+
+These durations use finite `f64` seconds in [0.001, 86400]:
+
+- Exchange timeout
+- Health check interval
+- Idle connection expiry
+
+Addresses accept a hostname or IPv4 address, with an optional decimal port.
+IPv6 uses brackets, for example `[::1]:53`.
+Omitted ports are 53 for listeners and plain upstreams, or 853 for TLS upstreams.
+Explicit ports are in [1, 65535].
+
+The loader performs no hostname resolution or socket operations.
+It rejects an empty or invalid DNS hostname in `server_name`.
+TLS takes precedence over `force_tcp`.
+
+The load fails if any resource exceeds these bounds:
+
+| Resource | Maximum |
+|---|---|
+| Source file | 65536 bytes |
+| Parser workspace, including parsed storage | 4 MiB |
+| Tokens / delimiter nesting | 8192 / 16 |
+| Listeners (at least one) / zones | 16 / 64 |
+| Upstreams per zone (at least one) / NODATA types | 16 / 256 |
+| Cache capacity per class per zone | 100000 entries, minimum 1 when enabled |
+| Total positive plus denial capacity across zones | 1000000 entries |
+| Hosts path | 4096 bytes, nonempty, no NUL |
+| Endpoint text / DNS hostname text | 320 / 253 bytes |
+
+Suffixes obey the DNS 63-byte label and 255-byte wire-name limits.
+Their stored text folds ASCII case and ends with a dot.
+The router consumes length-prefixed wire labels.
+A literal dot inside a query label does not create a suffix match.
+
+Diagnostics use one-based source lines and byte columns.
+A missing or defaulted field uses the position of its parent object.
+File I/O and workspace failures without a source token use position 1:1.
+Only the first error is reported, with a bounded 512-byte reason.
+
+No process reload or DNS service is implemented yet.
 
 ## 6. Reference configs
 

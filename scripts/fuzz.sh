@@ -6,16 +6,55 @@ if [[ ! $iterations =~ ^[1-9][0-9]{0,8}$ ]]; then
     echo 'usage: scripts/fuzz.sh [iterations: 1..999999999]' >&2
     exit 2
 fi
-# Nix owns TMPDIR; use /tmp so evidence survives the development shell.
-capture=$(mktemp -d /tmp/z53-fuzz.XXXXXXXX)
+# Keep failed evidence project-local, outside Nix's temporary development shell.
+mkdir -p .tmp/fuzz
+capture=$(mktemp -d "$PWD/.tmp/fuzz/run.XXXXXXXX")
 cache="$capture/cache"
 log="$capture/build.log"
+status=125
+build_pid=
+cleanup() {
+    local result=$? sample
+    trap - EXIT
+    trap '' HUP INT TERM
+    set +e
+    if [[ -n $build_pid ]]; then
+        # The build owns a separate group, including compiler and fuzzer descendants.
+        kill -TERM -- "-$build_pid" 2>/dev/null || true
+        if kill -0 -- "-$build_pid" 2>/dev/null; then
+            sleep 0.1
+            kill -KILL -- "-$build_pid" 2>/dev/null || true
+        fi
+        wait "$build_pid" 2>/dev/null || true
+    fi
+    cat "$log" || result=1
+    if (( result != 0 )); then
+        printf '%s\n' "$status" >"$capture/status" || result=1
+        if [[ -f "$cache/f/crash" ]]; then
+            cp "$cache/f/crash" "$capture/crash" || result=1
+        elif [[ -d "$cache/f/crash" ]]; then
+            sample=$(find "$cache/f/crash" -type f -print -quit) || result=1
+            if [[ -n $sample ]]; then cp "$sample" "$capture/crash" || result=1; fi
+        fi
+        rm -rf "$cache" || result=1
+        echo "Fuzz evidence: $capture" >&2
+    else
+        rm -rf "$capture" || result=1
+    fi
+    exit "$result"
+}
+trap cleanup EXIT
+trap 'status=129; exit 129' HUP
+trap 'status=130; exit 130' INT
+trap 'status=143; exit 143' TERM
+: >"$log"
+# Bash job control gives this asynchronous build its own process group on both targets.
+set -m
+zig build fuzz --fuzz="$iterations" --cache-dir "$cache" --summary all >"$log" 2>&1 &
+build_pid=$!
+set +m
 status=0
-zig build fuzz --fuzz="$iterations" --cache-dir "$cache" --summary all >"$log" 2>&1 || status=$?
-printf '%s\n' "$status" >"$capture/status"
-cat "$log"
-echo "Fuzz evidence: $capture" >&2
-# Keep evidence on success too. The cache is never reused by this gate.
+wait "$build_pid" || status=$?
 if (( status != 0 )); then
     echo "Fuzz build exited $status" >&2
     exit 1

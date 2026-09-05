@@ -194,11 +194,42 @@ Each target requires exactly one completed report, starting from zero and reachi
 
 #### Retained evidence
 
-Every invocation uses a fresh local cache under `/tmp/z53-fuzz.*`.
-It retains `build.log`, the underlying build exit `status`, and the cache on success and failure.
-The cache includes any crash inputs. The script prints the evidence path.
-Evidence remains until explicitly removed. Repeated invocations consume disk space.
+Every invocation uses a fresh isolated cache under the ignored project-local `.tmp/fuzz/run.*` directory.
+The EXIT handler prints the build log and removes the cache.
+Successful runs also remove the capture directory.
 
+Failed runs retain only these files:
+
+- `build.log`
+- `status`
+- One `crash` sample, if present
+
+An empty crash file is retained.
+For a crash directory, the first regular file supplies the sample.
+Empty crash directories leave no sample.
+The script prints the failed evidence path.
+Failure evidence remains until explicitly removed.
+
+`status` records the build exit code.
+Signal exits use these values:
+
+- HUP: 129
+- INT: 130
+- TERM: 143
+
+The build runs in a dedicated process group.
+Cleanup sends TERM to that group and allows 0.1 seconds for shutdown.
+It then sends KILL to any members that remain.
+It waits for the build leader to exit before it removes the cache.
+SIGKILL and machine failure bypass shell cleanup.
+
+#### Manual cache cleanup
+
+1. Preserve useful fuzz inputs and compact failure evidence first.
+2. Remove compiled metadata and objects together, not only `.zig-cache/o`.
+3. Leave shared toolchain and dependency caches untouched.
+
+Partial object removal leaves stale build-runner references.
 Toolchain and dependency caches are not patched.
 The script assumes the pinned runner's report format.
 It rejects missing or changed report formats.
@@ -206,8 +237,97 @@ It rejects missing or changed report formats.
 #### Gate validation
 
 `tests/fuzz-gate.sh` runs in `test-wire` and `test`.
-It checks successful reports, nonzero process status, failure diagnostics, and empty/file and directory crash artifacts.
-It also checks missing, duplicate, unknown, incomplete and reused-cache reports, insufficient budgets and invalid arguments.
+It checks these results and artifacts:
+
+- Successful reports
+- Nonzero process status
+- Failure diagnostics
+- Empty-file and directory crash artifacts
+- Cache removal after each supported exit path
+- Capture removal after success
+- Exact retained failure files and crash sample contents
+- Report format
+- Report completeness
+- Report uniqueness
+- Reused-cache reports
+- Insufficient budgets
+- Invalid arguments
+
+The interruption mock includes a build leader and descendant that both ignore TERM.
+Neither remains live after cleanup.
+Each mock owns an isolated fixture directory.
+Its EXIT handler removes all mock evidence.
 
 An actual temporary fuzz invariant panic was rejected while the build runner reported success.
 The invariant was removed before the restored bounded run.
+
+## Configuration and suffix routing (#1)
+
+`src/config.zig` loads typed `std.zon` structs.
+Unknown fields are errors at every level.
+SPEC §5.1 defines the schema and startup bounds.
+
+Both example files remain unchanged. Tests read the actual files.
+The package manifest includes `examples` so packaged tests retain both fixtures.
+
+`cache = null` and `hosts = null` encode absence.
+The reference `rotate` and `force_tcp` booleans remain schema switches, not redundant runtime state.
+Numeric NODATA types use `.{ .number = N }`.
+Common names retain `.AAAA` syntax.
+
+The caller provides a source buffer and at most 4 MiB of parser storage.
+The binary makes one bounded startup allocation for that workspace.
+The load fails if its data does not fit. There is no allocation fallback.
+The workspace holds these values:
+
+- AST
+- Zoir
+- Typed values
+- Strings
+- Canonical suffixes
+
+Config views live until the workspace is reused or freed.
+A successful parse retains no source bytes.
+Diagnostics own a fixed reason buffer and borrow only the path.
+No query operation takes an allocator.
+
+A tokenizer pass checks these bounds before the standard AST parser runs:
+
+- Source size
+- Token count
+- Delimiter depth
+
+It excludes Zig-only recursive prefix syntax and repeated negation.
+These checks bound the parser's recursive grammar. The standard library remains unchanged.
+
+Semantic validation maps Zoir field and array nodes to their actual AST locations.
+It does not search for field names in source text.
+Textual lookup can select the wrong source location in these cases:
+
+- Comments
+- Escaped identifiers
+- Repeated nested fields
+
+The router uses the length-prefixed Name representation.
+It compares only at wire label boundaries and folds ASCII case.
+It scans at most 64 zones and constructs a bounded suffix name on the stack.
+It makes no heap allocation.
+This is a correctness implementation, not a measured optimization.
+
+The endpoint parser retains hostnames. It does not resolve them.
+Later slices still own these features:
+
+- Sockets
+- DNS bootstrap
+- Upstream transport selection
+- The query pipeline
+
+The startup CLI loads `/etc/z53/z53.zon` or exactly one `-c path` override.
+Failures exit 1 and report these fields to stderr:
+
+- Path
+- One-based line and byte column
+- Reason
+
+A valid file still produces the service-not-implemented message and exit status 1.
+A successful configuration load does not mean the binary serves DNS.

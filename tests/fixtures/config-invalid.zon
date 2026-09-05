@@ -1,0 +1,8 @@
+.{
+    .zones = .{
+        .{
+            .suffix = ".",
+            .upstreams = .{},
+        },
+    },
+}
