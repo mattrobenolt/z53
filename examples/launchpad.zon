@@ -1,0 +1,27 @@
+.{
+    .listen = .{"127.0.0.1:53"},
+    .zones = .{
+        .{
+            .suffix = ".",
+            .hosts = .{ .ttl = 30 },
+            .nodata = .{.AAAA},
+            .upstreams = .{
+                .{ .address = "169.254.169.253:53" },
+                .{ .address = "1.1.1.1:853", .tls = .{ .server_name = "one.one.one.one" } },
+                .{ .address = "1.0.0.1:853", .tls = .{ .server_name = "one.one.one.one" } },
+            },
+            .max_fails = 1,
+            .health_check_interval_s = 5,
+            .rotate = true,
+        },
+        .{
+            .suffix = "ts.net.",
+            .hosts = .{ .ttl = 30 },
+            .upstreams = .{
+                .{ .address = "100.100.100.100:53" },
+            },
+            .max_fails = 1,
+            .cache = .{ .max_ttl_s = 30 },
+        },
+    },
+}

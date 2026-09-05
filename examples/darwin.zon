@@ -1,0 +1,34 @@
+.{
+    .listen = .{"127.0.0.1:53"},
+    .zones = .{
+        .{
+            .suffix = ".",
+            .hosts = .{ .ttl = 30 },
+            .nodata = .{.AAAA},
+            .upstreams = .{
+                .{ .address = "192.168.2.100:53" },
+                .{ .address = "1.1.1.1:853", .tls = .{ .server_name = "one.one.one.one" } },
+                .{ .address = "1.0.0.1:853", .tls = .{ .server_name = "one.one.one.one" } },
+            },
+            .max_fails = 1,
+            .health_check_interval_s = 5,
+            .rotate = true,
+        },
+        .{
+            .suffix = "ts.net.",
+            .hosts = .{ .ttl = 30 },
+            .upstreams = .{
+                .{ .address = "100.100.100.100:53" },
+            },
+            .cache = .{ .max_ttl_s = 30 },
+        },
+        .{
+            .suffix = "svc.cluster.local.",
+            .upstreams = .{
+                .{ .address = "192.168.194.138:53", .force_tcp = true },
+            },
+            .health_check_interval_s = 60,
+            .rotate = true,
+        },
+    },
+}
