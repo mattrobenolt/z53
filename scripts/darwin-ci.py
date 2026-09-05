@@ -47,7 +47,9 @@ def green(result, text):
 
 
 def full_green(result, text, root):
-    green(result, text)
+    # The full suite reports successful negative fuzz fixtures, including panic (#1).
+    diagnostics = re.sub(r"^fuzz gate panic: exit 1, cleanup and evidence checked$", "", text, flags=re.M)
+    green(result, diagnostics)
     summaries = re.findall(r"^ztest: (\d+) passed, (\d+) failed, (\d+) skipped "
                            r"\(of (\d+) total\)", text, re.M)
     if len(summaries) != 5 or text.count("ALL TESTS PASSED") != 5:

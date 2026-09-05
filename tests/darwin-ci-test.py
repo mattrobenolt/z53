@@ -40,6 +40,17 @@ def valid_red():
         "error: the following test command failed with exit code 1:\n/path/to/test\n")
 
 
+FUZZ_PANIC_REPORT = "fuzz gate panic: exit 1, cleanup and evidence checked"
+
+
+def valid_full():
+    names = ci.re.findall(r'^test "([^"]+)"',
+                          (ROOT / "tests/runtime_darwin.zig").read_text(), ci.re.M)
+    text = "\n".join(f"[1/1] PASS: {name} (1ms)" for name in names)
+    text += "\n" + "\n".join(f"[1/1] SKIP: {name} (1ms)" for name in ci.SKIPS)
+    return text + "\nztest: 1 passed, 0 failed, 0 skipped (of 1 total)\nALL TESTS PASSED\n" * 5
+
+
 class EvidenceTests(unittest.TestCase):
     def test_controls_match_exact_source(self):
         controls.preflight(ROOT)
@@ -62,9 +73,7 @@ class EvidenceTests(unittest.TestCase):
     def test_full_run_requires_reports_and_every_native_test(self):
         names = ci.re.findall(r'^test "([^"]+)"',
                               (ROOT / "tests/runtime_darwin.zig").read_text(), ci.re.M)
-        text = "\n".join(f"[1/1] PASS: {name} (1ms)" for name in names)
-        text += "\n" + "\n".join(f"[1/1] SKIP: {name} (1ms)" for name in ci.SKIPS)
-        text += "\nztest: 1 passed, 0 failed, 0 skipped (of 1 total)\nALL TESTS PASSED\n" * 5
+        text = valid_full()
         result = {"exit": 0, "reason": None}
         ci.full_green(result, text, ROOT)
         for bad in (text.replace(names[0], "missing"), text.replace("SKIP:", "PASS:", 1),
@@ -72,6 +81,46 @@ class EvidenceTests(unittest.TestCase):
                     text.replace("of 1 total", "of 2 total", 1), text + "\nthread 1 panic: crash"):
             with self.assertRaises(RuntimeError):
                 ci.full_green(result, bad, ROOT)
+
+    # SPEC §9.5: the successful negative fixture report is not a native crash (#1).
+    def test_full_run_accepts_exact_fuzz_panic_report(self):
+        ci.full_green({"exit": 0, "reason": None}, FUZZ_PANIC_REPORT + "\n" + valid_full(), ROOT)
+
+    def test_full_run_fuzz_report_does_not_hide_diagnostics(self):
+        text = FUZZ_PANIC_REPORT + "\n" + valid_full()
+        for diagnostic in (
+                "thread 42 panic: injected", "panic: injected", "PANIC: injected",
+                'panic in test "sample": injected', 'PANIC in test "sample": injected',
+                "panic: injected " + FUZZ_PANIC_REPORT, FUZZ_PANIC_REPORT + " panic: injected",
+                "prefix " + FUZZ_PANIC_REPORT, FUZZ_PANIC_REPORT + " suffix",
+                FUZZ_PANIC_REPORT.replace("exit 1", "exit 0"), FUZZ_PANIC_REPORT[:-1],
+                "fuzz gate panic: exit 1", "Segmentation fault", "Bus error",
+                "memory address 0x1234 leaked:", "[1/1] LEAK: sample",
+                "compilation failed", "1 compilation errors",
+                "src/runtime.zig:10:2: error: invalid type", "error: compile error",
+                "TESTS FAILED", "[1/1] FAIL: sample — error.TestUnexpectedResult (1ms)"):
+            with self.subTest(diagnostic=diagnostic), self.assertRaises(RuntimeError):
+                ci.full_green({"exit": 0, "reason": None}, text + diagnostic + "\n", ROOT)
+
+    def test_full_run_fuzz_report_still_requires_status_and_complete_suites(self):
+        text = FUZZ_PANIC_REPORT + "\n" + valid_full()
+        for result in ({"exit": 1, "reason": None}, {"exit": -11, "reason": None},
+                       {"exit": 0, "reason": "signal 15"}, {"exit": 0, "reason": "deadline"}):
+            with self.subTest(result=result), self.assertRaises(RuntimeError):
+                ci.full_green(result, text, ROOT)
+        for bad in (FUZZ_PANIC_REPORT, text.replace("ALL TESTS PASSED", "missing", 1),
+                    text.replace("of 1 total", "of 2 total", 1),
+                    text.replace("0 failed", "1 failed", 1),
+                    text.replace("SKIP:", "PASS:", 1), text.replace("PASS:", "missing:", 1)):
+            with self.subTest(report=bad), self.assertRaises(RuntimeError):
+                ci.full_green({"exit": 0, "reason": None}, bad, ROOT)
+
+    def test_fuzz_panic_report_exemption_is_full_suite_only(self):
+        with self.assertRaises(RuntimeError):
+            ci.green({"exit": 0, "reason": None}, FUZZ_PANIC_REPORT)
+        control, tests, text = valid_red()
+        with self.assertRaises(RuntimeError):
+            ci.intended_red({"exit": 1, "reason": None}, text + FUZZ_PANIC_REPORT + "\n", control, tests)
 
     def test_red_requires_the_intended_assertion(self):
         control = controls.CONTROLS[0]
