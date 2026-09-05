@@ -62,14 +62,7 @@ const Harness = struct {
         try testing.expect(descriptor >= 0);
         errdefer _ = system.close(descriptor);
         try runtime.address.prepare(descriptor);
-        switch (std.posix.errno(system.connect(
-            descriptor,
-            @ptrCast(&self.address.storage),
-            self.address.length,
-        ))) {
-            .SUCCESS, .INPROGRESS => {},
-            else => return error.ConnectFailed,
-        }
+        try connectSocket(descriptor, &self.address);
         return descriptor;
     }
 
@@ -102,6 +95,91 @@ const Harness = struct {
         return error.CancellationDidNotDrain;
     }
 };
+
+const Readiness = enum { ready, expired };
+
+fn socketReady(descriptor: system.fd_t, events: i16, timeout_ms: u16) !Readiness {
+    var descriptor_poll: system.pollfd = .{ .fd = descriptor, .events = events, .revents = 0 };
+    const result = system.poll(@ptrCast(&descriptor_poll), 1, timeout_ms);
+    if (result < 0) {
+        std.debug.print("socket wait: fd={d} errno={t}\n", .{
+            descriptor, std.posix.errno(result),
+        });
+        return error.SocketWaitFailed;
+    }
+    if (result == 0) return .expired;
+    if (descriptor_poll.revents & system.POLL.NVAL != 0) return error.InvalidSocket;
+    // Error readiness must reach SO_ERROR or recv, not masquerade as a deadline.
+    if (descriptor_poll.revents & (events | system.POLL.ERR | system.POLL.HUP) == 0)
+        return error.UnexpectedReadiness;
+    return .ready;
+}
+
+fn connectSocket(descriptor: system.fd_t, endpoint: *const runtime.address.Address) !void {
+    const result = system.connect(descriptor, @ptrCast(&endpoint.storage), endpoint.length);
+    switch (std.posix.errno(result)) {
+        .SUCCESS => return,
+        .INPROGRESS => {},
+        else => return error.ConnectFailed,
+    }
+    // #1: EINPROGRESS does not permit the first TCP send, even on loopback.
+    if (try socketReady(descriptor, system.POLL.OUT, 1000) == .expired)
+        return error.ConnectDeadline;
+    var failure: c_int = 0;
+    var length: system.socklen_t = @sizeOf(c_int);
+    try testing.expectEqual(0, system.getsockopt(
+        descriptor,
+        system.SOL.SOCKET,
+        system.SO.ERROR,
+        &failure,
+        &length,
+    ));
+    try testing.expectEqual(@as(system.socklen_t, @sizeOf(c_int)), length);
+    if (failure != 0) {
+        std.debug.print("connect completion: fd={d} SO_ERROR={d}\n", .{ descriptor, failure });
+        return error.ConnectFailed;
+    }
+}
+
+// SPEC §1.2, #1: fixture waits have finite deadlines and reject invalid descriptors.
+test "Darwin native client readiness deadline and invalid descriptor" {
+    const pair = try socketPair();
+    defer _ = system.close(pair[1]);
+    defer _ = system.close(pair[0]);
+    try testing.expectEqual(.expired, try socketReady(pair[0], system.POLL.IN, 1));
+    try send(pair[1], &.{42});
+    try testing.expectEqual(.ready, try socketReady(pair[0], system.POLL.IN, 1000));
+    const closed = system.dup(pair[0]);
+    try testing.expect(closed >= 0);
+    try testing.expectEqual(0, system.close(closed));
+    try testing.expectError(error.InvalidSocket, socketReady(closed, system.POLL.IN, 1));
+}
+
+// SPEC §1.2, #1: writable readiness alone does not establish a TCP connection.
+test "Darwin native client rejects refused connection" {
+    var endpoint: runtime.address.Address = undefined;
+    try endpoint.parse("127.0.0.1:1");
+    @as(*system.sockaddr.in, @ptrCast(&endpoint.storage)).port = 0;
+    const reservation = system.socket(system.AF.INET, system.SOCK.STREAM, 0);
+    try testing.expect(reservation >= 0);
+    defer _ = system.close(reservation);
+    // A bound socket without listen reserves a port that refuses TCP connections.
+    try testing.expectEqual(0, system.bind(
+        reservation,
+        @ptrCast(&endpoint.storage),
+        endpoint.length,
+    ));
+    try testing.expectEqual(0, system.getsockname(
+        reservation,
+        @ptrCast(&endpoint.storage),
+        &endpoint.length,
+    ));
+    const descriptor = system.socket(system.AF.INET, system.SOCK.STREAM, 0);
+    try testing.expect(descriptor >= 0);
+    defer _ = system.close(descriptor);
+    try runtime.address.prepare(descriptor);
+    try testing.expectError(error.ConnectFailed, connectSocket(descriptor, &endpoint));
+}
 
 fn send(descriptor: system.fd_t, bytes: []const u8) !void {
     const result = system.sendto(descriptor, bytes.ptr, bytes.len, 0, null, 0);
@@ -647,7 +725,14 @@ fn deliverRetained(
     try testing.expectEqual(null, harness.service.proctor.registrations[162]);
     var output: [512]u8 = undefined;
     for (saved, 0..) |*snapshot, index| {
-        const received = system.recv(sockets[index % 2], &output, output.len, 0);
+        // Slot release precedes client readiness. Expiry still proves absent intended delivery.
+        const readiness = try socketReady(sockets[index % 2], system.POLL.IN, 1000);
+        const received = system.recv(sockets[index % 2], &output, output.len, system.MSG.DONTWAIT);
+        const failure = std.posix.errno(received);
+        if (received <= 0) std.debug.print(
+            "retained delivery: index={d} listener={d} fd={d} readiness={t} recv={d} errno={t}\n",
+            .{ index, snapshot.listener, sockets[index % 2], readiness, received, failure },
+        );
         try testing.expect(received > 0);
         const length: usize = @intCast(received);
         try testing.expectEqualSlices(u8, snapshot.bytes[0..snapshot.length], output[0..length]);
@@ -776,7 +861,19 @@ test "Darwin native accept quota timer recovery" {
     try testing.expectEqual(timer_generation + 1, harness.service.proctor.ownership[32].generation);
     try testing.expectEqual(generation + 1, harness.service.proctor.ownership[16].generation);
     try testing.expect(harness.service.proctor.registrations[16] != null);
-    try testing.expect(try harness.service.step());
+    // Rearm does not order accept ahead of the next timer or an interrupted kevent.
+    for (0..4) |_| {
+        try testing.expect(try harness.service.step());
+        if (harness.service.descriptors[0] != null) break;
+    }
+    if (harness.service.descriptors[0] == null) std.debug.print(
+        "quota recovery: accept_generation={d} timer_generation={d} armed={}\n",
+        .{
+            harness.service.proctor.ownership[16].generation,
+            harness.service.proctor.ownership[32].generation,
+            harness.service.proctor.registrations[16] != null,
+        },
+    );
     try testing.expect(harness.service.descriptors[0] != null);
     const accepted = harness.service.descriptors[0].?;
     const nonblocking: c_int = @bitCast(@as(system.O, .{ .NONBLOCK = true }));
