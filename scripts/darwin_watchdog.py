@@ -1,5 +1,6 @@
 """Bound native CI commands and their compact evidence (#1)."""
 
+import errno
 import json
 import os
 from pathlib import Path
@@ -7,6 +8,7 @@ import selectors
 import shutil
 import signal
 import subprocess
+import sys
 import time
 
 LOG_BYTES_MAX = 2 * 1024 * 1024
@@ -63,6 +65,19 @@ def kill_group(process, sig):
         os.killpg(process.pid, sig)
     except ProcessLookupError:
         pass
+    except PermissionError as error:
+        if sys.platform != "darwin" or error.errno != errno.EPERM:
+            raise
+        # XNU killpg1 excludes zombies and can return EPERM for a zombie-only group (#1).
+        # Reap only our leader. Its exit alone does not exclude live descendants.
+        if process.poll() is None:
+            raise
+        try:
+            os.killpg(process.pid, 0)
+        except ProcessLookupError:
+            return
+        # A live group or an inconclusive probe must never become cleanup success.
+        raise
 
 
 def cleanup_group(process):

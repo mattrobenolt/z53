@@ -1,5 +1,6 @@
 """SPEC §1.2 and §9.5: native CI rejects false evidence and restores controls (#1)."""
 
+import errno
 import hashlib
 import importlib.util
 import json
@@ -13,7 +14,7 @@ import tempfile
 import threading
 import time
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, call, patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
@@ -460,6 +461,116 @@ class WatchdogTests(unittest.TestCase):
         self.assertEqual("log bound", result["reason"])
         self.assertEqual(1024, len(text))
 
+    def test_darwin_eperm_log_bound_cleanup_preserves_evidence(self):
+        # SPEC §9.5: injected errno reproduces the native log-bound cleanup failure (#1).
+        processes, selectors, calls = [], [], []
+        popen, selector_type, killpg = subprocess.Popen, watchdog.selectors.DefaultSelector, os.killpg
+
+        def spawn(*args, **kwargs):
+            process = popen(*args, **kwargs)
+            processes.append(process)
+            return process
+
+        def select():
+            selector = selector_type()
+            selectors.append(selector)
+            return selector
+
+        def kill(pgid, number):
+            self.assertEqual(processes[0].pid, pgid)
+            calls.append(number)
+            if number == signal.SIGTERM:
+                # This wait fixes the exit state. It does not prove native zombie errno behavior.
+                processes[0].wait(timeout=3)
+                raise PermissionError(errno.EPERM, "injected Darwin EPERM")
+            return killpg(pgid, number)
+
+        with tempfile.TemporaryDirectory(prefix="z53-eperm-test-") as directory:
+            root = Path(directory)
+            try:
+                with patch.object(watchdog.sys, "platform", "darwin"), \
+                        patch.object(watchdog, "LOG_BYTES_MAX", 1024), \
+                        patch.object(watchdog.subprocess, "Popen", spawn), \
+                        patch.object(watchdog.selectors, "DefaultSelector", select), \
+                        patch.object(watchdog.os, "killpg", kill):
+                    result, text = watchdog.run([sys.executable, "-c", "print('x' * 2048)"],
+                                                root, root, "log-bound", seconds=3)
+                self.assertEqual("log bound", result["reason"])
+                self.assertEqual(0, result["exit"])
+                self.assertEqual("x" * 1024, text)
+                self.assertEqual(result, json.loads((root / "log-bound.json").read_text()))
+                self.assertEqual([signal.SIGTERM, 0, signal.SIGKILL], calls)
+                self.assertTrue(processes[0].stdout.closed)
+                self.assertTrue(all(selector.get_map() is None for selector in selectors))
+                with self.assertRaises(ChildProcessError):
+                    os.waitpid(processes[0].pid, os.WNOHANG)
+            finally:
+                for process in processes:
+                    try:
+                        killpg(process.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                    process.wait(timeout=5)
+                    process.stdout.close()
+                for selector in selectors:
+                    selector.close()
+
+    def test_darwin_eperm_reaps_before_exact_group_check(self):
+        # SPEC §9.5: injected states require a reap and ESRCH, not just leader exit (#1).
+        process = Mock(pid=12345)
+        process.poll.return_value = 0
+        events = Mock()
+        events.attach_mock(process.poll, "poll")
+        denied = PermissionError(errno.EPERM, "injected Darwin EPERM")
+        with patch.object(watchdog.sys, "platform", "darwin"), \
+                patch.object(watchdog.os, "killpg", side_effect=[denied, ProcessLookupError(errno.ESRCH, "absent")]) as kill:
+            events.attach_mock(kill, "killpg")
+            watchdog.kill_group(process, signal.SIGTERM)
+        self.assertEqual([call.killpg(process.pid, signal.SIGTERM), call.poll(),
+                          call.killpg(process.pid, 0)], events.mock_calls)
+
+    def test_eperm_rejects_live_unowned_and_unknown_groups(self):
+        # SPEC §9.5: injected permission failures must never become cleanup success (#1).
+        for platform, status, number, probe in (
+                ("linux", 0, errno.EPERM, None),
+                ("darwin", 0, errno.EACCES, None),
+                ("darwin", None, errno.EPERM, None),
+                ("darwin", 0, errno.EPERM, None),
+                ("darwin", 0, errno.EPERM, PermissionError(errno.EPERM, "unowned")),
+                ("darwin", 0, errno.EPERM, OSError(errno.EIO, "unknown"))):
+            with self.subTest(platform=platform, status=status, errno=number, probe=probe):
+                process = Mock(pid=12345)
+                process.poll.return_value = status
+                denied = PermissionError(number, "injected permission failure")
+                with patch.object(watchdog.sys, "platform", platform), \
+                        patch.object(watchdog.os, "killpg", side_effect=[denied, probe]) as kill:
+                    with self.assertRaises(OSError) as caught:
+                        watchdog.kill_group(process, signal.SIGTERM)
+                self.assertIs(probe if probe is not None else denied, caught.exception)
+                if platform != "darwin" or number != errno.EPERM:
+                    process.poll.assert_not_called()
+                else:
+                    process.poll.assert_called_once_with()
+                self.assertEqual(2 if platform == "darwin" and status == 0 and number == errno.EPERM
+                                 else 1, kill.call_count)
+
+    def test_darwin_eperm_for_live_owned_leader_is_an_error(self):
+        # SPEC §9.5: a real live target remains an error under injected EPERM (#1).
+        with subprocess.Popen([sys.executable, "-c", "input()"], stdin=subprocess.PIPE,
+                              start_new_session=True) as process:
+            try:
+                denied = PermissionError(errno.EPERM, "injected live-target EPERM")
+                with patch.object(watchdog.sys, "platform", "darwin"), \
+                        patch.object(watchdog.os, "killpg", side_effect=denied) as kill:
+                    with self.assertRaises(PermissionError) as caught:
+                        watchdog.kill_group(process, signal.SIGTERM)
+                self.assertIs(denied, caught.exception)
+                kill.assert_called_once_with(process.pid, signal.SIGTERM)
+                self.assertIsNone(process.poll())
+            finally:
+                os.killpg(process.pid, signal.SIGKILL)
+                process.wait(timeout=5)
+
     def test_storage_bound_still_stops_the_command(self):
         with tempfile.TemporaryDirectory(prefix="z53-storage-test-") as directory:
             root = Path(directory)
@@ -479,13 +590,38 @@ class WatchdogTests(unittest.TestCase):
                   " os._exit(0)\n"
                   "os.close(1); os.close(2)\n"
                   "time.sleep(30)\n")
-        result, text = self.run_fixture(source)
-        self.assertEqual(0, result["exit"])
-        self.assertIsNone(result["reason"])
-        self.assertLess(result["elapsed_s"], 1)
-        state = subprocess.run(["ps", "-o", "stat=", "-p", text.strip()],
-                               capture_output=True, text=True, timeout=5).stdout.strip()
-        self.assertTrue(not state or state.startswith("Z"), state)
+        # SPEC §9.5: leader exit never authorizes a live-descendant cleanup skip (#1).
+        processes, signals = [], []
+        popen, kill_group = subprocess.Popen, watchdog.kill_group
+
+        def spawn(*args, **kwargs):
+            process = popen(*args, **kwargs)
+            processes.append(process)
+            return process
+
+        def kill(process, number):
+            if number == signal.SIGTERM:
+                self.assertEqual(0, process.wait(timeout=3))
+                os.killpg(process.pid, 0)
+            signals.append(number)
+            kill_group(process, number)
+
+        try:
+            with patch.object(watchdog.subprocess, "Popen", spawn), \
+                    patch.object(watchdog, "kill_group", kill):
+                result, text = self.run_fixture(source)
+            self.assertEqual([signal.SIGTERM, signal.SIGKILL], signals)
+            self.assertEqual(0, result["exit"])
+            self.assertIsNone(result["reason"])
+            self.assertLess(result["elapsed_s"], 1)
+            state = subprocess.run(["ps", "-o", "stat=", "-p", text.strip()],
+                                   capture_output=True, text=True, timeout=5).stdout.strip()
+            self.assertTrue(not state or state.startswith("Z"), state)
+        finally:
+            for process in processes:
+                kill_group(process, signal.SIGKILL)
+                process.wait(timeout=5)
+                process.stdout.close()
 
     def test_deadline_kills_term_resistant_descendant(self):
         source = ("import os, pathlib, signal, time\n"
