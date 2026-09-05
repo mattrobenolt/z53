@@ -681,3 +681,131 @@ A burst alone did not reliably exhaust provided buffers because completion handl
 The deterministic depletion regression withholds the initial buffer batch before the first submission.
 It observes ENOBUFS, rearm, buffer publication, and a successful response.
 No resolver performance claim accompanies these checks.
+
+
+## macOS local client runtime candidate (#1)
+
+The platform facade selects `runtime_linux.zig` or `runtime_darwin.zig` at compile time.
+The Linux runtime was moved byte-for-byte from `src/runtime.zig`.
+Its address helper, proctor, framing, ownership, and native transport tests remain unchanged.
+This includes explicit registered-file teardown and TCP address reuse for restarts.
+
+macOS uses one kqueue through Zig 0.16 `std.c`, with no event-loop dependency.
+Socket calls are nonblocking. Readiness is one-shot and each rearm advances the shared
+non-wrapping operation generation. One event is fetched per step, so no userspace batch
+retains a descriptor reference across close/reuse. EV_EOF still runs recv so buffered
+TCP frames drain before zero-length receive closes the connection.
+
+SPEC §1.2 documents its fixed operation, descriptor, and buffer budgets.
+UDP reads use one event-thread scratch buffer; response slots own the destination,
+listener identity and output until send succeeds or fails. EAGAIN/EINTR retain output.
+One write filter per listener drains its bounded response slots without replacing udata.
+TCP shares the existing length framing and partial-write state machine.
+Full admission pauses without accepting an extra process descriptor.
+The relative one-second timer also retries resource-limited admission without busy looping.
+
+Darwin socket creation and accept require explicit fcntl for nonblocking and close-on-exec.
+SO_NOSIGPIPE prevents peer close from terminating the event thread.
+The pinned std.c.IPV6 is void on Darwin. `address_darwin.zig` names IPV6_V6ONLY=27,
+verified against the pinned toolchain's bundled
+`libc/include/any-darwin-any/netinet6/in6.h`. No installed source or pin changed.
+
+EV_DELETE is the synchronous readiness cancellation barrier.
+Neither kevent nor a pending registration borrows query buffers.
+Fatal and startup teardown closes kqueue and every owned socket before releasing storage.
+Runtime.stop remains an explicit API; daemon signals still rely on process teardown.
+The local pipeline, hosts startup/reload policy and unresolved-forward SERVFAIL are shared.
+Hostname bootstrap, upstream I/O/health, forward-cache/stale integration and logs remain later work.
+
+### Candidate evidence and blockers
+
+Darwin runtime and test roots pass `-target aarch64-macos -fno-emit-bin` semantic compilation
+on aarch64 Linux. This is neither Darwin linking nor native execution.
+The native-CI regressions cover timer deletion, registration/setup failure, socket flags,
+pool exhaustion/recovery, repeated restart/rollback, UDP/TCP framing, malformed input,
+hosts reload, IPv6 half-close and original-listener reply identity.
+Darwin execution and Darwin-specific negative controls remain unproved.
+
+Two added platform-independent tests ran on Linux and rejected five temporary mutations:
+stale generation admission, duplicate terminal release, short frame admission,
+partial receive overrun and partial send overrun. Shared source was restored byte-for-byte.
+No wire fuzz target, malformed-input test, assertion or runtime safety mode was removed.
+
+The candidate full Linux suite failed its two unchanged immediate-restart regressions
+at UDP bind. Other runtime tests passed (20/22), as did other suites.
+Three bounded comparison runs then passed: candidate focused restarts, exact accepted
+baseline focused restarts, and exact baseline full suite with matching `-j2`.
+These passes do not explain or withdraw the observed failure.
+No endpoint/errno/cycle diagnosis was captured by the original tests.
+Socket/load snapshots and source hashes accompany the run artifact.
+This remains an unresolved Linux acceptance blocker, separate from missing Darwin evidence.
+No bind retries, sleeps, UDP address reuse or weakened regressions were added.
+There is no resolver performance claim.
+
+
+### Native ARM macOS CI preparation (#1)
+
+The `test/darwin-runtime` branch supplies a focused `macos-15` workflow.
+GitHub documents this label as ARM64 and lists `macos-15-intel` separately.
+The job requires `uname -m` to return `arm64` and records the exact Git head and source hashes.
+Action references use verified repository commit hashes.
+The workflow uses read-only repository permissions, no retained credentials, and no private cache or deployment access.
+
+The retained-send regression submits four UDP queries through the real Runtime, across two listeners and two client sources.
+A test-only errno field injects EAGAIN before `sendto` and disappears from production storage.
+This is injected errno evidence, not kernel backpressure evidence.
+Real kqueue write events retry retained responses before native `sendto` delivers their original bytes and destinations.
+The test checks one write filter per listener and release of every response slot.
+
+The deletion regression arms an already-ready socket and calls `remove`.
+A zero-time kernel poll must return no event before any close or replacement registration.
+A distinct timer supplies the sentinel event.
+A later `dup2` operation reuses the descriptor, and a new registration reuses the operation slot with its next generation.
+Separate native events exercise stale identity and generation rejection.
+
+The accept-quota regression lowers the real descriptor limit after the client connects.
+Admission must remain unarmed after quota failure.
+The next real timer restores admission after the limit returns to its previous value.
+The accepted connection then serves a framed query.
+
+Each native command has a 180-second execution deadline and a separate process group.
+Bounded teardown follows that deadline.
+The runner rejects zero-exit crash diagnostics, incomplete suite reports, and unexpected Darwin skips.
+Each command retains at most 2 MiB of output.
+Compiler objects do not survive a completed batch, and generated storage has a 1 GiB limit.
+Artifacts contain only compact logs, statuses, source hashes, and bounded crash samples.
+
+Harness teardown first allows 25 seconds for cooperative cleanup of its detached fixtures.
+A separate SIGUSR1 latch avoids the harness's intentional signal tests.
+Safe checkpoints propagate cancellation outside cleanup blocks.
+Ordinary teardown allows 0.5 seconds for TERM and five seconds for the final reap.
+Real Linux cancellation tests cover active fixtures, cleanup, and intentional signal-handler overrides.
+Native Darwin cancellation evidence remains pending.
+
+Controls run one at a time in an owned detached worktree at the exact published head.
+Each control requires one exact source match and the named test's intended assertion failure.
+Only exit 1 with the intended assertion report satisfies a control.
+A signal, crash, leak, compile failure, or deadline does not satisfy a control.
+Each `finally` block restores the original bytes and checks source hashes and the index.
+After ordinary control completion or failure, the restored full suite and both lint invocations follow.
+Cancellation restores the source and completes cleanup without new validation.
+
+The finite controls cover these paths:
+
+- Retained UDP release, listener selection, and write-filter ownership
+- Kernel deletion, stale identity, and stale generation
+- Nonblocking, close-on-exec, and SIGPIPE flags
+- Startup rollback and reload disablement
+- External and embedded datagram metadata lengths
+- Buffered EOF delivery
+- Accept-quota pause and timer recovery
+
+The installed ast-grep Zig parser rejected the relevant control patterns or produced ERROR nodes.
+The controls therefore use exact byte replacements with unique-match checks, not approximate syntax rewrites.
+Local semantic compilation can reject invalid mutations but cannot prove their native assertion failures.
+
+This branch prepares publication evidence, not Darwin implementation acceptance.
+Native linking, the full native suite, and all native controls remain pending the parent's reviewed branch publication.
+The unexplained Linux UDP `BindFailed` results remain blockers.
+The passing instrumented D1 run supplied no failed-endpoint ownership capture and remains inconclusive.
+No Linux runtime behavior, dependency pin, deployment module, or example changes accompany this preparation.

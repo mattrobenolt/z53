@@ -35,7 +35,7 @@ pub fn build(b: *std.Build) void {
     b.installArtifact(executable);
     const run = b.addRunArtifact(executable);
     if (b.args) |args| run.addArgs(args);
-    b.step("run", "Run z53 (Linux local responses only)").dependOn(&run.step);
+    b.step("run", "Run z53 (local responses only)").dependOn(&run.step);
     b.step("check", "Check compilation without linking").dependOn(
         &b.addExecutable(executable_options).step,
     );
@@ -65,19 +65,7 @@ fn addTests(b: *std.Build, executable: *std.Build.Step.Compile, tls: *std.Build.
     run_tests.setEnvironmentVariable("ZTEST_VERBOSE", "1");
     run_tests.setEnvironmentVariable("ZTEST_PLAIN", "1");
     unit_step.dependOn(&run_tests.step);
-    // SPEC §1: macOS retains its explicit incomplete-runtime startup error.
-    if (target.result.os.tag != .linux) {
-        const startup = b.addRunArtifact(executable);
-        startup.addArgs(&.{ "-c", "examples/launchpad.zon" });
-        startup.setCwd(b.path("."));
-        startup.expectExitCode(1);
-        startup.expectStdOutEqual("");
-        startup.expectStdErrEqual("z53: DNS service is not implemented yet\n");
-        unit_step.dependOn(&startup.step);
-    }
-    if (target.result.os.tag == .linux) {
-        runtime.add(b, executable, ztest, test_step, test_compile);
-    }
+    runtime.add(b, executable, ztest, test_step, test_compile);
     config.add(b, executable, ztest, test_step, test_compile);
     resolver.add(b, executable, ztest, test_step, test_compile);
     benchmark.addSmoke(b, &target, test_step);
