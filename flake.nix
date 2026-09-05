@@ -44,6 +44,9 @@
                 just
                 dig
                 nixfmt
+                # #1: the native CI watchdog and its local checks use pinned tools.
+                python3
+                actionlint
                 llvmPackages.bintools
               ]
               ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [ pkgs.perf ];

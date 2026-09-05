@@ -681,3 +681,206 @@ A burst alone did not reliably exhaust provided buffers because completion handl
 The deterministic depletion regression withholds the initial buffer batch before the first submission.
 It observes ENOBUFS, rearm, buffer publication, and a successful response.
 No resolver performance claim accompanies these checks.
+
+
+## macOS local client runtime candidate (#1)
+
+The platform facade selects `runtime_linux.zig` or `runtime_darwin.zig` at compile time.
+The Linux runtime was moved byte-for-byte from `src/runtime.zig`.
+Its address helper, proctor, framing, ownership, and native transport tests remain unchanged.
+This includes explicit registered-file teardown and TCP address reuse for restarts.
+
+macOS uses one kqueue through Zig 0.16 `std.c`, with no event-loop dependency.
+Socket calls are nonblocking. Readiness is one-shot and each rearm advances the shared
+non-wrapping operation generation. One event is fetched per step, so no userspace batch
+retains a descriptor reference across close/reuse. EV_EOF still runs recv so buffered
+TCP frames drain before zero-length receive closes the connection.
+
+SPEC §1.2 documents its fixed operation, descriptor, and buffer budgets.
+UDP reads use one event-thread scratch buffer; response slots own the destination,
+listener identity and output until send succeeds or fails. EAGAIN/EINTR retain output.
+One write filter per listener drains its bounded response slots without replacing udata.
+TCP shares the existing length framing and partial-write state machine.
+Full admission pauses without accepting an extra process descriptor.
+The relative one-second timer also retries resource-limited admission without busy looping.
+
+Darwin socket creation and accept require explicit fcntl for nonblocking and close-on-exec.
+SO_NOSIGPIPE prevents peer close from terminating the event thread.
+The pinned std.c.IPV6 is void on Darwin. `address_darwin.zig` names IPV6_V6ONLY=27,
+verified against the pinned toolchain's bundled
+`libc/include/any-darwin-any/netinet6/in6.h`. No installed source or pin changed.
+
+EV_DELETE is the synchronous readiness cancellation barrier.
+Neither kevent nor a pending registration borrows query buffers.
+Fatal and startup teardown closes kqueue and every owned socket before releasing storage.
+Runtime.stop remains an explicit API; daemon signals still rely on process teardown.
+The local pipeline, hosts startup/reload policy and unresolved-forward SERVFAIL are shared.
+Hostname bootstrap, upstream I/O/health, forward-cache/stale integration and logs remain later work.
+
+### Candidate evidence and blockers
+
+Darwin runtime and test roots pass `-target aarch64-macos -fno-emit-bin` semantic compilation
+on aarch64 Linux. This is neither Darwin linking nor native execution.
+The native-CI regressions cover timer deletion, registration/setup failure, socket flags,
+pool exhaustion/recovery, repeated restart/rollback, UDP/TCP framing, malformed input,
+hosts reload, IPv6 half-close and original-listener reply identity.
+The initial candidate lacked native execution and Darwin-specific negative controls.
+The native acceptance record below supplies that later evidence.
+
+Two added platform-independent tests ran on Linux and rejected five temporary mutations:
+stale generation admission, duplicate terminal release, short frame admission,
+partial receive overrun and partial send overrun. Shared source was restored byte-for-byte.
+No wire fuzz target, malformed-input test, assertion or runtime safety mode was removed.
+
+The candidate full Linux suite failed its two unchanged immediate-restart regressions
+at UDP bind. Other runtime tests passed (20/22), as did other suites.
+Three bounded comparison runs then passed: candidate focused restarts, exact accepted
+baseline focused restarts, and exact baseline full suite with matching `-j2`.
+These passes do not explain or withdraw the observed failure.
+No endpoint/errno/cycle diagnosis was captured by the original tests.
+Socket/load snapshots and source hashes accompany the run artifact.
+This remains an unresolved Linux release blocker, separate from the later Darwin acceptance.
+No bind retries, sleeps, UDP address reuse or weakened regressions were added.
+There is no resolver performance claim.
+
+
+### Native ARM macOS CI preparation (#1)
+
+The `test/darwin-runtime` branch supplies a focused `macos-15` workflow.
+GitHub documents this label as ARM64 and lists `macos-15-intel` separately.
+The job requires `uname -m` to return `arm64` and records the exact Git head and source hashes.
+Action references use verified repository commit hashes.
+The workflow uses read-only repository permissions, no retained credentials, and no private cache or deployment access.
+
+The retained-send regression submits four UDP queries through the real Runtime, across two listeners and two client sources.
+A test-only errno field injects EAGAIN before `sendto` and disappears from production storage.
+This is injected errno evidence, not kernel backpressure evidence.
+Real kqueue write events retry retained responses before native `sendto` delivers their original bytes and destinations.
+The test checks one write filter per listener and release of every response slot.
+
+The deletion regression arms an already-ready socket and calls `remove`.
+A zero-time kernel poll must return no event before any close or replacement registration.
+A distinct timer supplies the sentinel event.
+A later `dup2` operation reuses the descriptor, and a new registration reuses the operation slot with its next generation.
+Separate native events exercise stale identity and generation rejection.
+
+The accept-quota regression lowers the real descriptor limit after the client connects.
+Admission must remain unarmed after quota failure.
+The next real timer restores admission after the limit returns to its previous value.
+A fresh connection then serves a framed query after the timer restores admission.
+The fixture also records and checks the original client's terminal receive result.
+
+Each native command has a 180-second execution deadline and a separate process group.
+Bounded teardown follows that deadline.
+The runner rejects zero-exit crash diagnostics, incomplete suite reports, and unexpected Darwin skips.
+Each command retains at most 2 MiB of output.
+Compiler objects do not survive a completed batch, and generated storage has a 1 GiB limit.
+Artifacts contain only compact logs, statuses, source hashes, and bounded crash samples.
+
+Harness teardown first allows 25 seconds for cooperative cleanup of its detached fixtures.
+A separate SIGUSR1 latch avoids the harness's intentional signal tests.
+Safe checkpoints propagate cancellation outside cleanup blocks.
+Ordinary teardown allows 0.5 seconds for TERM and five seconds for the final reap.
+Real Linux cancellation tests cover active fixtures, cleanup, and intentional signal-handler overrides.
+The native acceptance record below includes Darwin cancellation evidence.
+
+Controls run one at a time in an owned detached worktree at the exact published head.
+Each control requires one exact source match and the named test's intended assertion failure.
+Only exit 1 with the intended assertion report satisfies a control.
+A signal, crash, leak, compile failure, or deadline does not satisfy a control.
+Each `finally` block restores the original bytes and checks source hashes and the index.
+After ordinary control completion or failure, the restored full suite and both lint invocations follow.
+Cancellation restores the source and completes cleanup without new validation.
+
+The finite controls cover these paths:
+
+- Retained UDP release, listener selection, and write-filter ownership
+- Kernel deletion, stale identity, and stale generation
+- Nonblocking, close-on-exec, and SIGPIPE flags
+- Startup rollback and reload disablement
+- External and embedded datagram metadata lengths
+- Buffered EOF delivery
+- Accept-quota pause and timer recovery
+- Nonzero `SO_ERROR` rejection after a controlled TCP reset
+- Preservation of a second queued frame by the test reader
+
+The installed ast-grep Zig parser rejected the relevant control patterns or produced ERROR nodes.
+The controls therefore use exact byte replacements with unique-match checks, not approximate syntax rewrites.
+Local semantic compilation can reject invalid mutations but cannot prove their native assertion failures.
+
+Publication initially permitted native evidence collection without implementation acceptance.
+The acceptance record below supersedes that restriction for the local-runtime slice only.
+The unexplained Linux UDP `BindFailed` results remain release blockers.
+The passing instrumented D1 run supplied no failed-endpoint ownership capture and remains inconclusive.
+No Linux runtime behavior, dependency pin, deployment module, or example changes accompany this preparation.
+
+### Native fixture semantics (#1)
+
+Run 33966889564 records 27 runtime passes, two failures, and four approved skips.
+The original TCP `NOTCONN` and retained UDP delivery cases pass in that run.
+Quota recovery still fails after four post-rearm steps, despite an armed accept filter and advanced timer generations.
+The new bound-port test reports `ConnectDeadline`, not its original expected `ConnectFailed`.
+Neither failure is classified as intermittent noise.
+
+Apple's public [XNU accept implementation](https://github.com/apple-oss-distributions/xnu/blob/xnu-11417.140.69/bsd/kern/uipc_syscalls.c#L551-L635)
+removes the connection from the queue before `falloc`.
+Allocation failure calls `soclose` instead of queue restoration.
+SPEC §1.2 requires timer-restored admission, not survival of that discarded client.
+The quota fixture preserves exact pause and generation assertions before a fresh recovery connection.
+A bounded receive on the original client requires EOF or `ECONNRESET` and records the actual result.
+The accepted descriptor flags and framed response remain required.
+
+The [TCP input path](https://github.com/apple-oss-distributions/xnu/blob/xnu-11417.140.69/bsd/netinet/tcp_input.c#L2465-L2469)
+drops packets for `TCPS_CLOSED` without a reset.
+TCP attachment starts in that state, and bind does not enter `LISTEN`.
+The reserved, non-listening endpoint therefore tests the helper's exact deadline result, not refusal or `SO_ERROR`.
+This is not a general contract for all unavailable endpoints.
+
+A separate fixture establishes TCP, accepts the connection, and closes the accepted peer with enabled zero linger.
+[XNU `tcp_disconnect`](https://github.com/apple-oss-distributions/xnu/blob/xnu-11417.140.69/bsd/netinet/tcp_usrreq.c#L3150-L3164)
+uses `tcp_drop` for this case.
+The fixture waits for read readiness without a receive, then requires rejection through the shared `finishConnect` check.
+[`SO_ERROR`](https://github.com/apple-oss-distributions/xnu/blob/xnu-11417.140.69/bsd/kern/uipc_socket.c#L6051-L6054)
+returns and clears the pending error.
+This tests a real asynchronous socket error, not necessarily a failed `EINPROGRESS` handshake.
+The seventeenth finite control ignores positive socket errors and requires the named assertion failure.
+The original 16 controls and their strict gate remain unchanged.
+
+The cited public tag is `xnu-11417.140.69`.
+The native runner reports `xnu-11417.140.69.711.44~1/RELEASE_ARM64_VMAPPLE`.
+Source inspection explains the fixture corrections but does not establish exact patch-level equivalence.
+The native acceptance record below includes these corrections and the additional frame-reader control.
+No production runtime change accompanies these fixture corrections.
+
+### Native local-runtime acceptance (#1, #2)
+
+Matt approved the Darwin local-runtime slice and its merge after native CI and physical MacBook validation.
+The unexplained Linux restart failure remains a release blocker.
+The approval permits work on upstream transport without further diagnostic calibration.
+It does not grant deployment or full SPEC acceptance.
+
+[ARM CI run 33989708897](https://github.com/mattrobenolt/z53/actions/runs/33989708897)
+tested commit `953447d0fa00120e76d255815fc66f1c9d7fbf22`.
+The physical MacBook tested the same commit.
+Both hosts ran the full suite before and after the finite controls.
+Each full run passed 133 tests, with 23 Darwin cases and four approved Linux-only skips.
+All 18 controls failed at their designated assertions without a crash or deadline.
+Every restoration matched all 82 published source hashes.
+
+The physical MacBook archive has SHA-256 `251e0d4e3276d11422698321bfedec13efdbb935c475741847249b242c2b3edc`.
+Its full runs completed in 102.228 and 97.901 seconds under the unchanged 180-second deadline.
+The audit reconciled individual test reports with suite totals and inspected each control's first project frame.
+Native builds and the harness cleanup checks also passed.
+
+An earlier MacBook run failed while the client awaited two TCP responses.
+The test reader consumed extra frames and discarded bytes after the first frame.
+The corrected reader receives only one prefix and declared payload.
+A deterministic regression queues two complete frames before its first read.
+The eighteenth control restores the old reader and fails at the remaining-frame assertion.
+The original log lacks byte counts, so its exact failure mechanism remains unconfirmed.
+
+Injected EAGAIN does not prove actual kernel backpressure.
+The reset fixture proves nonzero `SO_ERROR`, not a failed handshake.
+The helper benchmark and fuzz-gate smoke tests do not establish resolver performance or decoder fuzz coverage.
+The earlier Linux failure and inconclusive D1 result remain preserved.
+No additional Linux diagnostic follows from this acceptance.

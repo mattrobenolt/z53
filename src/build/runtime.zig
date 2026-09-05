@@ -12,7 +12,7 @@ pub fn add(
         .target = executable.root_module.resolved_target.?,
         .optimize = executable.root_module.optimize,
     });
-    const filter = b.option([]const u8, "runtime-filter", "Select a Linux runtime regression");
+    const filter = b.option([]const u8, "runtime-filter", "Select a runtime regression");
     const options: std.Build.TestOptions = .{
         .filters = if (filter) |value| &.{value} else &.{},
         .root_module = b.createModule(.{
@@ -29,7 +29,7 @@ pub fn add(
     run.has_side_effects = true;
     run.setEnvironmentVariable("ZTEST_VERBOSE", "1");
     run.setEnvironmentVariable("ZTEST_PLAIN", "1");
-    const step = b.step("test-runtime", "Run native Linux transport and lifecycle tests");
+    const step = b.step("test-runtime", "Run native transport and lifecycle tests");
     step.dependOn(&run.step);
     all.dependOn(step);
 }

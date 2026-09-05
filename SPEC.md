@@ -1,12 +1,13 @@
 # z53 — Feature Specification
 
-**Stage: Linux local client service.**
-Linux answers local queries over UDP and TCP.
+**Stage: local client service.**
+Linux and macOS select io_uring and kqueue respectively for local UDP and TCP.
+Native ARM macOS builds, runtime tests, and assertion controls pass on CI and a physical MacBook.
+The unresolved Linux restart failure remains a release blocker (#1).
 These features remain incomplete:
 
 - Forward transport
 - Listener hostname bootstrap
-- macOS runtime
 - Query logs
 
 This document is the contract for the first implementation.
@@ -81,6 +82,33 @@ An enabled hosts source loads before listeners start.
 An initial load failure aborts startup even when `reload_s` is zero.
 A monotonic io_uring timer schedules subsequent checks at whole-second intervals.
 Periodic failures preserve the active table and mtime for the next configured check.
+
+### 1.2 macOS client runtime bounds
+
+The macOS event thread owns one kqueue with 177 one-shot operation slots:
+16 UDP reads, 16 TCP accepts, one timer, 128 TCP clients, and 16 UDP writes.
+It receives one readiness event per step, so no userspace event batch survives descriptor reuse.
+Each rearm advances a non-wrapping completion generation.
+
+Sockets and accepted clients are nonblocking and close-on-exec.
+TCP sockets suppress SIGPIPE and enable address reuse for immediate restarts, not port reuse.
+There are at most 32 listener descriptors and 128 accepted client descriptors.
+TCP admission pauses when the client pool fills and resumes after close.
+Descriptor/resource quota failures retry admission on the next timer, without a hot loop.
+
+One 65535-byte scratch buffer receives datagrams synchronously.
+64 response slots retain output, source address, and listener identity across EAGAIN.
+Each UDP listener has one write filter shared by its pending responses.
+Response-slot exhaustion drops a datagram without an overflow queue.
+The 128 TCP clients use the same bounded framing buffers as Linux.
+No steady-state socket operation allocates or blocks.
+
+A relative one-second kqueue timer schedules the same hosts reload policy as Linux.
+EV_DELETE synchronously cancels readiness; the kernel never borrows query buffers.
+Closing kqueue and sockets releases all interests and descriptors on teardown or startup failure.
+Runtime.stop is an explicit API; daemon signals still rely on process teardown.
+PR #2 records native local-runtime tests and assertion-specific mutation evidence.
+Upstream transport and full deployment acceptance remain incomplete.
 
 ## 2. Non-goals
 
@@ -428,7 +456,7 @@ File I/O and workspace failures without a source token use position 1:1.
 Only the first error is reported, with a bounded 512-byte reason.
 
 Process reload remains unsupported.
-The Linux runtime serves local responses on literal listener addresses.
+The runtime serves local responses on literal listener addresses.
 Listener hostnames remain valid configuration, but startup returns `UnresolvedListener` until bootstrap exists.
 An unresolved forward stage returns uncached SERVFAIL, without stale fallback.
 

@@ -1,0 +1,52 @@
+name: Darwin runtime candidate
+
+# #1: branch publication supplies native evidence, not full SPEC acceptance.
+on:
+  push:
+    branches: [test/darwin-runtime]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native:
+    if: github.ref == 'refs/heads/test/darwin-runtime'
+    runs-on: macos-15
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - name: Record exact native checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p darwin-evidence
+          { uname -a; uname -m; sw_vers; git rev-parse HEAD; } > darwin-evidence/host.txt
+          test "$(uname -m)" = arm64
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          git ls-files -z | xargs -0 shasum -a 256 > darwin-evidence/checkout.sha256
+      - uses: cachix/install-nix-action@1ca7d21a94afc7c957383a2d217460d980de4934 # v31.10.1
+        with:
+          enable_kvm: false
+          set_as_trusted_user: false
+          # Clear the action's default token configuration. No private dependency needs it.
+          extra_nix_config: |
+            access-tokens =
+            accept-flake-config = false
+      - name: Native build tests and finite controls
+        shell: bash
+        run: |
+          set -euo pipefail
+          trap 'printf "%s\n" "$?" > darwin-evidence/devshell.status' EXIT
+          nix develop --no-write-lock-file path:. -c python3 scripts/darwin-ci.py
+      - name: Compact evidence only
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: darwin-runtime-${{ github.sha }}
+          path: darwin-evidence/
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 9

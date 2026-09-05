@@ -1,11 +1,16 @@
 const std = @import("std");
 const runtime = @import("runtime");
 const testing = std.testing;
+const builtin = @import("builtin");
 const linux = std.os.linux;
 const wire = runtime.pipeline.wire;
 
 test {
-    _ = @import("runtime_transport.zig");
+    if (builtin.os.tag == .linux) {
+        _ = @import("runtime_transport.zig");
+    } else {
+        _ = @import("runtime_darwin.zig");
+    }
 }
 
 // SPEC §1.1: fixed runtime storage excludes separately bounded zone cache and hosts tables.
@@ -13,7 +18,10 @@ test "runtime fixed storage budget" {
     try testing.expect(@sizeOf(runtime.Runtime) <= 32 * 1024 * 1024);
     try testing.expectEqual(128, runtime.tcp.clients_max);
     try testing.expectEqual(64, runtime.proctor.buffers_max);
-    try testing.expectEqual(225, runtime.proctor.operations_max);
+    try testing.expectEqual(
+        if (builtin.os.tag == .linux) 225 else 177,
+        runtime.proctor.operations_max,
+    );
 }
 
 // SPEC §1: cancellation and target completion jointly release ownership, in either order.
@@ -61,6 +69,7 @@ test "TCP partial framing and repeated responses" {
 
 // SPEC §1: mandatory ring setup, provided buffers, and cancellation execute on Linux.
 test "native ring setup registered files and cancellation" {
+    if (builtin.os.tag != .linux) return error.SkipZigTest;
     const proctor = try testing.allocator.create(runtime.proctor.Proctor);
     defer testing.allocator.destroy(proctor);
     try proctor.init();
@@ -82,6 +91,7 @@ test "native ring setup registered files and cancellation" {
 
 // SPEC §1: teardown also handles startup before the file table was registered.
 test "native proctor teardown without registered files" {
+    if (builtin.os.tag != .linux) return error.SkipZigTest;
     const proctor = try testing.allocator.create(runtime.proctor.Proctor);
     defer testing.allocator.destroy(proctor);
     try proctor.init();
@@ -90,6 +100,7 @@ test "native proctor teardown without registered files" {
 
 // SPEC §1: actual io_uring_setup failure is a startup error, with no probe or fallback.
 test "native setup failure under descriptor quota" {
+    if (builtin.os.tag != .linux) return error.SkipZigTest;
     const proctor = try testing.allocator.create(runtime.proctor.Proctor);
     defer testing.allocator.destroy(proctor);
     var previous: linux.rlimit = undefined;
@@ -130,6 +141,7 @@ test "initial hosts failure and startup allocation rollback" {
 
 // SPEC §3.9: truncated recvmsg payloads never become partial DNS requests.
 test "UDP recvmsg metadata bounds" {
+    if (builtin.os.tag != .linux) return error.SkipZigTest;
     var bytes: [runtime.proctor.buffer_bytes]u8 = @splat(0);
     var header: linux.io_uring_recvmsg_out = .{
         .namelen = 16,
@@ -233,4 +245,43 @@ test "local pipeline and explicit unresolved forwarding" {
     try testing.expectEqual(null, pipeline.zones[0].cache.denial.entries[0].bytes);
     try testing.expectEqual(allocations, allocator.alloc_index);
     try testing.expect(!allocator.has_induced_failure);
+}
+
+// SPEC §1: one-shot readiness consumption or synchronous deletion permits reuse, not replay.
+test "readiness ownership releases exactly once and rejects stale reuse" {
+    var owner: runtime.proctor.Ownership = .{};
+    const ready = try owner.arm(7);
+    try owner.complete(ready, .terminal);
+    try testing.expectEqual(.idle, owner.state);
+    try testing.expectError(error.InvalidCompletion, owner.complete(ready, .terminal));
+    const replacement = try owner.arm(7);
+    try testing.expectError(error.InvalidCompletion, owner.complete(ready, .terminal));
+    try testing.expectEqual(.active, owner.state);
+    // The kqueue backend completes terminal ownership only after EV_DELETE succeeds.
+    try owner.complete(replacement, .terminal);
+    try testing.expectEqual(.idle, owner.state);
+}
+
+// RFC 1035 §4.2.2; SPEC §3.9: both backends reject completion overruns without wrapping.
+test "TCP framing partial overruns and maximum message length" {
+    const client = try testing.allocator.create(runtime.tcp.Client);
+    defer testing.allocator.destroy(client);
+    client.reset();
+    client.input[0..2].* = .{ 0, 12 };
+    try testing.expectEqual(null, try client.received(1));
+    try testing.expectError(error.InvalidFrame, client.received(2));
+    try testing.expectEqual(1, client.offset);
+    client.respond(12);
+    try client.sent(1);
+    try testing.expectError(error.InvalidFrame, client.sent(14));
+    try testing.expectEqual(1, client.offset);
+    client.reset();
+    client.input[0..2].* = .{ 255, 255 };
+    try testing.expectEqual(null, try client.received(2));
+    try testing.expectEqual(65537, client.length);
+    try testing.expectEqual(@as(usize, 65535), (try client.received(65535)).?.len);
+    client.respond(65535);
+    try testing.expectEqualSlices(u8, &.{ 255, 255 }, client.output[0..2]);
+    try client.sent(65537);
+    try testing.expectEqual(.prefix, client.phase);
 }
