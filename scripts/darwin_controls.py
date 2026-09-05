@@ -22,6 +22,33 @@ RETAINED = "Darwin native retained EAGAIN bytes destinations and shared filters"
 STALE = "Darwin native stale event identity and generation rejection"
 FLAGS = "Darwin native nonblocking close-on-exec and no SIGPIPE"
 QUOTA = "Darwin native accept quota timer recovery"
+FRAME_READER = """    fn frame(self: *Harness, descriptor: system.fd_t, output: []u8) ![]const u8 {
+        if (output.len < 2) return error.NoSpace;
+        var length: usize = 0;
+        var target: usize = 2;
+        for (0..64) |_| {
+            // #1: later frames must stay queued because this reader retains no trailing bytes.
+            const received = try self.receive(descriptor, output[length..target]);
+            if (received == 0) return error.UnexpectedEof;
+            length += received;
+            if (try wire.frame(output[0..length])) |value| return value.message;
+            if (length == 2) {
+                target = 2 + @as(usize, wire.integer(u16, output[0..2]));
+                if (target > output.len) return error.NoSpace;
+            }
+        }
+        return error.TestDeadline;
+    }"""
+FRAME_READER_OLD = """    fn frame(self: *Harness, descriptor: system.fd_t, output: []u8) ![]const u8 {
+        var length: usize = 0;
+        for (0..64) |_| {
+            length += try self.receive(descriptor, output[length..]);
+            if (try wire.frame(output[0..length])) |value| return value.message;
+        }
+        return error.TestDeadline;
+    }"""
+# Preserve assertion line numbers for the existing strict native gate.
+FRAME_READER_OLD += "\n" * (FRAME_READER.count("\n") - FRAME_READER_OLD.count("\n"))
 CONTROLS = [
     Control("r3-release", RUNTIME, ".AGAIN, .INTR => return,", ".AGAIN, .INTR => {},",
             RETAINED, "TestExpectedEqual", "try testing.expectEqual(index + 1, retainedCount(first.service));"),
@@ -92,6 +119,9 @@ CONTROLS = [
             "if (failure < 0) {",
             "Darwin native client completion rejects peer reset", "TestExpectedError",
             "try testing.expectError(error.ConnectFailed, finishConnect(descriptor));"),
+    Control("frame-reader", "tests/runtime_darwin.zig", FRAME_READER, FRAME_READER_OLD,
+            "Darwin native frame reader preserves a second queued frame", "TestExpectedEqual",
+            "try testing.expectEqual(.ready, remaining);"),
 ]
 
 

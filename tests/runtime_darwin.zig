@@ -79,10 +79,19 @@ const Harness = struct {
     }
 
     fn frame(self: *Harness, descriptor: system.fd_t, output: []u8) ![]const u8 {
+        if (output.len < 2) return error.NoSpace;
         var length: usize = 0;
+        var target: usize = 2;
         for (0..64) |_| {
-            length += try self.receive(descriptor, output[length..]);
+            // #1: later frames must stay queued because this reader retains no trailing bytes.
+            const received = try self.receive(descriptor, output[length..target]);
+            if (received == 0) return error.UnexpectedEof;
+            length += received;
             if (try wire.frame(output[0..length])) |value| return value.message;
+            if (length == 2) {
+                target = 2 + @as(usize, wire.integer(u16, output[0..2]));
+                if (target > output.len) return error.NoSpace;
+            }
         }
         return error.TestDeadline;
     }
@@ -239,6 +248,82 @@ fn queryName(output: []u8, text: []const u8, kind: u16) ![]const u8 {
     try encoder.init(output, &.{ .id = 345, .bits = 0x100 });
     try encoder.question(&name, kind, 1);
     return encoder.finish();
+}
+
+fn frameSocketPair() ![2]system.fd_t {
+    var descriptors: [2]system.fd_t = undefined;
+    const result = system.socketpair(system.AF.UNIX, system.SOCK.STREAM, 0, &descriptors);
+    try testing.expectEqual(0, result);
+    errdefer for (descriptors) |descriptor| {
+        _ = system.close(descriptor);
+    };
+    for (descriptors) |descriptor| try runtime.address.prepare(descriptor);
+    return descriptors;
+}
+
+// SPEC §3.9, RFC 1035 §4.2.2, #1: one receive must not discard a second queued DNS frame.
+test "Darwin native frame reader preserves a second queued frame" {
+    var harness: Harness = undefined;
+    try harness.init();
+    try harness.start();
+    defer harness.deinit();
+    const pair = try frameSocketPair();
+    defer for (pair) |descriptor| {
+        _ = system.close(descriptor);
+    };
+    var input: [512]u8 = undefined;
+    var output: [512]u8 = undefined;
+    const first = try query(input[2..]);
+    try wire.framePrefix(&input, first.len);
+    const next = first.len + 2;
+    const second = try queryName(input[next + 2 ..], "example.invalid.", 28);
+    try wire.framePrefix(input[next..], second.len);
+    // One completed send queues both frames before the reader can consume either frame.
+    try send(pair[1], input[0 .. next + second.len + 2]);
+    try testing.expectEqualSlices(u8, first, try harness.frame(pair[0], &output));
+    const remaining = try socketReady(pair[0], system.POLL.IN, 1);
+    // The old reader fails here, not at its receive deadline or an arbitrary recv error.
+    try testing.expectEqual(.ready, remaining);
+    try testing.expectEqualSlices(
+        u8,
+        second,
+        try harness.frame(pair[0], output[0 .. second.len + 2]),
+    );
+}
+
+// SPEC §3.9, RFC 1035 §4.2.2, #1: fixture bounds and incomplete frames return explicit errors.
+test "Darwin native frame reader bounds malformed lengths and partial EOF" {
+    var harness: Harness = undefined;
+    try harness.init();
+    try harness.start();
+    defer harness.deinit();
+    const Case = struct {
+        bytes: []const u8,
+        capacity: usize,
+        failure: error{ NoSpace, Truncated, UnexpectedEof },
+    };
+    const cases = [_]Case{
+        .{ .bytes = &.{}, .capacity = 0, .failure = error.NoSpace },
+        .{ .bytes = &.{}, .capacity = 1, .failure = error.NoSpace },
+        .{ .bytes = &.{ 0, 0 }, .capacity = 32, .failure = error.Truncated },
+        .{ .bytes = &.{ 0, 11 }, .capacity = 32, .failure = error.Truncated },
+        .{ .bytes = &.{ 255, 255 }, .capacity = 32, .failure = error.NoSpace },
+        .{ .bytes = &.{ 0, 12 }, .capacity = 13, .failure = error.NoSpace },
+        .{ .bytes = &.{}, .capacity = 32, .failure = error.UnexpectedEof },
+        .{ .bytes = &.{0}, .capacity = 32, .failure = error.UnexpectedEof },
+        .{ .bytes = &.{ 0, 12 }, .capacity = 32, .failure = error.UnexpectedEof },
+        .{ .bytes = &.{ 0, 12, 1, 2, 3 }, .capacity = 32, .failure = error.UnexpectedEof },
+    };
+    var output: [32]u8 = undefined;
+    for (cases) |case| {
+        const pair = try frameSocketPair();
+        defer for (pair) |descriptor| {
+            _ = system.close(descriptor);
+        };
+        if (case.bytes.len > 0) try send(pair[1], case.bytes);
+        try testing.expectEqual(0, system.shutdown(pair[1], system.SHUT.WR));
+        try testing.expectError(case.failure, harness.frame(pair[0], output[0..case.capacity]));
+    }
 }
 
 // SPEC §1 and §3.9: real kqueue UDP readiness and ACCEPT serve local loopback queries.
