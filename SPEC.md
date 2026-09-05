@@ -1,8 +1,9 @@
 # z53 — Feature Specification
 
-**Stage: local client service; macOS native validation pending.**
+**Stage: local client service.**
 Linux and macOS select io_uring and kqueue respectively for local UDP and TCP.
-The macOS implementation has semantic compilation coverage, not native execution evidence yet.
+Native ARM macOS builds, runtime tests, and assertion controls pass on CI and a physical MacBook.
+The unresolved Linux restart failure remains a release blocker (#1).
 These features remain incomplete:
 
 - Forward transport
@@ -106,7 +107,8 @@ A relative one-second kqueue timer schedules the same hosts reload policy as Lin
 EV_DELETE synchronously cancels readiness; the kernel never borrows query buffers.
 Closing kqueue and sockets releases all interests and descriptors on teardown or startup failure.
 Runtime.stop is an explicit API; daemon signals still rely on process teardown.
-Native Darwin execution and Darwin-specific mutation evidence remain acceptance obligations.
+PR #2 records native local-runtime tests and assertion-specific mutation evidence.
+Upstream transport and full deployment acceptance remain incomplete.
 
 ## 2. Non-goals
 

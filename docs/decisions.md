@@ -724,7 +724,8 @@ on aarch64 Linux. This is neither Darwin linking nor native execution.
 The native-CI regressions cover timer deletion, registration/setup failure, socket flags,
 pool exhaustion/recovery, repeated restart/rollback, UDP/TCP framing, malformed input,
 hosts reload, IPv6 half-close and original-listener reply identity.
-Darwin execution and Darwin-specific negative controls remain unproved.
+The initial candidate lacked native execution and Darwin-specific negative controls.
+The native acceptance record below supplies that later evidence.
 
 Two added platform-independent tests ran on Linux and rejected five temporary mutations:
 stale generation admission, duplicate terminal release, short frame admission,
@@ -738,7 +739,7 @@ baseline focused restarts, and exact baseline full suite with matching `-j2`.
 These passes do not explain or withdraw the observed failure.
 No endpoint/errno/cycle diagnosis was captured by the original tests.
 Socket/load snapshots and source hashes accompany the run artifact.
-This remains an unresolved Linux acceptance blocker, separate from missing Darwin evidence.
+This remains an unresolved Linux release blocker, separate from the later Darwin acceptance.
 No bind retries, sleeps, UDP address reuse or weakened regressions were added.
 There is no resolver performance claim.
 
@@ -781,7 +782,7 @@ A separate SIGUSR1 latch avoids the harness's intentional signal tests.
 Safe checkpoints propagate cancellation outside cleanup blocks.
 Ordinary teardown allows 0.5 seconds for TERM and five seconds for the final reap.
 Real Linux cancellation tests cover active fixtures, cleanup, and intentional signal-handler overrides.
-Native Darwin cancellation evidence remains pending.
+The native acceptance record below includes Darwin cancellation evidence.
 
 Controls run one at a time in an owned detached worktree at the exact published head.
 Each control requires one exact source match and the named test's intended assertion failure.
@@ -801,14 +802,15 @@ The finite controls cover these paths:
 - Buffered EOF delivery
 - Accept-quota pause and timer recovery
 - Nonzero `SO_ERROR` rejection after a controlled TCP reset
+- Preservation of a second queued frame by the test reader
 
 The installed ast-grep Zig parser rejected the relevant control patterns or produced ERROR nodes.
 The controls therefore use exact byte replacements with unique-match checks, not approximate syntax rewrites.
 Local semantic compilation can reject invalid mutations but cannot prove their native assertion failures.
 
-This branch prepares publication evidence, not Darwin implementation acceptance.
-Native linking, the full native suite, and all native controls remain pending the parent's reviewed branch publication.
-The unexplained Linux UDP `BindFailed` results remain blockers.
+Publication initially permitted native evidence collection without implementation acceptance.
+The acceptance record below supersedes that restriction for the local-runtime slice only.
+The unexplained Linux UDP `BindFailed` results remain release blockers.
 The passing instrumented D1 run supplied no failed-endpoint ownership capture and remains inconclusive.
 No Linux runtime behavior, dependency pin, deployment module, or example changes accompany this preparation.
 
@@ -847,5 +849,38 @@ The original 16 controls and their strict gate remain unchanged.
 The cited public tag is `xnu-11417.140.69`.
 The native runner reports `xnu-11417.140.69.711.44~1/RELEASE_ARM64_VMAPPLE`.
 Source inspection explains the fixture corrections but does not establish exact patch-level equivalence.
-The corrected native tests and all 17 native controls remain pending publication.
+The native acceptance record below includes these corrections and the additional frame-reader control.
 No production runtime change accompanies these fixture corrections.
+
+### Native local-runtime acceptance (#1, #2)
+
+Matt approved the Darwin local-runtime slice and its merge after native CI and physical MacBook validation.
+The unexplained Linux restart failure remains a release blocker.
+The approval permits work on upstream transport without further diagnostic calibration.
+It does not grant deployment or full SPEC acceptance.
+
+[ARM CI run 33989708897](https://github.com/mattrobenolt/z53/actions/runs/33989708897)
+tested commit `953447d0fa00120e76d255815fc66f1c9d7fbf22`.
+The physical MacBook tested the same commit.
+Both hosts ran the full suite before and after the finite controls.
+Each full run passed 133 tests, with 23 Darwin cases and four approved Linux-only skips.
+All 18 controls failed at their designated assertions without a crash or deadline.
+Every restoration matched all 82 published source hashes.
+
+The physical MacBook archive has SHA-256 `251e0d4e3276d11422698321bfedec13efdbb935c475741847249b242c2b3edc`.
+Its full runs completed in 102.228 and 97.901 seconds under the unchanged 180-second deadline.
+The audit reconciled individual test reports with suite totals and inspected each control's first project frame.
+Native builds and the harness cleanup checks also passed.
+
+An earlier MacBook run failed while the client awaited two TCP responses.
+The test reader consumed extra frames and discarded bytes after the first frame.
+The corrected reader receives only one prefix and declared payload.
+A deterministic regression queues two complete frames before its first read.
+The eighteenth control restores the old reader and fails at the remaining-frame assertion.
+The original log lacks byte counts, so its exact failure mechanism remains unconfirmed.
+
+Injected EAGAIN does not prove actual kernel backpressure.
+The reset fixture proves nonzero `SO_ERROR`, not a failed handshake.
+The helper benchmark and fuzz-gate smoke tests do not establish resolver performance or decoder fuzz coverage.
+The earlier Linux failure and inconclusive D1 result remain preserved.
+No additional Linux diagnostic follows from this acceptance.
