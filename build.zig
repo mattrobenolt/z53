@@ -2,6 +2,7 @@ const std = @import("std");
 const wire = @import("src/build/wire.zig");
 const benchmark = @import("src/build/benchmark.zig");
 const config = @import("src/build/config.zig");
+const resolver = @import("src/build/resolver.zig");
 
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
@@ -72,6 +73,7 @@ fn addTests(b: *std.Build, executable: *std.Build.Step.Compile, tls: *std.Build.
     startup.expectStdErrEqual("z53: DNS service is not implemented yet\n");
     unit_step.dependOn(&startup.step);
     config.add(b, executable, ztest, test_step, test_compile);
+    resolver.add(b, executable, ztest, test_step, test_compile);
     benchmark.addSmoke(b, &target, test_step);
     wire.add(
         b,

@@ -331,3 +331,99 @@ Failures exit 1 and report these fields to stderr:
 
 A valid file still produces the service-not-implemented message and exit status 1.
 A successful configuration load does not mean the binary serves DNS.
+
+## Synthetic answers, hosts, and rotation (#1)
+
+Class policy approval: [#1](https://github.com/mattrobenolt/z53/issues/1#issuecomment-5549680247).
+RFC 6761 intercepts every class and emits IN records. The question retains its class.
+NODATA matches every class. Hosts serves only IN and otherwise falls through.
+CH follows the ordinary pipeline.
+
+CoreDNS 1.14.6 local has no class guard and emits IN records.
+CoreDNS hosts also has no class guard.
+IN-only hosts is therefore an explicit approved deviation, not a parity claim.
+
+`src/resolver.zig` exposes two synchronous seams after zone routing:
+
+- `beforeCache`: RFC 6761 hit, or proceed to cache lookup.
+- `afterCache`: called only on a cache miss. The remaining stages run in this order:
+  1. NODATA
+  2. Hosts
+  3. Forward
+
+Synthetic encoders echo the question.
+They also echo the client's EDNS payload size and COOKIE.
+They apply these flag rules:
+
+- Set AA.
+- Clear RA/AD.
+- Preserve RD/CD.
+
+Source policies prohibit synthetic cache insertion and prohibit RFC 6761/NODATA rotation.
+These seams do not implement the cache or forward stage.
+The runtime must obey the documented order and end a hit immediately.
+
+Hosts storage uses two caller-owned disjoint entry arrays.
+Each array holds at most 4096 address/name pairs.
+The source buffer holds at most 1 MiB plus one overflow byte.
+No query operation allocates.
+
+Loads parse the inactive table and publish only on success.
+Publication is a synchronous event-thread swap, not a cross-thread atomic pointer.
+Readers cannot retain table views across replacements. Old data and mtime survive errors.
+The load API performs these steps:
+
+1. Open a regular file.
+2. Compare mtime.
+3. Read within the bound.
+4. Recheck these fields before publication:
+   - Size
+   - Mtime
+   - Ctime
+
+Detected mid-read changes are retryable errors.
+This is not a filesystem snapshot or a guarantee against writers who deliberately restore metadata.
+Real-file tests use isolated temporary directories and deterministic mtime changes.
+Io fault injection tests cover a torn read and read failure. They do not modify std.
+
+Entries retain these fields:
+
+- Canonical name
+- Reverse name
+- Address bytes
+
+Aliases get PTRs. Identical pairs collapse. Malformed lines are skipped as a whole.
+Lookup and load deduplication use bounded linear scans. There is no performance claim.
+
+Rotation partitions only answer-record indices into these groups, in order:
+
+1. CNAME
+2. Other records
+3. A/AAAA
+4. MX
+
+Only the last two groups shuffle. The caller supplies the random source.
+Authority and additional records retain order. Extended EDNS error codes also inhibit rotation.
+The wire rewriter relocates compressed names and retains opaque bytes.
+Raw record byte spans are never shuffled.
+
+Forward responses gain RA and retain AA. Cache responses retain stored flags.
+The runtime must apply `Source.forward.responseBits` before cache insertion, so cached forwarded data already carries RA.
+Final delivery uses the same normalization. Each cache delivery shuffles afresh.
+The input header is restored even on rewrite failure.
+
+Full-size hosts encoding failure is `RewriteTooLarge`, not truncation.
+Smaller caller buffers use `NoSpace`.
+
+Later runtime work still owns these responsibilities:
+
+- Startup table allocation and initial file-load error policy
+- Configured periodic checks (default five seconds, zero disabled)
+- Listener/transport I/O
+- Cache integration
+- Final client UDP limits and COOKIE policy on forwarded/cache answers
+- Random seeds
+- Logs
+
+No event loop or service endpoint is introduced in this slice.
+Existing wire fuzz targets remain unchanged and continue to exercise safe record movement and malformed packets.

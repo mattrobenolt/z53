@@ -115,6 +115,8 @@ Answers:
 - `1.0.0.127.in-addr.arpa.` type PTR returns `localhost.`
 - Every other covered name returns an empty NOERROR.
 - These answers set AA and clear RA.
+- Coverage applies to every query class. Synthetic answer records use class IN.
+  The echoed question retains the original class.
 - No covered query reaches the cache, the hosts file, or any upstream.
 
 The legacy `localhost.<domain>` prefix form is out. RFC 6761 names only.
@@ -133,7 +135,14 @@ The legacy `localhost.<domain>` prefix form is out. RFC 6761 names only.
 ### 3.5 hosts (per zone)
 
 - Source: `/etc/hosts` by default. A zone can name another file.
-- Serve A, AAAA, and PTR. Synthesize PTR records from the reverse entries.
+- Serve these record types for IN queries only:
+  - A
+  - AAAA
+  - PTR
+
+  Non-IN queries fall through.
+  Synthesize PTR records for every hostname and alias associated with an address.
+  The IN-only restriction is a deliberate deviation from CoreDNS, see 7.2.
 - TTL: 30 seconds default. Configurable per zone.
 - A query with no matching record falls through to forward. A name that
   exists under a different record type also falls through. There is no
@@ -142,6 +151,27 @@ The legacy `localhost.<domain>` prefix form is out. RFC 6761 names only.
   interval is configurable. Zero disables the check. Swap the table
   atomically. Skip unparsable lines.
 - Answers set AA and clear RA. Answers are not cached. Deviation, see 7.2.
+- Load only regular files, at most 1 MiB per source.
+  Each table holds at most 4096 unique address/name pairs. Aliases count toward this bound.
+  The caller pre-sizes two disjoint table buffers for replacement.
+  Duplicate pairs collapse. One name at multiple addresses retains every address.
+- Skip an entire line if an address or hostname is invalid.
+  Hostnames obey DNS label bounds and accept these ASCII characters:
+  - Letters
+  - Digits
+  - Hyphens
+  - Underscores
+  - Label separators
+
+  Scoped IPv6 addresses cannot be represented in AAAA and are skipped.
+- These failures leave the active table and its mtime unchanged, so the next check can retry:
+  - Failed read
+  - Oversized source
+  - Exhausted table
+  - Detected mid-read change
+
+  A successful empty file clears the table. Checks compare mtime.
+  Edits that deliberately retain the same mtime are not detected.
 
 ### 3.6 Forwarding (per zone)
 
@@ -228,7 +258,8 @@ Connections:
   the client closes it.
 - Responses echo the client EDNS payload size and COOKIE when present.
 - Opcode other than QUERY: answer NOTIMP. This is a spec choice.
-- CH class queries forward like any other query.
+- CH class queries follow the ordinary pipeline. RFC 6761 and NODATA can
+  answer them before the forward stage. Hosts falls through for non-IN classes.
 - Malformed input: answer FORMERR when the header parses, else drop. Input
   must never crash the process.
 - The codec must decode compressed names. Responses can compress names.
@@ -470,6 +501,7 @@ The numbers below come from the CoreDNS 1.14.6 source tree, not from memory.
 |---|---|
 | NODATA and hosts answers bypass the cache | Regeneration is free. The cache adds nothing. |
 | hosts always falls through | The NXDOMAIN mode is unused in both Corefiles. |
+| hosts serves IN queries only | DNS address data is IN. Non-IN hosts queries fall through. CoreDNS hosts has no class guard. |
 | Sequential policy only | Both Corefiles use one upstream or sequential. |
 | NOTIMP for non-QUERY opcodes | RFC-conservative. Unused by real clients here. |
 | serve_stale added, default off | Requested feature. RFC 8767. |
