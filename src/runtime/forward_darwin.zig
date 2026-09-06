@@ -77,7 +77,8 @@ pub const Driver = struct {
         const operation = &self.operations[index];
         const session = &service.forward.sessions[index];
         operation.address.fromIp(&service.forward.endpoints[session.endpoint]);
-        const descriptor = system.socket(operation.address.storage.family, system.SOCK.STREAM, 0);
+        const kind: u32 = if (session.transport == .udp) system.SOCK.DGRAM else system.SOCK.STREAM;
+        const descriptor = system.socket(operation.address.storage.family, kind, 0);
         if (descriptor < 0) return self.localFailure(service, index);
         operation.descriptor = descriptor;
         runtime.address.prepare(descriptor) catch {
@@ -125,7 +126,7 @@ pub const Driver = struct {
         if (try runtime.nowNs() >= session.deadline_ns) return self.close(service, index, .retry);
         const filter: i16 = switch (session.state) {
             .connecting, .writing => system.EVFILT.WRITE,
-            .read_prefix, .read_body => system.EVFILT.READ,
+            .read_prefix, .read_body, .read_datagram => system.EVFILT.READ,
             else => unreachable,
         };
         try service.proctor.arm(
@@ -157,7 +158,7 @@ pub const Driver = struct {
                 session.length - session.offset,
                 0,
             ),
-            .read_prefix, .read_body => system.recv(
+            .read_prefix, .read_body, .read_datagram => system.recv(
                 descriptor,
                 session.input[session.offset..].ptr,
                 session.length - session.offset,
@@ -187,7 +188,7 @@ pub const Driver = struct {
                     service.forward.accepted(index, now_ns);
                     return;
                 }
-                session.prefix();
+                session.startRead();
             },
         }
         try self.arm(service, index);

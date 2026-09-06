@@ -1,18 +1,16 @@
 # z53 — Feature Specification
 
-**Stage: literal forced-TCP forwarding candidate.**
+**Stage: UDP and TCP forwarding POC (#1).**
 Linux and macOS select io_uring and kqueue respectively for UDP and TCP clients.
-The candidate forwards zones whose every upstream uses a literal address, forced TCP, and no TLS.
-Native Linux IPv4 loopback tests exercise the candidate. Native macOS execution remains pending.
-The Linux test host disables IPv6, so native Linux IPv6 upstream coverage remains unproved.
-The accepted local macOS runtime passed native CI and physical MacBook controls before this candidate.
-The unresolved historical Linux restart failure remains a release blocker (#1).
-The final candidate suite also fails two Linux UDP binds during restart tests.
-This fresh failure remains unclassified. Its endpoint, errno, and cycle are unavailable.
-The candidate does not pass implementation acceptance.
+Plain literal upstreams support UDP and TCP, including forced TCP.
+A later unsupported TLS or hostname member does not disable an earlier supported upstream.
+Selection of that unsupported member returns uncached local SERVFAIL without a silent skip.
+Native Linux tests and manual queries exercise UDP replies, TCP replies, and caching.
+Native macOS forwarding feedback and Linux IPv6 execution remain pending.
+The earlier Linux restart bind failures remain unexplained. Full SPEC acceptance remains incomplete.
 These features remain incomplete:
 
-- Ordinary UDP and DoT upstream transport
+- DoT upstream transport
 - Upstream health exclusion and probes
 - Listener and upstream hostname bootstrap
 - Query and upstream transition logs
@@ -154,7 +152,7 @@ Full upstream transport and deployment acceptance remain incomplete.
 
 Both backends retain these fixed limits:
 
-- 32 foreground transactions and 32 reusable TCP sessions
+- 32 foreground transactions and 32 reusable UDP/TCP sessions
 - No overflow queue
 - 1024 endpoint entries, at most 64 bytes each
 - One original query of at most 65535 bytes per transaction
@@ -184,7 +182,7 @@ Only idle sessions permit eviction. Each session carries at most one exchange.
 Pool and local socket resource exhaustion return uncached local SERVFAIL without stale fallback or failover.
 Supported transport exhaustion invokes the existing stale or five-second SERVFAIL policy.
 An admitted DNS response, including SERVFAIL, ends the configured sequence.
-Unsupported zones never skip selected members or invoke transport exhaustion policy.
+An unsupported selected member returns uncached local SERVFAIL, without stale fallback or transport exhaustion policy.
 
 Connect and request transmission share one absolute configured timeout.
 Complete transmission starts a separate response deadline across prefix, body, and rejected frames.
@@ -324,9 +322,9 @@ The legacy `localhost.<domain>` prefix form is out. RFC 6761 names only.
 Upstream list, in configured order. Each upstream has an address, an optional
 TLS block, and an optional `force_tcp` flag.
 
-- Plain upstreams speak UDP first. `force_tcp` forces TCP for a plain
-  upstream. TLS upstreams always speak TLS over TCP (DoT). Default TLS port:
-  853.
+- Plain upstreams use UDP for UDP clients and TCP for TCP clients.
+  `force_tcp` forces TCP regardless of client transport.
+  TLS upstreams always speak TLS over TCP (DoT). Default TLS port: 853.
 - A TLS upstream requires `server_name`. Config load fails without it.
 - Policy: sequential. Try upstreams in order. This is the only policy. A
   zone with one upstream needs nothing else.
@@ -548,10 +546,11 @@ Only the first error is reported, with a bounded 512-byte reason.
 Process reload remains unsupported.
 The runtime serves local responses on literal listener addresses.
 Listener hostnames remain valid configuration, but startup returns `UnresolvedListener` until bootstrap exists.
-The forwarding candidate supports a zone only when every upstream has a literal address, `force_tcp = true`, and no TLS block.
-An unsupported zone miss returns uncached SERVFAIL, without stale fallback or health effects.
-Health exclusion and probes remain incomplete, even for supported zones.
-The candidate does not change the final transport, health, or logging requirements.
+The POC supports plain literal upstreams over UDP or TCP.
+It tries configured members in order. A later unsupported member does not prevent an earlier supported member from a successful exchange.
+Selection of an unsupported TLS or hostname member returns uncached SERVFAIL, without stale fallback, health effects, or further attempts.
+Health exclusion and probes remain incomplete, even for supported upstreams.
+The POC does not change the final transport, health, or logging requirements.
 
 ## 6. Reference configs
 

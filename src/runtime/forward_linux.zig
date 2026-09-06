@@ -56,9 +56,10 @@ pub const Driver = struct {
         const session = &service.forward.sessions[index];
         const operation = &self.operations[index];
         operation.address.fromIp(&service.forward.endpoints[session.endpoint]);
+        const kind: u32 = if (session.transport == .udp) linux.SOCK.DGRAM else linux.SOCK.STREAM;
         const result = linux.socket(
             operation.address.storage.family,
-            linux.SOCK.STREAM | linux.SOCK.CLOEXEC | linux.SOCK.NONBLOCK,
+            kind | linux.SOCK.CLOEXEC | linux.SOCK.NONBLOCK,
             0,
         );
         if (linux.errno(result) != .SUCCESS) {
@@ -115,7 +116,7 @@ pub const Driver = struct {
                 session.output[session.offset..session.length],
                 linux.MSG.NOSIGNAL,
             ),
-            .read_prefix, .read_body => service.proctor.ring.recv(
+            .read_prefix, .read_body, .read_datagram => service.proctor.ring.recv(
                 token,
                 descriptor,
                 .{ .buffer = session.input[session.offset..session.length] },
@@ -209,7 +210,7 @@ pub const Driver = struct {
                 if (service.forward.sent(index, count, now_ns) == .failed)
                     return self.close(service, index, .retry);
             },
-            .read_prefix, .read_body => switch (session.received(count)) {
+            .read_prefix, .read_body, .read_datagram => switch (session.received(count)) {
                 .failed => return self.close(service, index, .retry),
                 .progress => {},
                 .frame => {
@@ -222,7 +223,7 @@ pub const Driver = struct {
                         return;
                     }
                     // Rejected frames consume the original response budget, never a new one.
-                    session.prefix();
+                    session.startRead();
                 },
             },
             else => return error.InvalidCompletion,

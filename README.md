@@ -1,23 +1,39 @@
 # z53
 
-A DNS caching forwarder in Zig. io_uring on Linux, kqueue on macOS, DoT
-through [ztls](https://github.com/mattrobenolt/ztls), configuration in ZON.
-A small, personal replacement for CoreDNS: hosts overrides, per-zone NODATA
-rules, health-checked sequential failover, caching with RFC 8767
-serve-stale, answer rotation.
+A DNS caching forwarder in Zig. io_uring on Linux, kqueue on macOS,
+configuration in ZON. A small, personal replacement for CoreDNS under development.
 
-**Status: literal forced-TCP forwarding candidate (#1).** The contract is [`SPEC.md`](SPEC.md).
-The binary serves local UDP and TCP clients.
-A zone forwards only when every upstream uses a literal address, forced TCP, and no TLS.
-Health, ordinary UDP upstreams, DoT, hostname bootstrap, and logs remain incomplete.
-Native macOS candidate tests remain pending. The historical Linux restart failure still blocks release.
-A fresh unclassified Linux restart failure also blocks this candidate's acceptance.
+**Status: UDP and TCP forwarding POC (#1).** The contract is [`SPEC.md`](SPEC.md).
+Plain literal upstreams support UDP, TCP, sequential transport failover, and caching.
+Hosts, synthetic answers, NODATA rules, and answer rotation also work.
+DoT, health checks, hostname bootstrap, and query logs remain incomplete.
+An unused DoT fallback does not disable a plain primary. If selection reaches DoT, the POC returns uncached SERVFAIL.
+Earlier Linux restart bind failures remain unexplained. Native macOS forwarding feedback remains pending.
 
 ## Targets
 
 aarch64-linux · x86_64-linux · aarch64-darwin. Zig 0.16. Zero Zig
 dependencies beyond ztls; one libcrypto backend (OpenSSL) linked through
 pkg-config.
+
+## Try the POC
+
+`examples/poc.zon` uses Cloudflare over plain UDP, with TCP for TCP clients.
+It listens on `127.0.0.1:5354` and leaves the system resolver unchanged.
+
+Enter `nix develop`.
+Start the resolver:
+
+```sh
+zig build run -- -c examples/poc.zon
+```
+
+In another terminal, query the resolver:
+
+```sh
+dig @127.0.0.1 -p 5354 example.com A
+dig @127.0.0.1 -p 5354 example.net A +tcp
+```
 
 ## Development
 

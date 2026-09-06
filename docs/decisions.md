@@ -1106,3 +1106,26 @@ Observation-order controls move only the snapshot. Every real barrier and cleanu
 This one-pair proof does not establish native full-capacity or delayed-worker behavior.
 Error branches, synthetic-owner regressions, unread accepts, startup, native Darwin, and full gates remain separate proof slices.
 Earlier frame, entropy, driver-order, and failed-run evidence remains unchanged.
+
+## UDP forwarding POC (#1)
+
+The POC adds plain literal UDP upstreams through the existing session pool and event drivers.
+Connected datagram sockets retain kernel source filtering. Response admission still checks the ID and question.
+Each datagram contains one DNS message, without the TCP length prefix.
+Malformed datagrams do not restart the response deadline.
+
+TCP clients use TCP upstream sockets, even when `force_tcp` is false.
+Session reuse requires both the configured endpoint and the transport to match.
+A truncated UDP answer returns to the client without automatic TCP fallback or cache insertion.
+Its client TCP retry can then obtain the full answer.
+
+This stage replaces the earlier whole-zone support restriction.
+A later TLS or hostname member no longer disables an earlier supported member.
+Selection of an unsupported member returns uncached local SERVFAIL and stops the sequence.
+The POC never skips that member or counts its absence as transport exhaustion.
+DoT, health checks, bootstrap, and query logs remain incomplete.
+
+The Linux loopback tests cover replies, cache hits, rejected datagrams, TCP retries, and timeout dispositions.
+Manual queries through `examples/poc.zon` returned public DNS answers over UDP and TCP.
+The macOS test roots compile. Native macOS feedback remains separate.
+No change here explains the historical Linux restart bind failures.

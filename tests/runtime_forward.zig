@@ -600,12 +600,12 @@ test "forward native precise silent deadline and terminal cache" {
     try harness.stop();
 }
 
-// SPEC §5.1: an unsupported member prevents the entire zone from transport or stale treatment.
-test "forward native mixed unsupported zone stays uncached" {
+// SPEC §5.1: an unsupported first member cannot be skipped or treated as transport exhaustion.
+test "forward native unsupported first upstream stays uncached" {
     var harness: Harness = undefined;
     try harness.init();
     defer harness.deinit();
-    harness.upstreams[1].force_tcp = false;
+    harness.upstreams[0].tls = .{ .server_name = "dns.example" };
     harness.zones[0].upstreams = &harness.upstreams;
     harness.zones[0].cache = .{ .capacity = 1 };
     harness.zones[0].serve_stale_s = 300;
@@ -1142,7 +1142,7 @@ test "forward native longest zone selects configured endpoint" {
     var harness: Harness = undefined;
     try harness.init();
     defer harness.deinit();
-    harness.upstreams[0].force_tcp = false;
+    harness.upstreams[0].tls = .{ .server_name = "dns.example" };
     harness.settings.zones = &harness.zones;
     try harness.start();
     const client = try harness.client(system.SOCK.DGRAM);
@@ -1168,6 +1168,7 @@ test "forward bounded partial receive and transmit offsets" {
     const forward = try testing.allocator.create(runtime.forward.Forward);
     defer testing.allocator.destroy(forward);
     const session = &forward.sessions[0];
+    session.transport = .tcp;
     session.prefix();
     session.input[0..2].* = .{ 0, 11 };
     try testing.expectEqual(.failed, session.received(2));
@@ -2564,3 +2565,257 @@ const LinuxSubmittedTeardown = struct {
         try trace.check(fixture.before.runtime_address);
     }
 };
+
+const DatagramPeer = struct {
+    descriptor: system.fd_t,
+    source: runtime.address.Address = undefined,
+
+    fn init(self: *DatagramPeer, harness: *Harness) !void {
+        self.descriptor = try harness.upstream_address.bind(system.SOCK.DGRAM);
+    }
+
+    fn request(self: *DatagramPeer, harness: *Harness, output: []u8) ![]const u8 {
+        for (0..256) |_| {
+            self.source.length = @sizeOf(@TypeOf(self.source.storage));
+            const count = system.recvfrom(
+                self.descriptor,
+                output.ptr,
+                output.len,
+                0,
+                @ptrCast(&self.source.storage),
+                &self.source.length,
+            );
+            if (count >= 0) return output[0..@intCast(count)];
+            if (std.posix.errno(count) != .AGAIN) return error.ReceiveFailed;
+            try testing.expect(try harness.service.step());
+        }
+        return error.RequestNotReceived;
+    }
+
+    fn respond(self: *DatagramPeer, bytes: []const u8) !void {
+        const count = system.sendto(
+            self.descriptor,
+            bytes.ptr,
+            bytes.len,
+            0,
+            @ptrCast(&self.source.storage),
+            self.source.length,
+        );
+        try testing.expectEqual(@as(isize, @intCast(bytes.len)), count);
+    }
+};
+
+// SPEC §§3.6, 3.7: a UDP answer precedes unused TLS fallback. Subsequent queries hit the cache.
+test "forward UDP native answer with unused TLS fallback and cache hit" {
+    var harness: Harness = undefined;
+    try harness.init();
+    defer harness.deinit();
+    var peer: DatagramPeer = undefined;
+    try peer.init(&harness);
+    defer _ = system.close(peer.descriptor);
+    harness.upstreams[0].force_tcp = false;
+    harness.upstreams[1].tls = .{ .server_name = "dns.example" };
+    harness.zones[0].upstreams = &harness.upstreams;
+    harness.zones[0].cache = .{ .capacity = 1 };
+    try harness.start();
+    try testing.expectEqual(.supported, harness.service.forward.support[0]);
+    const client = try harness.client(system.SOCK.DGRAM);
+    defer _ = system.close(client);
+    var input: [512]u8 = undefined;
+    var upstream: [512]u8 = undefined;
+    var response: [512]u8 = undefined;
+    var output: [512]u8 = undefined;
+    try send(client, try query(&input, 42, "udp.example."));
+    const request = try peer.request(&harness, &upstream);
+    const framed = try answer(&response, request, 0, 1);
+    try peer.respond(framed[2..]);
+    const length = try harness.receive(client, &output);
+    const header = try wire.Header.decode(output[0..length]);
+    try testing.expectEqual(42, header.id);
+    try testing.expectEqual(0, header.bits & 15);
+    try testing.expectEqual(1, header.counts[1]);
+    try testing.expect(harness.service.pipeline.zones[0].cache.positive.entries[0].bytes != null);
+    try send(client, try query(&input, 43, "udp.example."));
+    const cached = try harness.receive(client, &output);
+    try testing.expectEqual(43, (try wire.Header.decode(output[0..cached])).id);
+    try testing.expectEqual(system.E.AGAIN, std.posix.errno(system.recv(
+        peer.descriptor,
+        &upstream,
+        upstream.len,
+        0,
+    )));
+    try harness.stop();
+}
+
+// SPEC §§3.6, 3.9: a connected UDP socket rejects other sources and ignores invalid replies.
+test "forward UDP native ignores empty malformed wrong ID and wrong source replies" {
+    var harness: Harness = undefined;
+    try harness.init();
+    defer harness.deinit();
+    var peer: DatagramPeer = undefined;
+    try peer.init(&harness);
+    defer _ = system.close(peer.descriptor);
+    harness.upstreams[0].force_tcp = false;
+    try harness.start();
+    const client = try harness.client(system.SOCK.DGRAM);
+    defer _ = system.close(client);
+    var input: [512]u8 = undefined;
+    var upstream: [512]u8 = undefined;
+    var response: [512]u8 = undefined;
+    var output: [512]u8 = undefined;
+    try send(client, try query(&input, 51, "ignore.example."));
+    const request = try peer.request(&harness, &upstream);
+    try peer.respond(&.{});
+    try peer.respond(&.{ 0, 1, 2 });
+    const wrong = try answer(&response, request, 0, 1);
+    response[2] ^= 1;
+    try peer.respond(wrong[2..]);
+    const stranger = system.socket(system.AF.INET, system.SOCK.DGRAM, 0);
+    try testing.expect(stranger >= 0);
+    defer _ = system.close(stranger);
+    const forged = try answer(&response, request, 0, 1);
+    try testing.expectEqual(@as(isize, @intCast(forged.len - 2)), system.sendto(
+        stranger,
+        forged[2..].ptr,
+        forged.len - 2,
+        0,
+        @ptrCast(&peer.source.storage),
+        peer.source.length,
+    ));
+    const valid = try answer(&response, request, 0, 2);
+    try peer.respond(valid[2..]);
+    const length = try harness.receive(client, &output);
+    const header = try wire.Header.decode(output[0..length]);
+    try testing.expectEqual(51, header.id);
+    try testing.expectEqual(2, header.counts[1]);
+    try harness.stop();
+}
+
+// SPEC §§3.6, 3.9: TC returns to the client. Its TCP retry uses TCP, not the idle UDP socket.
+test "forward UDP native truncation and client TCP retry" {
+    var harness: Harness = undefined;
+    try harness.init();
+    defer harness.deinit();
+    var peer: DatagramPeer = undefined;
+    try peer.init(&harness);
+    defer _ = system.close(peer.descriptor);
+    harness.upstreams[0].force_tcp = false;
+    harness.zones[0].cache = .{ .capacity = 1 };
+    try harness.start();
+    const client = try harness.client(system.SOCK.DGRAM);
+    defer _ = system.close(client);
+    var input: [512]u8 = undefined;
+    var upstream: [512]u8 = undefined;
+    var response: [512]u8 = undefined;
+    var output: [512]u8 = undefined;
+    const bytes = try query(input[2..], 52, "truncated.example.");
+    try send(client, bytes);
+    const request = try peer.request(&harness, &upstream);
+    const truncated = try answer(&response, request, 0, 1);
+    response[4] |= 2;
+    try peer.respond(truncated[2..]);
+    const length = try harness.receive(client, &output);
+    try testing.expect((try wire.Header.decode(output[0..length])).has(.truncated));
+    try emptyCache(&harness);
+    const stream = try harness.client(system.SOCK.STREAM);
+    defer _ = system.close(stream);
+    try wire.framePrefix(&input, bytes.len);
+    try send(stream, input[0 .. bytes.len + 2]);
+    const retry = try harness.request(&upstream);
+    try testing.expectEqual(.tcp, harness.service.forward.sessions[retry.session].transport);
+    try send(harness.peer.?, try answer(&response, retry.bytes, 0, 2));
+    const full = try harness.frame(stream, &output);
+    const header = try wire.Header.decode(full);
+    try testing.expect(!header.has(.truncated));
+    try testing.expectEqual(2, header.counts[1]);
+    try harness.stop();
+}
+
+// SPEC §3.6: a silent UDP primary times out before the next configured TCP member answers.
+test "forward UDP native timeout advances to TCP fallback" {
+    var harness: Harness = undefined;
+    try harness.init();
+    defer harness.deinit();
+    var peer: DatagramPeer = undefined;
+    try peer.init(&harness);
+    defer _ = system.close(peer.descriptor);
+    harness.upstreams[0].force_tcp = false;
+    harness.zones[0].upstreams = &harness.upstreams;
+    harness.zones[0].read_timeout_s = 0.05;
+    try harness.start();
+    const client = try harness.client(system.SOCK.DGRAM);
+    defer _ = system.close(client);
+    var input: [512]u8 = undefined;
+    var upstream: [512]u8 = undefined;
+    var response: [512]u8 = undefined;
+    var output: [512]u8 = undefined;
+    try send(client, try query(&input, 53, "timeout.example."));
+    _ = try peer.request(&harness, &upstream);
+    // The UDP send CQE must retire before the TCP-only helper waits for another write phase.
+    _ = try harness.phase(.read_datagram);
+    const retry = try harness.request(&upstream);
+    try testing.expectEqual(1, harness.service.forward.sessions[retry.session].endpoint);
+    try send(harness.peer.?, try answer(&response, retry.bytes, 0, 1));
+    const length = try harness.receive(client, &output);
+    try testing.expectEqual(1, (try wire.Header.decode(output[0..length])).counts[1]);
+    try harness.stop();
+}
+
+// SPEC §§3.6, 3.7, 5.1: unsupported TLS is local failure, not supported transport exhaustion.
+test "forward UDP native timeout distinguishes exhaustion from unsupported TLS" {
+    for ([_]enum { exhausted, tls }{ .exhausted, .tls }) |ending| {
+        var harness: Harness = undefined;
+        try harness.init();
+        defer harness.deinit();
+        var peer: DatagramPeer = undefined;
+        try peer.init(&harness);
+        defer _ = system.close(peer.descriptor);
+        harness.upstreams[0].force_tcp = false;
+        if (ending == .tls) {
+            harness.upstreams[1].tls = .{ .server_name = "dns.example" };
+            harness.zones[0].upstreams = &harness.upstreams;
+        }
+        harness.zones[0].read_timeout_s = 0.01;
+        harness.zones[0].cache = .{ .capacity = 1 };
+        try harness.start();
+        const client = try harness.client(system.SOCK.DGRAM);
+        defer _ = system.close(client);
+        var input: [512]u8 = undefined;
+        var upstream: [512]u8 = undefined;
+        var output: [512]u8 = undefined;
+        try send(client, try query(&input, 54, "failure.example."));
+        _ = try peer.request(&harness, &upstream);
+        const length = try harness.receive(client, &output);
+        try testing.expectEqual(2, (try wire.Header.decode(output[0..length])).bits & 15);
+        const denial = &harness.service.pipeline.zones[0].cache.denial.entries[0];
+        switch (ending) {
+            .exhausted => {
+                try testing.expect(denial.bytes != null);
+                try testing.expectEqual(5, denial.lifetime_s);
+            },
+            .tls => try testing.expectEqual(null, denial.bytes),
+        }
+        try harness.stop();
+    }
+}
+
+// SPEC §§3.6, 3.9: datagrams do not accumulate partial stream writes or DNS length prefixes.
+test "forward UDP datagram boundaries and partial send rejection" {
+    const forward = try testing.allocator.create(runtime.forward.Forward);
+    defer testing.allocator.destroy(forward);
+    const session = &forward.sessions[0];
+    session.transport = .udp;
+    session.startRead();
+    try testing.expectEqual(.frame, session.received(0));
+    try testing.expectEqual(2, session.length);
+    session.startRead();
+    try testing.expectEqual(.frame, session.received(12));
+    try testing.expectEqual(14, session.length);
+    session.startRead();
+    try testing.expectEqual(.failed, session.received(65536));
+    session.state = .writing;
+    session.offset = 2;
+    session.length = 14;
+    try testing.expectEqual(.failed, forward.sent(0, 1, 0));
+    try testing.expectEqual(2, session.offset);
+}

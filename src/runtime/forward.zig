@@ -1,13 +1,15 @@
-//! #1: bounded literal forced-TCP exchanges. Backends own socket and cancellation barriers.
+//! #1: bounded literal UDP and TCP exchanges. Backends own socket and cancellation barriers.
 const std = @import("std");
 const pipeline = @import("pipeline.zig");
 const config = pipeline.resolver.config;
 const wire = pipeline.wire;
+const udp = @import("udp.zig");
 const ownership = @import("ownership.zig");
 pub const transactions_max = 32;
 pub const sessions_max = 32;
 pub const endpoints_max = config.zones_max * config.upstreams_max;
 pub const storage_bytes_max = 8 * 1024 * 1024;
+pub const Transport = enum { udp, tcp };
 pub const Destination = struct {
     index: u16,
     generation: u31,
@@ -23,7 +25,17 @@ pub const Transaction = struct {
     input: [wire.message_bytes_max]u8,
 };
 pub const Session = struct {
-    state: enum { vacant, connecting, writing, read_prefix, read_body, idle, cancelling } = .vacant,
+    state: enum {
+        vacant,
+        connecting,
+        writing,
+        read_prefix,
+        read_body,
+        read_datagram,
+        idle,
+        cancelling,
+    } = .vacant,
+    transport: Transport = .tcp,
     transaction: ?u16 = null,
     endpoint: u16,
     generation: u31 = 0,
@@ -41,7 +53,20 @@ pub const Session = struct {
         self.length = 2;
     }
 
+    pub fn startRead(self: *Session) void {
+        if (self.transport == .tcp) return self.prefix();
+        self.state = .read_datagram;
+        self.offset = 2;
+        self.length = self.input.len;
+    }
+
     pub fn received(self: *Session, count: i32) enum { progress, frame, failed } {
+        if (self.state == .read_datagram) {
+            if (count < 0) return .failed;
+            if (@as(u32, @intCast(count)) > self.input.len - 2) return .failed;
+            self.length = @as(u32, @intCast(count)) + 2;
+            return .frame;
+        }
         switch (self.state) {
             .read_prefix, .read_body => {},
             else => unreachable,
@@ -64,6 +89,7 @@ pub const Forward = struct {
     config: *const config.Config,
     support: [config.zones_max]enum { unsupported, supported },
     endpoints: [endpoints_max]std.Io.net.IpAddress,
+    protocols: [endpoints_max]?Transport,
     transactions: [transactions_max]Transaction,
     sessions: [sessions_max]Session,
     random: std.Random.DefaultCsprng,
@@ -75,9 +101,11 @@ pub const Forward = struct {
     ) std.Io.RandomSecureError!void {
         self.config = settings;
         self.support = @splat(.unsupported);
+        self.protocols = @splat(null);
         for (&self.transactions) |*transaction| transaction.state = .free;
         for (&self.sessions) |*session| {
             session.state = .vacant;
+            session.transport = .tcp;
             session.transaction = null;
             session.generation = 0;
         }
@@ -87,13 +115,15 @@ pub const Forward = struct {
         self.random = .init(seed);
         for (settings.zones, 0..) |*zone, index| {
             for (zone.upstreams, 0..) |*upstream, cursor| {
-                if (upstream.tls != null) break;
-                if (!upstream.force_tcp) break;
+                if (upstream.tls != null) continue;
                 var endpoint: config.Endpoint = undefined;
                 upstream.endpoint(&endpoint);
-                self.endpoints[index * config.upstreams_max + cursor] =
-                    std.Io.net.IpAddress.parse(endpoint.host, endpoint.port) catch break;
-            } else self.support[index] = .supported;
+                const position = index * config.upstreams_max + cursor;
+                self.endpoints[position] =
+                    std.Io.net.IpAddress.parse(endpoint.host, endpoint.port) catch continue;
+                self.protocols[position] = if (upstream.force_tcp) .tcp else .udp;
+                if (cursor == 0) self.support[index] = .supported;
+            }
         }
     }
 
@@ -128,26 +158,15 @@ pub const Forward = struct {
             return null;
         }
         const endpoint = transaction.zone * @as(u16, config.upstreams_max) + transaction.cursor;
-        var candidate: ?Selection = null;
-        for (&self.sessions, 0..) |*session, position| {
-            // An accepted response retains its frame until client publication completes.
-            if (session.transaction != null) continue;
-            switch (session.state) {
-                .idle => {
-                    if (session.endpoint == endpoint) {
-                        if (now_ns < session.deadline_ns) {
-                            candidate = .{ .session = @intCast(position), .action = .reuse };
-                            break;
-                        }
-                    }
-                    if (candidate == null)
-                        candidate = .{ .session = @intCast(position), .action = .replace };
-                },
-                .vacant => candidate = .{ .session = @intCast(position), .action = .connect },
-                else => {},
-            }
-        }
-        const selected = candidate orelse {
+        const configured = self.protocols[endpoint] orelse {
+            // An unavailable transport stops here, without a silent skip past this member.
+            transaction.completion = .local_failure;
+            transaction.state = .deliver;
+            return null;
+        };
+        const transport: Transport =
+            if (transaction.destination.transport == .tcp) .tcp else configured;
+        const selected = self.selectSession(endpoint, transport, now_ns) orelse {
             transaction.completion = .local_failure;
             transaction.state = .deliver;
             return null;
@@ -157,9 +176,33 @@ pub const Forward = struct {
         const session = &self.sessions[selected.session];
         session.transaction = index;
         session.endpoint = endpoint;
+        session.transport = transport;
         session.deadline_ns = now_ns +
             duration(self.config.zones[transaction.zone].read_timeout_s);
         return selected;
+    }
+
+    fn selectSession(self: *Forward, endpoint: u16, transport: Transport, now_ns: u64) ?Selection {
+        var candidate: ?Selection = null;
+        for (&self.sessions, 0..) |*session, position| {
+            // An accepted response retains its frame until client publication completes.
+            if (session.transaction != null) continue;
+            switch (session.state) {
+                .idle => {
+                    if (session.endpoint == endpoint) {
+                        if (session.transport == transport) {
+                            if (now_ns < session.deadline_ns)
+                                return .{ .session = @intCast(position), .action = .reuse };
+                        }
+                    }
+                    if (candidate == null)
+                        candidate = .{ .session = @intCast(position), .action = .replace };
+                },
+                .vacant => candidate = .{ .session = @intCast(position), .action = .connect },
+                else => {},
+            }
+        }
+        return candidate;
     }
 
     pub fn prepare(self: *Forward, index: u16, workspace: *pipeline.Pipeline) wire.Error!void {
@@ -177,8 +220,17 @@ pub const Forward = struct {
             session.output[2..],
             &settings,
         );
+        if (session.transport == .udp) {
+            const family: udp.Family = switch (self.endpoints[session.endpoint]) {
+                .ip4 => .ipv4,
+                .ip6 => .ipv6,
+            };
+            if (bytes.len > udp.limit(wire.message_bytes_max, family))
+                return error.MessageTooLarge;
+        }
         try wire.framePrefix(&session.output, bytes.len);
-        session.offset = 0;
+        // Datagram payloads share the response layout but never send the TCP length prefix.
+        session.offset = if (session.transport == .udp) 2 else 0;
         session.length = @intCast(bytes.len + 2);
     }
 
@@ -215,12 +267,15 @@ pub const Forward = struct {
         const session = &self.sessions[index];
         if (count <= 0) return .failed;
         if (@as(u32, @intCast(count)) > session.length - session.offset) return .failed;
+        if (session.transport == .udp) {
+            if (@as(u32, @intCast(count)) != session.length - session.offset) return .failed;
+        }
         session.offset += @intCast(count);
         if (session.offset == session.length) {
             const transaction = &self.transactions[session.transaction.?];
             session.deadline_ns = now_ns +
                 duration(self.config.zones[transaction.zone].read_timeout_s);
-            session.prefix();
+            session.startRead();
         }
         return .progress;
     }
