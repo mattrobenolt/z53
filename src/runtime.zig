@@ -15,3 +15,5 @@ pub const address = platform.address;
 pub const tcp = @import("runtime/tcp.zig");
 pub const udp = @import("runtime/udp.zig");
 pub const pipeline = @import("runtime/pipeline.zig");
+pub const forward = @import("runtime/forward.zig");
+pub const nowNs = platform.nowNs;

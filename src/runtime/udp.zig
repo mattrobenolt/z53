@@ -13,14 +13,16 @@ pub fn limit(client_bytes: u16, family: Family) u16 {
     return @min(@max(512, client_bytes), maximum);
 }
 pub const Response = struct {
-    state: enum { free, sending } = .free,
+    state: enum { free, reserved, sending } = .free,
+    generation: u31 = 0,
+    listener: u16,
     address: linux.sockaddr.storage,
     vector: std.posix.iovec_const,
     message: linux.msghdr_const,
     output: [wire.message_bytes_max]u8,
 
     pub fn prepare(self: *Response, datagram: *const Datagram, length: usize) void {
-        std.debug.assert(self.state == .free);
+        std.debug.assert(self.state == .reserved);
         @memcpy(std.mem.asBytes(&self.address)[0..datagram.address.len], datagram.address);
         self.vector = .{ .base = &self.output, .len = length };
         self.message = .{

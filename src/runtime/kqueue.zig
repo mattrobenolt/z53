@@ -2,7 +2,7 @@
 const std = @import("std");
 const system = std.c;
 pub const Ownership = @import("ownership.zig").Ownership;
-pub const operations_max = 177;
+pub const operations_max = 210;
 pub const buffers_max = 64;
 pub const Error = error{
     SetupFailed,
@@ -50,6 +50,24 @@ pub const Proctor = struct {
         if (system.kevent(self.descriptor, @ptrCast(&change), 1, &.{}, 0, null) < 0)
             return error.RegistrationFailed;
         self.registrations[index] = .{ .ident = ident, .filter = filter };
+    }
+
+    /// Nanosecond timers preserve the configured one-millisecond minimum.
+    pub fn deadline(self: *Proctor, index: u32, remaining_ns: u64) Error!void {
+        try self.remove(index);
+        const token = try self.ownership[index].arm(index);
+        errdefer self.ownership[index].complete(token, .terminal) catch unreachable;
+        const change: system.Kevent = .{
+            .ident = index,
+            .filter = system.EVFILT.TIMER,
+            .flags = system.EV.ADD | system.EV.ONESHOT,
+            .fflags = system.NOTE.NSECONDS,
+            .data = @intCast(@max(1, remaining_ns)),
+            .udata = token,
+        };
+        if (system.kevent(self.descriptor, @ptrCast(&change), 1, &.{}, 0, null) < 0)
+            return error.RegistrationFailed;
+        self.registrations[index] = .{ .ident = index, .filter = system.EVFILT.TIMER };
     }
 
     /// Fetch only one event: no userspace batch can outlive descriptor close or slot reuse.

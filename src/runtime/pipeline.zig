@@ -1,4 +1,4 @@
-//! Local runtime pipeline. Missing forwarding returns an uncached, explicit SERVFAIL.
+//! Synchronous admission and continuation. No packet view survives asynchronous work.
 const std = @import("std");
 pub const resolver = @import("../resolver.zig");
 pub const wire = resolver.wire;
@@ -8,11 +8,15 @@ const cache = resolver.cache;
 const udp = @import("udp.zig");
 pub const Transport = union(enum) { udp: udp.Family, tcp };
 pub const Error = error{ OutOfMemory, HostsLoadFailed };
+pub const Admission = union(enum) { drop, answer: resolver.Answer, forward: u16 };
+pub const Completion = union(enum) { response: []const u8, exhausted, local_failure };
 const Zone = struct {
     cache: cache.Cache,
     hosts: ?hosts.Store = null,
     check_s: u64 = 0,
 };
+
+pub const zone_storage_bytes_max = config.zones_max * @sizeOf(Zone);
 
 pub const Pipeline = struct {
     allocator: std.mem.Allocator,
@@ -92,11 +96,25 @@ pub const Pipeline = struct {
         transport: Transport,
         now_s: u64,
     ) wire.Error!?resolver.Answer {
+        return switch (try self.begin(input, output, transport, now_s)) {
+            .drop => null,
+            .answer => |value| value,
+            .forward => try self.localFailure(input, output),
+        };
+    }
+
+    pub fn begin(
+        self: *Pipeline,
+        input: []const u8,
+        output: []u8,
+        transport: Transport,
+        now_s: u64,
+    ) wire.Error!Admission {
         switch (wire.query(&self.request_packet, input)) {
-            .drop => return null,
+            .drop => return .drop,
             .reply => |header| {
                 try header.encode(output);
-                return .{ .bytes = output[0..12], .source = .servfail };
+                return .{ .answer = .{ .bytes = output[0..12], .source = .servfail } };
             },
             .accepted => {},
         }
@@ -104,9 +122,72 @@ pub const Pipeline = struct {
         try request.init(&self.request_packet);
         const selected = config.route(self.config, &request.name);
         const local = self.resolveLocal(&request, selected, now_s) catch {
-            const failed = try self.failure(&request, output, 2);
-            return failed;
+            return .{ .answer = try self.failure(&request, output, 2) };
         };
+        const value = local orelse return .{ .forward = selected.? };
+        return .{ .answer = self.finish(&request, output, transport, selected, &value) catch
+            try self.failure(&request, output, 2) };
+    }
+
+    pub fn complete(
+        self: *Pipeline,
+        input: []const u8,
+        output: []u8,
+        transport: Transport,
+        now_s: u64,
+        completion: *const Completion,
+    ) wire.Error!resolver.Answer {
+        try self.request_packet.parse(input);
+        var request: resolver.Request = undefined;
+        try request.init(&self.request_packet);
+        const index = config.route(self.config, &request.name).?;
+        const zone = &self.zones[index];
+        const result = switch (completion.*) {
+            .response => |bytes| zone.cache.prepareForward(
+                &request,
+                bytes,
+                &self.cache_workspace,
+                &self.intermediate,
+            ),
+            .exhausted => zone.cache.prepareTerminal(
+                &request,
+                now_s,
+                &self.cache_workspace,
+                &self.intermediate,
+            ),
+            .local_failure => return self.failure(&request, output, 2),
+        } catch return self.failure(&request, output, 2);
+        const answer_value = self.finish(
+            &request,
+            output,
+            transport,
+            index,
+            &result.answer,
+        ) catch return self.failure(&request, output, 2);
+        // #1: final rotation can expand compression. Publication follows its successful rewrite.
+        _ = zone.cache.publish(&request, now_s, &self.cache_workspace);
+        return answer_value;
+    }
+
+    pub fn localFailure(
+        self: *Pipeline,
+        input: []const u8,
+        output: []u8,
+    ) wire.Error!resolver.Answer {
+        try self.request_packet.parse(input);
+        var request: resolver.Request = undefined;
+        try request.init(&self.request_packet);
+        return self.failure(&request, output, 2);
+    }
+
+    fn finish(
+        self: *Pipeline,
+        request: *const resolver.Request,
+        output: []u8,
+        transport: Transport,
+        selected: ?u16,
+        local: *const resolver.Answer,
+    ) wire.Error!resolver.Answer {
         try self.response_packet.parse(local.bytes);
         var settings: wire.rewrite.Settings = .{};
         switch (transport) {
@@ -123,17 +204,14 @@ pub const Pipeline = struct {
             (if (self.config.zones[index].rotate) .rotate else .fixed)
         else
             .fixed;
-        const bytes = self.rotation.finish(
+        const bytes = try self.rotation.finish(
             &self.response_packet,
             output,
             &settings,
             local.source,
             mode,
             self.random.random(),
-        ) catch {
-            const failed = try self.failure(&request, output, 2);
-            return failed;
-        };
+        );
         return .{ .bytes = bytes, .source = local.source };
     }
 
@@ -142,10 +220,10 @@ pub const Pipeline = struct {
         request: *const resolver.Request,
         selected: ?u16,
         now_s: u64,
-    ) wire.Error!resolver.Answer {
+    ) wire.Error!?resolver.Answer {
         const encoder = &self.cache_workspace.rewrite.encoder;
         // SPEC §3.1: no matching zone is REFUSED, including special names.
-        const index = selected orelse return self.failure(request, &self.intermediate, 5);
+        const index = selected orelse return try self.failure(request, &self.intermediate, 5);
         if (try resolver.beforeCache(request, encoder, &self.intermediate)) |hit| return hit;
         const zone = &self.zones[index];
         if (try zone.cache.lookup(
@@ -162,9 +240,7 @@ pub const Pipeline = struct {
             encoder,
             &self.intermediate,
         )) |hit| return hit;
-        // #1: forwarding is unresolved, not an exhausted upstream attempt.
-        // Do not invoke terminalFailure, insert into cache, or serve stale.
-        return self.failure(request, &self.intermediate, 2);
+        return null;
     }
 
     fn failure(

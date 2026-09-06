@@ -581,9 +581,10 @@ A generation never wraps into an earlier token.
 
 The runtime stop API drains cancellation acknowledgements and target completions.
 Daemon signals still rely on process teardown rather than the stop API.
-Fatal teardown uses synchronous io_uring cancellation before storage release.
-After synchronous cancellation, teardown explicitly unregisters the file table before ring destruction.
-This releases listener and direct-accept references, even for unread accept completions.
+Fatal teardown originally treated synchronous cancellation and file unregistration as sufficient barriers before storage release.
+The submitted-receive regression disproves the expected immediate CQE publication, not an observed access after free.
+The Linux teardown correction below adds request retirement before file unregistration.
+Unread direct accepts retain their file-table references until that unregistration.
 Ring close alone defers file release and prevented immediate UDP rebind in the native regression.
 
 Teardown accepts an absent file table when startup failed before registration.
@@ -884,3 +885,224 @@ The reset fixture proves nonzero `SO_ERROR`, not a failed handshake.
 The helper benchmark and fuzz-gate smoke tests do not establish resolver performance or decoder fuzz coverage.
 The earlier Linux failure and inconclusive D1 result remain preserved.
 No additional Linux diagnostic follows from this acceptance.
+
+
+## Literal forced-TCP forwarding candidate (#1)
+
+This candidate supports a zone only when every configured upstream uses a literal address, forced TCP, and no TLS.
+It preserves configured order and attempts each member at most once per transaction.
+An unsupported zone miss remains uncached local SERVFAIL without stale fallback or health effects.
+Local responses and cache hits retain their existing pipeline order.
+Health exclusion and probes remain incomplete even for supported zones.
+Ordinary UDP upstreams, DoT, hostname bootstrap, and logs remain later work.
+
+### Ownership and bounds
+
+SPEC sections 1.1 through 1.3 replace the earlier local-only resource limits.
+Both backends own 32 transactions and 32 reusable sessions without an overflow queue.
+A transaction copies the original query before the listener returns or reuses its input buffer.
+UDP response slots reserve their destination and generation before asynchronous admission.
+TCP clients retain a connection generation and wait for response delivery before the next query.
+A disconnected client can retain its slot until its bounded exchange completes.
+
+Each session owns its framed input and output buffers.
+Only an idle session permits eviction, and an accepted response retains its session until client publication.
+Endpoint identity includes the configured zone and upstream position, not only the address text.
+The startup endpoint table uses 1024 entries of 32 bytes each.
+The forwarding object occupies 6326480 bytes on aarch64 Linux.
+The Linux Runtime occupies 33144744 bytes before external zone metadata and ring mappings.
+
+Compile-time assertions include the backend metadata in the 8 MiB forwarding cap.
+The 40 MiB combined cap includes 14336 bytes of maximum zone metadata and a 256 KiB allowance for Linux mappings.
+The native ring requests 18496 shared bytes, 32768 SQE bytes, and 1024 provided-ring bytes before page rounding.
+
+Configuration storage, the entire cache, and hosts tables retain separate bounds.
+The cache exclusion covers allocated entry arrays and packets.
+SPEC §1.3 states the separate cache limits, including the transient insertion packet.
+Kernel socket memory is outside these userspace caps.
+These sizes are storage evidence, not performance measurements.
+
+### Completion and deadline rules
+
+Linux retains provided-buffer multishot UDP and the direct-accept file range at 32 through 159.
+Upstream files occupy 160 through 191.
+Operation slots 225 through 288 form 32 I/O and timeout pairs, with the idle timer at 289.
+Both linked completions retire before rearm, close, failover, or file reassignment.
+Each explicit cancellation also retains its target completion and acknowledgement through the existing ownership state machine.
+Stop batches cancellations against the remaining SQ capacity, including queued work.
+
+Connect and request transmission share one absolute configured budget.
+Complete transmission starts a separate response deadline across prefix, body, and rejected frames.
+Linux uses `IORING_TIMEOUT_ABS` for linked operations and idle expiry.
+Relative timeouts can gain time while their SQEs wait for submission, so the kernel receives the absolute monotonic deadline.
+The native exchange assertion rejected the missing ABS flag before the correction.
+Fatal and startup teardown now require the additional request-retirement barrier described below.
+
+Darwin uses one-shot socket interests and SO_ERROR for connect completion.
+Its separate upstream timer selects the nearest nanosecond deadline.
+EV_DELETE precedes replacement of a deadline timer or socket identity.
+The original one-second hosts and admission timer remains separate.
+No new socket operation blocks or allocates on the established path.
+
+### Admission and publication
+
+A startup-seeded CSPRNG supplies each upstream ID independently of answer rotation.
+`Io.randomSecure` supplies the entire seed without a weak fallback.
+Entropy failure or cancellation aborts startup before event queue or listener creation.
+A deferred secure erase covers the seed lifetime on success and failure.
+
+Tests compare the encoded ID with transaction ownership, not with an assumption that random IDs always differ from client IDs.
+Admission requires the connected endpoint and generation, ID, QR, opcode, and exactly one matching question.
+Question comparison preserves DNS case-insensitive name equality and exact type and class.
+Malformed and mismatched frames never reach cache publication or renew the deadline.
+
+Each admitted DNS response ends failover, including upstream SERVFAIL.
+Only actual supported transport exhaustion enters the stale or terminal SERVFAIL policy.
+Pool exhaustion, socket resource failures, and local encoding failures remain uncached without stale fallback.
+Upstream queries retain all validated client options and DO, with payload size 1232.
+Final responses restore the original client ID, question, payload size, and COOKIE.
+
+Cache preparation now separates full-size response construction from publication.
+The runtime completes rotation and client encoding before it commits the prepared cache packet.
+The rotation regression moves opaque padding before repeated address owners, beyond the encoder dictionary range.
+The full client rewrite then fails without replacement of its stale candidate.
+The publication-order mutation fails at that candidate's pointer identity assertion.
+Extended-RCODE exclusions retain their earlier policy and native coverage.
+
+### Candidate evidence and limits
+
+The native Linux fixtures use owned loopback peers and actual Runtime sockets.
+They cover both client transports, concurrent identities, partial frames, queued client queries, reuse, expiry, failure-only sequence, and cache policy.
+They also cover EDNS envelopes, large UDP truncation, full TCP delivery, pool exhaustion, descriptor quotas, and cancellation in each upstream phase.
+The cache-disabled exchange and cache-hit tests reject allocator use after startup.
+Partial transmit bounds have deterministic state-machine tests, but the fixtures do not force kernel-induced short upstream sends.
+Native macOS execution remains pending and belongs to parent CI.
+
+The additional IPv6 fixture first failed at its owned `[::1]:0` bind on Linux.
+A separate owned bind returned EADDRNOTAVAIL, errno 99.
+Both Linux IPv6 disable flags equal one, and the interface table is empty.
+The supervisor approved explicit Darwin-only native scope for that fixture without host changes or general feature probes.
+Native Linux IPv6 exchange coverage remains unproved. Semantic compilation does not replace it.
+The failed run and its diagnosis remain preserved.
+
+That failure also exposed a fixture cleanup leak before Runtime startup.
+The fixture now owns cleanup immediately after preparation and distinguishes `prepared`, `running`, and `released` states.
+A Linux error-path regression checks allocation balance and descriptor release after startup rejection.
+Its storage-release mutation fails at the allocation counter assertion, without a leak as the acceptance signal.
+An independent deferred release cleans the omitted allocation after that assertion.
+
+The original 18 Darwin controls retain their exact source spans and assertion intent.
+No workflow, watchdog, native gate, example, or dependency lock changes accompany this candidate.
+One new control initially searched a multiline argument absent from the stack excerpt.
+Its existing first project frame proved the intended deadline assertion without a rerun.
+A broad ordinary-timeout mutation exceeded the control deadline before its intended assertion and supplies no red proof.
+The revised read-phase mutation reaches and fails the opcode assertion. Both logs remain preserved.
+
+The unresolved historical Linux restart failure remains a release blocker.
+An earlier candidate full suite passed 146 tests. That pass does not explain or withdraw the historical failure.
+No diagnostic calibration, production deployment, or primary-checkout changes accompany this slice.
+
+### Fresh candidate blocker
+
+The final restored Linux suite passed 147 tests and failed two tests, including 46 runtime passes out of 48.
+Both failures occur at the UDP bind in `runtime_linux.zig`, through `address.zig`.
+The server-close restart case fails at `tests/runtime_transport.zig:157` after 26.26 milliseconds.
+The partial-initialization restart case fails at `tests/runtime_transport.zig:206` after 34.80 milliseconds.
+The tests do not report the endpoint, errno, or cycle. Those values remain unavailable.
+
+This is a fresh unclassified failure after the forwarding changes.
+Matching historical test names do not establish a shared cause.
+All forwarding cases pass within that failed full run, but the candidate does not pass implementation acceptance.
+The supervisor directed a blocked handoff without another native test or new instrumentation.
+Only static checks, semantic compilation, preservation, and evidence finalization follow that direction.
+The failed run remains preserved and blocks publication.
+
+
+### Linux teardown retirement correction (#1)
+
+Overall candidate acceptance remains **BLOCKED**.
+The original submitted-receive run unexpectedly failed its regression assertion. It was not a mutation control.
+It recorded cancellation result 1, no published target CQEs, upstream EAGAIN, and client EOF.
+That observation establishes neither access after free nor a cause for either earlier bind failure.
+
+The reviewed sources use upstream Linux `v7.2.3`, not an attested copy of the host kernel.
+The same allocation-based drain mechanism exists at the `v7.2` floor.
+[`io_queue_deferred`](https://github.com/gregkh/linux/blob/v7.2.3/io_uring/io_uring.c#L457-L478)
+flushes cached requests and requires `nr_req_allocated == nr_drained` before dispatch.
+One final standalone `NOP` with `IOSQE_IO_DRAIN` therefore waits for all older request objects, not just their CQEs.
+
+[`io_free_batch_list`](https://github.com/gregkh/linux/blob/v7.2.3/io_uring/io_uring.c#L1094-L1168)
+releases operation resources and resource-node references before request caching.
+A worker-held reference also blocks the marker, through its CQE-less last-put cleanup.
+See [`io_wq_free_work`](https://github.com/gregkh/linux/blob/v7.2.3/io_uring/io_uring.c#L1457-L1471).
+
+Teardown completely consumes older SQEs before cancellation and marker preparation.
+Each of at most 512 submission attempts must consume at least one SQE.
+A separate submission prevents linkage to older work, even after a partial submission.
+
+The marker uses token `0xffffffffffffffff`, outside all normal and cancellation owner indices.
+Its opcode-specific flags are zero. It borrows no payload, file, or buffer resource.
+No later SQE follows it. Reserved-only and synthetic owners require no fabricated completion.
+
+One five-second absolute MONOTONIC deadline starts before teardown work.
+Cancellation receives the remaining relative duration, not the DNS response timeout.
+See [`io_sync_cancel`](https://github.com/gregkh/linux/blob/v7.2.3/io_uring/cancel.c#L272-L369).
+Kernel waits use `GETEVENTS | EXT_ARG | ABS_TIMER` with that same absolute deadline.
+
+The ring defaults to MONOTONIC, and [`io_cqring_wait`](https://github.com/gregkh/linux/blob/v7.2.3/io_uring/wait.c#L189-L235)
+converts absolute time through the time namespace.
+Pinned Zig lacks `ABS_TIMER` and fixes its enter wrapper argument size to `NSIG/8`.
+The raw six-argument syscall uses UAPI bit 5 and the 24-byte `io_uring_getevents_arg`.
+Its zero `pad` field matches the newer UAPI `min_wait_usec` field.
+
+Teardown copies CQEs in 32-entry stack batches without Runtime dispatch or buffer recycling.
+The 2048-CQE ceiling exceeds this conservative producer sum of 1925:
+
+- 1024 already published CQEs
+- 290 terminal target CQEs
+- 290 explicit cancellation acknowledgements
+- 64 provided-buffer UDP shots
+- 256 successful direct accepts
+- One marker CQE
+
+The 128 client file slots permit 128 accepts, plus at most 128 replacements after already queued direct closes.
+No teardown dispatch submits another close or returns a UDP buffer.
+Terminal accept errors and linked timeouts use the existing 290 target allowance.
+The CQ reader permits at most 4097 iterations, with at most one wait per nonempty batch.
+A wait requests one completion only when the published CQ is empty. It does not busy-poll or add arbitrary enters.
+Overflow-list entries also count against the ceiling. Excess entries fail closed rather than extend the proof bound.
+This ceiling is a termination bound, not native evidence for full-capacity teardown.
+
+Marker result zero and flags zero precede checked file unregistration.
+The absent-file-table startup case remains valid.
+Checked provided-ring unregistration precedes metadata unmapping, unlike the unchecked Zig helper.
+Every payload and mapping remains alive through both barriers.
+Runtime then retains its existing listener-close and Pipeline-release order.
+Errors or deadline exhaustion exit without storage-release unwinding.
+
+The final-file guarantee depends on the actual sole-submitter context with `SINGLE_ISSUER | DEFER_TASKRUN`.
+Ordinary `fput` queues final release on the live submitter before return to userspace.
+See [`file_table.c`](https://github.com/gregkh/linux/blob/v7.2.3/fs/file_table.c#L484-L590)
+and [`resume_user_mode.h`](https://github.com/gregkh/linux/blob/v7.2.3/include/linux/resume_user_mode.h#L40-L50).
+Current opcodes are:
+
+- RECVMSG and ACCEPT
+- RECV, SEND, and SENDMSG
+- CONNECT and direct CLOSE
+- TIMEOUT and LINK_TIMEOUT
+- ASYNC_CANCEL
+
+Production creates sockets through `socket()` and registration, without `IOSQE_ASYNC` or zero-copy operations.
+Future SOCKET, zero-copy, forced asynchronous closes, or another issuer requires a separate context proof.
+
+The existing submitted-receive fixture retains real SEND, RECV, and LINK_TIMEOUT operations on listenerless socketpairs.
+A bounded external transcript captures the actual marker and retired CQEs.
+Its snapshot freezes that transcript after file unregistration, before metadata release.
+The snapshot performs one nonblocking read per silent, drained peer.
+Assertions follow unconditional direct Runtime teardown and destruction.
+
+Observation-order controls move only the snapshot. Every real barrier and cleanup still executes.
+
+This one-pair proof does not establish native full-capacity or delayed-worker behavior.
+Error branches, synthetic-owner regressions, unread accepts, startup, native Darwin, and full gates remain separate proof slices.
+Earlier frame, entropy, driver-order, and failed-run evidence remains unchanged.

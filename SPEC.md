@@ -1,14 +1,21 @@
 # z53 — Feature Specification
 
-**Stage: local client service.**
-Linux and macOS select io_uring and kqueue respectively for local UDP and TCP.
-Native ARM macOS builds, runtime tests, and assertion controls pass on CI and a physical MacBook.
-The unresolved Linux restart failure remains a release blocker (#1).
+**Stage: literal forced-TCP forwarding candidate.**
+Linux and macOS select io_uring and kqueue respectively for UDP and TCP clients.
+The candidate forwards zones whose every upstream uses a literal address, forced TCP, and no TLS.
+Native Linux IPv4 loopback tests exercise the candidate. Native macOS execution remains pending.
+The Linux test host disables IPv6, so native Linux IPv6 upstream coverage remains unproved.
+The accepted local macOS runtime passed native CI and physical MacBook controls before this candidate.
+The unresolved historical Linux restart failure remains a release blocker (#1).
+The final candidate suite also fails two Linux UDP binds during restart tests.
+This fresh failure remains unclassified. Its endpoint, errno, and cycle are unavailable.
+The candidate does not pass implementation acceptance.
 These features remain incomplete:
 
-- Forward transport
-- Listener hostname bootstrap
-- Query logs
+- Ordinary UDP and DoT upstream transport
+- Upstream health exclusion and probes
+- Listener and upstream hostname bootstrap
+- Query and upstream transition logs
 
 This document is the contract for the first implementation.
 
@@ -66,11 +73,37 @@ Section 6 contains both reference configs as ZON.
 
 The Linux event thread owns these fixed resources:
 
-- 256 submission entries and 512 completion entries.
-- 225 operation slots with completion generations.
+- 512 submission entries and 1024 completion entries.
+- 290 operation slots with completion generations.
 - 64 provided UDP buffers and 64 response slots, shared across listeners.
 - 128 TCP client slots, each with one request and one response buffer.
-- 160 registered files: 32 listener slots and 128 direct-accept slots.
+- 192 registered files: 32 listener slots, 128 direct-accept slots, and 32 upstream slots.
+
+Direct accept retains files 32 through 159. Upstreams use files 160 through 191.
+Upstream I/O and linked timeout pairs use operation slots 225 through 288.
+Slot 289 supplies the idle timer. Both linked completions retire before a session can rearm.
+Explicit cancellation also retains each slot until its target completion and cancellation acknowledgement arrive.
+Stop batches cancellation submissions against the remaining submission capacity.
+
+Linux teardown retains storage through cancellation, request retirement, and checked resource unregistration (#1).
+One five-second absolute MONOTONIC deadline covers teardown, independently of DNS timeouts.
+After complete submission of older work, teardown cancels it and submits one standalone `NOP` with `IOSQE_IO_DRAIN`.
+No later operation follows that marker.
+
+Its successful completion precedes file unregistration and checked provided-ring unregistration.
+Only then can teardown release mappings and return to Runtime storage cleanup.
+Teardown consumes at most 2048 CQEs without dispatch, rearm, admission, or buffer recycling.
+These failures exit the process without storage-release unwinding:
+
+- Deadline or CQE ceiling exhaustion
+- Submission or cancellation failure
+- Invalid marker completion or dropped CQEs
+- Resource unregistration failure
+
+Reserved-only owners require no fabricated completion.
+This contract covers the current ordinary socket operations and sole submitter, not future SOCKET or zero-copy operations.
+The submitted-receive regression and its observation controls remain a separate proof from full-capacity and delayed-worker behavior.
+Overall candidate acceptance remains BLOCKED.
 
 UDP response-slot exhaustion drops the datagram and returns its provided buffer.
 An empty provided ring terminates multishot receive with ENOBUFS.
@@ -85,14 +118,18 @@ Periodic failures preserve the active table and mtime for the next configured ch
 
 ### 1.2 macOS client runtime bounds
 
-The macOS event thread owns one kqueue with 177 one-shot operation slots:
-16 UDP reads, 16 TCP accepts, one timer, 128 TCP clients, and 16 UDP writes.
+The macOS event thread owns one kqueue with 210 one-shot operation slots:
+
+- 16 UDP reads and 16 TCP accepts
+- One hosts/admission timer and 128 TCP clients
+- 16 UDP writes and 32 upstream socket interests
+- One precise upstream deadline timer
 It receives one readiness event per step, so no userspace event batch survives descriptor reuse.
 Each rearm advances a non-wrapping completion generation.
 
 Sockets and accepted clients are nonblocking and close-on-exec.
 TCP sockets suppress SIGPIPE and enable address reuse for immediate restarts, not port reuse.
-There are at most 32 listener descriptors and 128 accepted client descriptors.
+There are at most 32 listener descriptors, 128 accepted client descriptors, and 32 upstream descriptors.
 TCP admission pauses when the client pool fills and resumes after close.
 Descriptor/resource quota failures retry admission on the next timer, without a hot loop.
 
@@ -108,7 +145,60 @@ EV_DELETE synchronously cancels readiness; the kernel never borrows query buffer
 Closing kqueue and sockets releases all interests and descriptors on teardown or startup failure.
 Runtime.stop is an explicit API; daemon signals still rely on process teardown.
 PR #2 records native local-runtime tests and assertion-specific mutation evidence.
-Upstream transport and full deployment acceptance remain incomplete.
+The forwarding candidate adds nonblocking connect completion through SO_ERROR and nanosecond deadlines.
+The nearest upstream deadline replaces the dedicated timer through an EV_DELETE barrier.
+The separate one-second timer retains the existing hosts and admission policy.
+Full upstream transport and deployment acceptance remain incomplete.
+
+### 1.3 Candidate forwarding bounds
+
+Both backends retain these fixed limits:
+
+- 32 foreground transactions and 32 reusable TCP sessions
+- No overflow queue
+- 1024 endpoint entries, at most 64 bytes each
+- One original query of at most 65535 bytes per transaction
+- Two framed buffers of 65537 bytes per session
+- 8 MiB for forwarding storage, including backend metadata
+- 40 MiB for combined fixed runtime storage, excluding the cache, hosts tables, and configuration
+
+The packet arrays occupy 6291488 bytes. Compile-time assertions enforce the complete storage caps.
+The combined cap includes zone metadata and a separate 256 KiB allowance for Linux ring mappings.
+The mapping allowance includes page rounding for the submission, completion, and provided-buffer mappings.
+Configuration retains its separate section 5.1 bounds. Kernel socket memory is outside these userspace storage caps.
+
+The cache exclusion covers both allocated entry arrays and packet allocations.
+The cache retains these separate bounds, exclusive of allocator overhead:
+
+- 1000000 aggregate positive and denial entries across all zones
+- At most 320 bytes of metadata per `Entry`
+- At most 65535 packet bytes per entry
+- At most one additional 65535-byte packet during transactional insertion
+
+A transaction owns its original query before the listener returns or reuses its input buffer.
+A UDP response slot reserves its destination before admission and retains a non-wrapping generation.
+A TCP client retains a separate connection generation and waits for delivery before it reads another frame.
+A disconnected client can retain its slot until the bounded exchange completes.
+
+Only idle sessions permit eviction. Each session carries at most one exchange.
+Pool and local socket resource exhaustion return uncached local SERVFAIL without stale fallback or failover.
+Supported transport exhaustion invokes the existing stale or five-second SERVFAIL policy.
+An admitted DNS response, including SERVFAIL, ends the configured sequence.
+Unsupported zones never skip selected members or invoke transport exhaustion policy.
+
+Connect and request transmission share one absolute configured timeout.
+Complete transmission starts a separate response deadline across prefix, body, and rejected frames.
+Partial I/O and rejected frames never renew that response deadline.
+Linux links each operation to its absolute monotonic deadline with `IORING_TIMEOUT_ABS`.
+Queued submissions cannot renew the remaining budget.
+Idle expiry uses the configured interval after an accepted response.
+
+A separately seeded CSPRNG supplies upstream IDs. Answer rotation retains its separate generator.
+Secure entropy failure or cancellation aborts startup before event queue or listener creation.
+The upstream seed has no weak fallback.
+
+Response admission requires the connected endpoint, connection generation, ID, QR, opcode, and exactly one matching question.
+Final client encoding and rotation succeed before cache publication.
 
 ## 2. Non-goals
 
@@ -458,7 +548,10 @@ Only the first error is reported, with a bounded 512-byte reason.
 Process reload remains unsupported.
 The runtime serves local responses on literal listener addresses.
 Listener hostnames remain valid configuration, but startup returns `UnresolvedListener` until bootstrap exists.
-An unresolved forward stage returns uncached SERVFAIL, without stale fallback.
+The forwarding candidate supports a zone only when every upstream has a literal address, `force_tcp = true`, and no TLS block.
+An unsupported zone miss returns uncached SERVFAIL, without stale fallback or health effects.
+Health exclusion and probes remain incomplete, even for supported zones.
+The candidate does not change the final transport, health, or logging requirements.
 
 ## 6. Reference configs
 

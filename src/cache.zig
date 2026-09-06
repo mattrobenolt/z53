@@ -14,6 +14,7 @@ pub const Workspace = struct {
     packet: wire.Packet,
     rewrite: wire.rewrite.Workspace,
     storage: [wire.message_bytes_max]u8,
+    publication: ?struct { selected: policy.Policy, length: u32 } = null,
 };
 
 pub const Cache = struct {
@@ -79,6 +80,20 @@ pub const Cache = struct {
         workspace: *Workspace,
         output: []u8,
     ) wire.Error!Result {
+        var result = try self.prepareForward(request, response, workspace, output);
+        result.insertion = self.publish(request, now_s, workspace);
+        return result;
+    }
+
+    /// The runtime must finish rotation and client encoding before publication (#1).
+    pub fn prepareForward(
+        self: *Cache,
+        request: *const resolver.Request,
+        response: []const u8,
+        workspace: *Workspace,
+        output: []u8,
+    ) wire.Error!Result {
+        workspace.publication = null;
         try workspace.packet.parse(response);
         if (request.packet.opt == null) {
             if (workspace.packet.opt) |index| {
@@ -108,10 +123,27 @@ pub const Cache = struct {
             &workspace.storage,
             &settings,
         );
+        workspace.publication = .{ .selected = value, .length = @intCast(bytes.len) };
+        return .{ .answer = answer, .insertion = .skipped };
+    }
+
+    /// No packet or rewrite operation can fail after this commit point.
+    pub fn publish(
+        self: *Cache,
+        request: *const resolver.Request,
+        now_s: u64,
+        workspace: *Workspace,
+    ) Insertion {
+        const publication = workspace.publication orelse return .skipped;
+        workspace.publication = null;
         var key: store.Key = undefined;
         key.init(request);
-        const insertion = self.insert(&key, bytes, now_s, &value) catch .exhausted;
-        return .{ .answer = answer, .insertion = insertion };
+        return self.insert(
+            &key,
+            workspace.storage[0..publication.length],
+            now_s,
+            &publication.selected,
+        ) catch .exhausted;
     }
 
     /// Call only after every upstream transport failed. An upstream SERVFAIL is instead
@@ -123,6 +155,19 @@ pub const Cache = struct {
         workspace: *Workspace,
         output: []u8,
     ) wire.Error!Result {
+        var result = try self.prepareTerminal(request, now_s, workspace, output);
+        result.insertion = self.publish(request, now_s, workspace);
+        return result;
+    }
+
+    pub fn prepareTerminal(
+        self: *Cache,
+        request: *const resolver.Request,
+        now_s: u64,
+        workspace: *Workspace,
+        output: []u8,
+    ) wire.Error!Result {
+        workspace.publication = null;
         var key: store.Key = undefined;
         key.init(request);
         for ([_]*store.Bank{ &self.positive, &self.denial }) |bank| {
@@ -147,7 +192,7 @@ pub const Cache = struct {
         const encoder = &workspace.rewrite.encoder;
         try encoder.init(&failure, &header);
         try encoder.question(&request.name, request.kind, request.class);
-        var result = try self.forward(request, try encoder.finish(), now_s, workspace, output);
+        var result = try self.prepareForward(request, try encoder.finish(), workspace, output);
         result.answer.source = .servfail;
         return result;
     }

@@ -5,6 +5,8 @@ const system = std.c;
 pub const proctor = @import("runtime/kqueue.zig");
 pub const address = @import("runtime/address_darwin.zig");
 const datagram = @import("runtime/udp_darwin.zig");
+pub const forwarding = @import("runtime/forward.zig");
+const upstream = @import("runtime/forward_darwin.zig");
 const tcp = @import("runtime/tcp.zig");
 const pipeline = @import("runtime/pipeline.zig");
 const config = pipeline.resolver.config;
@@ -23,6 +25,8 @@ pub const Error = error{
     ListenFailed,
     OutOfMemory,
     HostsLoadFailed,
+    EntropyUnavailable,
+    Canceled,
     ClockFailed,
     TransportFailed,
 };
@@ -31,6 +35,8 @@ const Listener = struct { udp: ?system.fd_t = null, tcp: ?system.fd_t = null };
 pub const Runtime = struct {
     proctor: proctor.Proctor,
     pipeline: pipeline.Pipeline,
+    forward: forwarding.Forward,
+    upstreams: upstream.Driver,
     listeners: [config.listeners_max]Listener,
     clients: [tcp.clients_max]tcp.Client,
     descriptors: [tcp.clients_max]?system.fd_t,
@@ -59,8 +65,17 @@ pub const Runtime = struct {
         self.listener_count = @intCast(settings.listen.len);
         self.listeners = @splat(.{});
         self.descriptors = @splat(null);
-        for (&self.clients) |*client| client.state = .vacant;
-        for (&self.responses) |*response| response.listener = null;
+        for (&self.clients) |*client| {
+            client.state = .vacant;
+            client.generation = 0;
+        }
+        for (&self.responses) |*response| {
+            response.listener = null;
+            response.state = .ready;
+            response.generation = 0;
+        }
+        try self.forward.init(io, settings);
+        self.upstreams.init();
         try self.pipeline.init(allocator, io, settings);
         errdefer self.pipeline.deinit();
         try self.proctor.init();
@@ -87,6 +102,7 @@ pub const Runtime = struct {
     }
 
     fn closeDescriptors(self: *Runtime) void {
+        self.upstreams.deinit();
         for (self.descriptors) |descriptor| {
             if (descriptor) |value| _ = system.close(value);
         }
@@ -121,9 +137,14 @@ pub const Runtime = struct {
             try self.proctor.arm(timer_slot, timer_slot, system.EVFILT.TIMER);
         } else if (slot < send_start) {
             try self.clientReady(@intCast(slot - client_start));
-        } else {
+        } else if (slot < upstream.operation_start) {
             try self.sendReady(@intCast(slot - send_start));
+        } else if (slot == upstream.timer_slot) {
+            try self.upstreams.expired(self);
+        } else {
+            try self.upstreams.ready(self, @intCast(slot - upstream.operation_start));
         }
+        try self.upstreams.drive(self);
         return true;
     }
 
@@ -161,24 +182,54 @@ pub const Runtime = struct {
         if (message.flags & (system.MSG.TRUNC | system.MSG.CTRUNC) != 0) return;
         const family = datagram.family(&source, message.namelen) catch return;
         if (count > self.input.len) return error.TransportFailed;
-        for (&self.responses) |*response| {
+        for (&self.responses, 0..) |*response, index| {
             if (response.listener != null) continue;
-            const answer = self.pipeline.answer(
-                self.input[0..@intCast(count)],
+            if (response.generation == std.math.maxInt(u31)) return error.GenerationExhausted;
+            response.generation += 1;
+            response.address = source;
+            response.address_length = message.namelen;
+            response.listener = listener;
+            response.state = .reserved;
+            const input = self.input[0..@intCast(count)];
+            const admission = self.pipeline.begin(
+                input,
                 &response.output,
                 .{ .udp = family },
                 try now(),
-            ) catch return;
-            const value = answer orelse return;
-            response.address = source;
-            response.address_length = message.namelen;
-            response.length = @intCast(value.bytes.len);
-            response.listener = listener;
-            self.sendResponse(response);
-            if (response.listener != null) try self.armSend(listener);
+            ) catch {
+                response.listener = null;
+                return;
+            };
+            switch (admission) {
+                .drop => response.listener = null,
+                .answer => |answer| try self.publishResponse(@intCast(index), answer.bytes.len),
+                .forward => |zone| {
+                    const destination: forwarding.Destination = .{
+                        .index = @intCast(index),
+                        .generation = response.generation,
+                        .transport = .{ .udp = family },
+                    };
+                    if (self.forward.admit(input, zone, &destination) == null) {
+                        const answer = self.pipeline.localFailure(input, &response.output) catch {
+                            response.listener = null;
+                            return;
+                        };
+                        try self.publishResponse(@intCast(index), answer.bytes.len);
+                    }
+                },
+            }
             return;
         }
         // Pool exhaustion drops only this datagram, with no overflow storage.
+    }
+
+    fn publishResponse(self: *Runtime, index: u16, length: usize) Error!void {
+        const response = &self.responses[index];
+        const listener = response.listener.?;
+        response.length = @intCast(length);
+        response.state = .ready;
+        self.sendResponse(response);
+        if (response.listener != null) try self.armSend(listener);
     }
 
     fn sendResponse(self: *Runtime, response: *datagram.Response) void {
@@ -221,11 +272,59 @@ pub const Runtime = struct {
         // One shared write filter per socket; response slots never overwrite its udata.
         for (&self.responses) |*response| {
             if (response.listener != listener) continue;
+            if (response.state == .reserved) continue;
             self.sendResponse(response);
             if (response.listener != null) {
                 try self.armSend(listener);
                 return;
             }
+        }
+    }
+
+    pub fn deliverForwards(self: *Runtime) Error!void {
+        for (&self.forward.transactions) |*transaction| {
+            if (transaction.state != .deliver) continue;
+            const destination = transaction.destination;
+            const output: []u8 = switch (destination.transport) {
+                .tcp => self.clients[destination.index].output[2..],
+                .udp => &self.responses[destination.index].output,
+            };
+            switch (destination.transport) {
+                .tcp => {
+                    const client = &self.clients[destination.index];
+                    if (client.generation != destination.generation) return error.InvalidCompletion;
+                    if (client.phase != .waiting) return error.InvalidCompletion;
+                },
+                .udp => {
+                    const response = &self.responses[destination.index];
+                    if (response.generation != destination.generation)
+                        return error.InvalidCompletion;
+                    if (response.listener == null) return error.InvalidCompletion;
+                    if (response.state != .reserved) return error.InvalidCompletion;
+                },
+            }
+            const completion: pipeline.Completion = switch (transaction.completion) {
+                .response => |index| .{ .response = self.forward.responseBytes(index) },
+                .exhausted => .exhausted,
+                .local_failure => .local_failure,
+            };
+            const answer = self.pipeline.complete(
+                transaction.input[0..transaction.length],
+                output,
+                destination.transport,
+                try now(),
+                &completion,
+            ) catch return error.TransportFailed;
+            switch (destination.transport) {
+                .tcp => {
+                    self.clients[destination.index].respond(answer.bytes.len);
+                    try self.armClient(destination.index);
+                },
+                .udp => try self.publishResponse(destination.index, answer.bytes.len),
+            }
+            if (transaction.completion == .response)
+                self.forward.sessions[transaction.completion.response].transaction = null;
+            transaction.state = .free;
         }
     }
 
@@ -258,12 +357,15 @@ pub const Runtime = struct {
         }
         self.descriptors[index] = descriptor;
         try address.prepare(descriptor);
+        if (self.clients[index].generation == std.math.maxInt(u31))
+            return error.GenerationExhausted;
         self.clients[index].reset();
         try self.armClient(index);
         if (self.freeClient() != null) try self.accept(listener);
     }
 
     fn armClient(self: *Runtime, index: u16) Error!void {
+        if (self.clients[index].phase == .waiting) return;
         const filter: i16 = if (self.clients[index].phase == .response)
             system.EVFILT.WRITE
         else
@@ -279,6 +381,7 @@ pub const Runtime = struct {
         const client = &self.clients[index];
         const descriptor = self.descriptors[index].?;
         const count = switch (client.phase) {
+            .waiting => return error.InvalidCompletion,
             .prefix, .body => system.recv(
                 descriptor,
                 client.input[client.offset..].ptr,
@@ -299,23 +402,42 @@ pub const Runtime = struct {
             }
         }
         switch (client.phase) {
+            .waiting => return error.InvalidCompletion,
             .response => client.sent(@intCast(count)) catch return self.closeClient(index),
             .prefix, .body => {
                 const query = client.received(@intCast(count)) catch
                     return self.closeClient(index);
                 if (query) |bytes| {
-                    const answer = self.pipeline.answer(
-                        bytes,
-                        client.output[2..],
-                        .tcp,
-                        try now(),
-                    ) catch return self.closeClient(index);
-                    const value = answer orelse return self.closeClient(index);
-                    client.respond(value.bytes.len);
+                    try self.queryClient(index, bytes);
+                    if (self.descriptors[index] == null) return;
                 }
             },
         }
         try self.armClient(index);
+    }
+
+    fn queryClient(self: *Runtime, index: u16, bytes: []const u8) Error!void {
+        const client = &self.clients[index];
+        const admission = self.pipeline.begin(bytes, client.output[2..], .tcp, try now()) catch
+            return self.closeClient(index);
+        switch (admission) {
+            .drop => return self.closeClient(index),
+            .answer => |answer| client.respond(answer.bytes.len),
+            .forward => |zone| {
+                const destination: forwarding.Destination = .{
+                    .index = index,
+                    .generation = client.generation,
+                    .transport = .tcp,
+                };
+                if (self.forward.admit(bytes, zone, &destination) != null) {
+                    client.phase = .waiting;
+                } else {
+                    const answer = self.pipeline.localFailure(bytes, client.output[2..]) catch
+                        return self.closeClient(index);
+                    client.respond(answer.bytes.len);
+                }
+            },
+        }
     }
 
     fn closeClient(self: *Runtime, index: u16) Error!void {
@@ -333,4 +455,27 @@ pub fn now() error{ClockFailed}!u64 {
     if (system.clock_gettime(system.CLOCK.MONOTONIC, &timestamp) < 0) return error.ClockFailed;
     if (timestamp.sec < 0) return error.ClockFailed;
     return @intCast(timestamp.sec);
+}
+
+pub fn nowNs() error{ClockFailed}!u64 {
+    var timestamp: system.timespec = undefined;
+    if (system.clock_gettime(system.CLOCK.MONOTONIC, &timestamp) < 0) return error.ClockFailed;
+    if (timestamp.sec < 0) return error.ClockFailed;
+    const seconds: u64 = @intCast(timestamp.sec);
+    if (seconds > std.math.maxInt(u64) / std.time.ns_per_s - 86400) return error.ClockFailed;
+    if (timestamp.nsec < 0) return error.ClockFailed;
+    if (timestamp.nsec >= std.time.ns_per_s) return error.ClockFailed;
+    return seconds * std.time.ns_per_s + @as(u64, @intCast(timestamp.nsec));
+}
+
+comptime {
+    // SPEC §1.3 excludes cache entry arrays and packets.
+    // Hosts tables and configuration also retain separate bounds.
+    std.debug.assert(
+        @sizeOf(Runtime) + pipeline.zone_storage_bytes_max <=
+            40 * 1024 * 1024,
+    );
+    std.debug.assert(
+        @sizeOf(forwarding.Forward) + @sizeOf(upstream.Driver) <= forwarding.storage_bytes_max,
+    );
 }

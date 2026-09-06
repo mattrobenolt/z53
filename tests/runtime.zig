@@ -6,6 +6,7 @@ const linux = std.os.linux;
 const wire = runtime.pipeline.wire;
 
 test {
+    _ = @import("runtime_forward.zig");
     if (builtin.os.tag == .linux) {
         _ = @import("runtime_transport.zig");
     } else {
@@ -13,13 +14,19 @@ test {
     }
 }
 
-// SPEC §1.1: fixed runtime storage excludes separately bounded zone cache and hosts tables.
+// SPEC §1.3: the cap excludes cache entry arrays and packets, hosts tables, and configuration.
 test "runtime fixed storage budget" {
-    try testing.expect(@sizeOf(runtime.Runtime) <= 32 * 1024 * 1024);
+    const external = runtime.pipeline.zone_storage_bytes_max +
+        if (builtin.os.tag == .linux) runtime.proctor.mapping_bytes_max else 0;
+    try testing.expect(@sizeOf(runtime.Runtime) + external <= 40 * 1024 * 1024);
+    try testing.expect(
+        @sizeOf(runtime.forward.Forward) + @sizeOf(@FieldType(runtime.Runtime, "upstreams")) <=
+            runtime.forward.storage_bytes_max,
+    );
     try testing.expectEqual(128, runtime.tcp.clients_max);
     try testing.expectEqual(64, runtime.proctor.buffers_max);
     try testing.expectEqual(
-        if (builtin.os.tag == .linux) 225 else 177,
+        if (builtin.os.tag == .linux) 290 else 210,
         runtime.proctor.operations_max,
     );
 }
@@ -49,6 +56,7 @@ test "completion generations and cancellation barriers" {
 test "TCP partial framing and repeated responses" {
     const client = try testing.allocator.create(runtime.tcp.Client);
     defer testing.allocator.destroy(client);
+    client.generation = 0;
     client.reset();
     client.input[0..2].* = .{ 0, 12 };
     try testing.expectEqual(null, try client.received(1));
@@ -266,6 +274,7 @@ test "readiness ownership releases exactly once and rejects stale reuse" {
 test "TCP framing partial overruns and maximum message length" {
     const client = try testing.allocator.create(runtime.tcp.Client);
     defer testing.allocator.destroy(client);
+    client.generation = 0;
     client.reset();
     client.input[0..2].* = .{ 0, 12 };
     try testing.expectEqual(null, try client.received(1));
@@ -275,6 +284,7 @@ test "TCP framing partial overruns and maximum message length" {
     try client.sent(1);
     try testing.expectError(error.InvalidFrame, client.sent(14));
     try testing.expectEqual(1, client.offset);
+    client.generation = 0;
     client.reset();
     client.input[0..2].* = .{ 255, 255 };
     try testing.expectEqual(null, try client.received(2));

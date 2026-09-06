@@ -13,8 +13,12 @@ pub const Address = struct {
         // #1: bootstrap must add listener hostname resolution before final acceptance.
         const ip = std.Io.net.IpAddress.parse(endpoint.host, endpoint.port) catch
             return error.UnresolvedListener;
+        self.fromIp(&ip);
+    }
+
+    pub fn fromIp(self: *Address, ip: *const std.Io.net.IpAddress) void {
         self.storage = std.mem.zeroes(linux.sockaddr.storage);
-        switch (ip) {
+        switch (ip.*) {
             .ip4 => |value| {
                 const address: *linux.sockaddr.in = @ptrCast(&self.storage);
                 address.* = .{

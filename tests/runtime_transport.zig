@@ -403,3 +403,39 @@ test "native TCP pool exhaustion and recovery" {
     try testing.expectEqual(345, (try wire.Header.decode(response)).id);
     try harness.stop();
 }
+
+// SPEC §1.1: stop batches cancellations against queued SQEs, including indices above 255.
+test "forward native stop batches a full operation table" {
+    const proctor = try testing.allocator.create(runtime.proctor.Proctor);
+    defer testing.allocator.destroy(proctor);
+    try proctor.init();
+    defer proctor.deinit();
+    try proctor.ring.register_files_sparse(192);
+    try proctor.registerClients();
+    try testing.expectEqual(512, proctor.ring.sq.sqes.len);
+    try testing.expectEqual(1024, proctor.ring.cq.cqes.len);
+    std.debug.print(
+        "forward ring shared={d} sqes={d} provided={d} mapping-cap={d} zone-cap={d}\n",
+        .{
+            proctor.ring.sq.mmap.len,
+            proctor.ring.sq.mmap_sqes.len,
+            runtime.proctor.buffers_max * @sizeOf(linux.io_uring_buf),
+            runtime.proctor.mapping_bytes_max,
+            runtime.pipeline.zone_storage_bytes_max,
+        },
+    );
+    var interval: linux.kernel_timespec = .{ .sec = 60, .nsec = 0 };
+    for (0..runtime.proctor.operations_max) |index| {
+        const token = try proctor.arm(@intCast(index));
+        _ = try proctor.ring.timeout(token, &interval, 0, 0);
+    }
+    const stopped: ?runtime.proctor.Error = if (proctor.stop()) |_| null else |err| err;
+    try testing.expectEqual(null, stopped);
+    var count: u32 = 0;
+    while (proctor.pending()) {
+        _ = try proctor.next();
+        count += 1;
+        try testing.expect(count <= runtime.proctor.operations_max * 2);
+    }
+    try testing.expectEqual(runtime.proctor.operations_max * 2, count);
+}

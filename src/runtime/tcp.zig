@@ -4,13 +4,17 @@ const wire = @import("../wire.zig");
 pub const clients_max = 128;
 pub const Client = struct {
     state: enum { vacant, connected, closing, replacing } = .vacant,
-    phase: enum { prefix, body, response } = .prefix,
+    phase: enum { prefix, body, waiting, response } = .prefix,
+    generation: u31 = 0,
     offset: u32 = 0,
     length: u32 = 2,
     input: [wire.message_bytes_max + 2]u8,
     output: [wire.message_bytes_max + 2]u8,
 
     pub fn reset(self: *Client) void {
+        // Runtime admission checks exhaustion before it resets a connection.
+        std.debug.assert(self.generation < std.math.maxInt(u31));
+        self.generation += 1;
         self.state = .connected;
         self.nextQuery();
     }
@@ -35,7 +39,7 @@ pub const Client = struct {
                 return null;
             },
             .body => return self.input[2..self.length],
-            .response => unreachable,
+            .waiting, .response => unreachable,
         }
     }
 

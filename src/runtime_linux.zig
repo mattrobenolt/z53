@@ -5,6 +5,8 @@ pub const tcp = @import("runtime/tcp.zig");
 pub const udp = @import("runtime/udp.zig");
 pub const pipeline = @import("runtime/pipeline.zig");
 pub const address = @import("runtime/address.zig");
+pub const forwarding = @import("runtime/forward.zig");
+const upstream = @import("runtime/forward_linux.zig");
 const linux = proctor.linux;
 const config = pipeline.resolver.config;
 const client_start = 33;
@@ -21,6 +23,8 @@ pub const Error = error{
     GenerationExhausted,
     OutOfMemory,
     HostsLoadFailed,
+    EntropyUnavailable,
+    Canceled,
     UnresolvedListener,
     SocketFailed,
     BindFailed,
@@ -35,6 +39,8 @@ const Listener = struct {
 pub const Runtime = struct {
     proctor: proctor.Proctor,
     pipeline: pipeline.Pipeline,
+    forward: forwarding.Forward,
+    upstreams: upstream.Driver,
     listeners: [config.listeners_max]Listener,
     clients: [tcp.clients_max]tcp.Client,
     responses: [proctor.buffers_max]udp.Response,
@@ -58,14 +64,22 @@ pub const Runtime = struct {
             listener.udp = null;
             listener.tcp = null;
         }
-        for (&self.clients) |*client| client.state = .vacant;
-        for (&self.responses) |*response| response.state = .free;
+        for (&self.clients) |*client| {
+            client.state = .vacant;
+            client.generation = 0;
+        }
+        for (&self.responses) |*response| {
+            response.state = .free;
+            response.generation = 0;
+        }
+        try self.forward.init(io, settings);
+        self.upstreams.init();
         try self.pipeline.init(allocator, io, settings);
         errdefer self.pipeline.deinit();
         try self.proctor.init();
         errdefer self.proctor.deinit();
         errdefer self.closeDescriptors();
-        self.proctor.ring.register_files_sparse(32 + tcp.clients_max) catch
+        self.proctor.ring.register_files_sparse(192) catch
             return error.RegistrationFailed;
         try self.proctor.registerClients();
         for (settings.listen, 0..) |text, index| try self.bindListener(@intCast(index), text);
@@ -155,8 +169,15 @@ pub const Runtime = struct {
             if (!self.proctor.pending()) return false;
         }
         const completion = try self.proctor.next();
-        if (completion.user_data & proctor.cancel_bit != 0) return true;
         const slot: u32 = @truncate(completion.user_data);
+        if (slot >= upstream.operation_start) {
+            if (slot == upstream.timer_slot) {
+                if (self.state == .running) try self.upstreams.expired(self);
+            } else try self.upstreams.completed(self, &completion);
+            if (self.state == .running) try self.upstreams.drive(self);
+            return true;
+        }
+        if (completion.user_data & proctor.cancel_bit != 0) return true;
         if (slot < 16) {
             try self.datagram(@intCast(slot), &completion);
         } else if (slot < 32) {
@@ -172,6 +193,7 @@ pub const Runtime = struct {
         } else {
             self.responses[slot - response_start].state = .free;
         }
+        if (self.state == .running) try self.upstreams.drive(self);
         return true;
     }
 
@@ -199,25 +221,106 @@ pub const Runtime = struct {
         const datagram_value = udp.decode(bytes) catch return;
         for (&self.responses, 0..) |*response, index| {
             if (response.state != .free) continue;
-            const answer = self.pipeline.answer(
+            if (response.generation == std.math.maxInt(u31)) return error.GenerationExhausted;
+            response.generation += 1;
+            response.state = .reserved;
+            response.listener = listener;
+            response.prepare(&datagram_value, 0);
+            response.state = .reserved;
+            const admission = self.pipeline.begin(
                 datagram_value.payload,
                 &response.output,
                 .{ .udp = datagram_value.family },
                 try now(),
-            ) catch return;
-            const value = answer orelse return;
-            response.prepare(&datagram_value, value.bytes.len);
-            const token = try self.proctor.arm(@intCast(response_start + index));
-            const entry = self.proctor.ring.sendmsg(
-                token,
-                @as(i32, listener) * 2,
-                &response.message,
-                linux.MSG.NOSIGNAL,
-            ) catch return error.SubmissionFailed;
-            entry.flags |= linux.IOSQE_FIXED_FILE;
+            ) catch {
+                response.state = .free;
+                return;
+            };
+            switch (admission) {
+                .drop => response.state = .free,
+                .answer => |answer| try self.sendResponse(@intCast(index), answer.bytes.len),
+                .forward => |zone| {
+                    const destination: forwarding.Destination = .{
+                        .index = @intCast(index),
+                        .generation = response.generation,
+                        .transport = .{ .udp = datagram_value.family },
+                    };
+                    if (self.forward.admit(datagram_value.payload, zone, &destination) == null) {
+                        const answer = self.pipeline.localFailure(
+                            datagram_value.payload,
+                            &response.output,
+                        ) catch {
+                            response.state = .free;
+                            return;
+                        };
+                        try self.sendResponse(@intCast(index), answer.bytes.len);
+                    }
+                },
+            }
             return;
         }
         // Bounded overload policy: drop the datagram, never allocate an overflow queue.
+    }
+
+    fn sendResponse(self: *Runtime, index: u16, length: usize) Error!void {
+        const response = &self.responses[index];
+        std.debug.assert(response.state == .reserved);
+        response.vector.len = length;
+        response.state = .sending;
+        const token = try self.proctor.arm(response_start + @as(u32, index));
+        const entry = self.proctor.ring.sendmsg(
+            token,
+            @as(i32, response.listener) * 2,
+            &response.message,
+            linux.MSG.NOSIGNAL,
+        ) catch return error.SubmissionFailed;
+        entry.flags |= linux.IOSQE_FIXED_FILE;
+    }
+
+    pub fn deliverForwards(self: *Runtime) Error!void {
+        for (&self.forward.transactions) |*transaction| {
+            if (transaction.state != .deliver) continue;
+            const destination = transaction.destination;
+            const output: []u8 = switch (destination.transport) {
+                .tcp => self.clients[destination.index].output[2..],
+                .udp => &self.responses[destination.index].output,
+            };
+            switch (destination.transport) {
+                .tcp => {
+                    const client = &self.clients[destination.index];
+                    if (client.generation != destination.generation) return error.InvalidCompletion;
+                    if (client.phase != .waiting) return error.InvalidCompletion;
+                },
+                .udp => {
+                    const response = &self.responses[destination.index];
+                    if (response.generation != destination.generation)
+                        return error.InvalidCompletion;
+                    if (response.state != .reserved) return error.InvalidCompletion;
+                },
+            }
+            const completion: pipeline.Completion = switch (transaction.completion) {
+                .response => |index| .{ .response = self.forward.responseBytes(index) },
+                .exhausted => .exhausted,
+                .local_failure => .local_failure,
+            };
+            const answer = self.pipeline.complete(
+                transaction.input[0..transaction.length],
+                output,
+                destination.transport,
+                try now(),
+                &completion,
+            ) catch return error.TransportFailed;
+            switch (destination.transport) {
+                .tcp => {
+                    self.clients[destination.index].respond(answer.bytes.len);
+                    try self.armClient(destination.index);
+                },
+                .udp => try self.sendResponse(destination.index, answer.bytes.len),
+            }
+            if (transaction.completion == .response)
+                self.forward.sessions[transaction.completion.response].transaction = null;
+            transaction.state = .free;
+        }
     }
 
     fn accepted(self: *Runtime, listener: u16, completion: *const linux.io_uring_cqe) Error!void {
@@ -246,6 +349,8 @@ pub const Runtime = struct {
         const client_value = &self.clients[index];
         switch (client_value.state) {
             .vacant => {
+                if (client_value.generation == std.math.maxInt(u31))
+                    return error.GenerationExhausted;
                 client_value.reset();
                 try self.armClient(index);
             },
@@ -257,6 +362,7 @@ pub const Runtime = struct {
 
     fn armClient(self: *Runtime, index: u16) Error!void {
         const client_value = &self.clients[index];
+        if (client_value.phase == .waiting) return;
         const token = try self.proctor.arm(client_start + @as(u32, index));
         const descriptor: i32 = 32 + @as(i32, index);
         if (client_value.state == .closing) {
@@ -271,6 +377,7 @@ pub const Runtime = struct {
                 .{ .buffer = client_value.input[client_value.offset..client_value.length] },
                 0,
             ),
+            .waiting => unreachable,
             .response => self.proctor.ring.send(
                 token,
                 descriptor,
@@ -288,6 +395,8 @@ pub const Runtime = struct {
             .closing, .replacing => {
                 if (count < 0) return error.TransportFailed;
                 if (client_value.state == .replacing) {
+                    if (client_value.generation == std.math.maxInt(u31))
+                        return error.GenerationExhausted;
                     client_value.reset();
                     try self.armClient(index);
                 } else client_value.state = .vacant;
@@ -301,22 +410,44 @@ pub const Runtime = struct {
             .vacant => return error.InvalidCompletion,
         }
         switch (client_value.phase) {
+            .waiting => return error.InvalidCompletion,
             .response => client_value.sent(count) catch return self.closeClient(index),
             .prefix, .body => {
                 const query = client_value.received(count) catch return self.closeClient(index);
                 if (query) |bytes| {
-                    const answer = self.pipeline.answer(
-                        bytes,
-                        client_value.output[2..],
-                        .tcp,
-                        try now(),
-                    ) catch return self.closeClient(index);
-                    const value = answer orelse return self.closeClient(index);
-                    client_value.respond(value.bytes.len);
+                    try self.queryClient(index, bytes);
                 }
             },
         }
         try self.armClient(index);
+    }
+
+    fn queryClient(self: *Runtime, index: u16, bytes: []const u8) Error!void {
+        const client = &self.clients[index];
+        const admission = self.pipeline.begin(bytes, client.output[2..], .tcp, try now()) catch {
+            client.state = .closing;
+            return;
+        };
+        switch (admission) {
+            .drop => client.state = .closing,
+            .answer => |answer| client.respond(answer.bytes.len),
+            .forward => |zone| {
+                const destination: forwarding.Destination = .{
+                    .index = index,
+                    .generation = client.generation,
+                    .transport = .tcp,
+                };
+                if (self.forward.admit(bytes, zone, &destination) != null) {
+                    client.phase = .waiting;
+                } else {
+                    const answer = self.pipeline.localFailure(bytes, client.output[2..]) catch {
+                        client.state = .closing;
+                        return;
+                    };
+                    client.respond(answer.bytes.len);
+                }
+            },
+        }
     }
 
     fn closeClient(self: *Runtime, index: u16) Error!void {
@@ -332,4 +463,28 @@ pub fn now() error{ClockFailed}!u64 {
     if (linux.errno(result) != .SUCCESS) return error.ClockFailed;
     if (timestamp.sec < 0) return error.ClockFailed;
     return @intCast(timestamp.sec);
+}
+
+pub fn nowNs() error{ClockFailed}!u64 {
+    var timestamp: linux.timespec = undefined;
+    const result = linux.clock_gettime(linux.CLOCK.MONOTONIC, &timestamp);
+    if (linux.errno(result) != .SUCCESS) return error.ClockFailed;
+    if (timestamp.sec < 0) return error.ClockFailed;
+    const seconds: u64 = @intCast(timestamp.sec);
+    if (seconds > std.math.maxInt(u64) / std.time.ns_per_s - 86400) return error.ClockFailed;
+    if (timestamp.nsec < 0) return error.ClockFailed;
+    if (timestamp.nsec >= std.time.ns_per_s) return error.ClockFailed;
+    return seconds * std.time.ns_per_s + @as(u64, @intCast(timestamp.nsec));
+}
+
+comptime {
+    // SPEC §1.3 excludes cache entry arrays and packets.
+    // Hosts tables and configuration also retain separate bounds.
+    std.debug.assert(
+        @sizeOf(Runtime) + pipeline.zone_storage_bytes_max + proctor.mapping_bytes_max <=
+            40 * 1024 * 1024,
+    );
+    std.debug.assert(
+        @sizeOf(forwarding.Forward) + @sizeOf(upstream.Driver) <= forwarding.storage_bytes_max,
+    );
 }

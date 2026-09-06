@@ -5,6 +5,8 @@ const udp = @import("udp.zig");
 
 pub const Response = struct {
     listener: ?u16 = null,
+    state: enum { reserved, ready } = .ready,
+    generation: u31 = 0,
     address: system.sockaddr.storage,
     address_length: system.socklen_t,
     length: u32,

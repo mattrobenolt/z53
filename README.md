@@ -6,9 +6,12 @@ A small, personal replacement for CoreDNS: hosts overrides, per-zone NODATA
 rules, health-checked sequential failover, caching with RFC 8767
 serve-stale, answer rotation.
 
-**Status: build foundation only.** The contract is [`SPEC.md`](SPEC.md).
-The binary prints a diagnostic to stderr and exits with status 1.
-It does not listen or serve DNS.
+**Status: literal forced-TCP forwarding candidate (#1).** The contract is [`SPEC.md`](SPEC.md).
+The binary serves local UDP and TCP clients.
+A zone forwards only when every upstream uses a literal address, forced TCP, and no TLS.
+Health, ordinary UDP upstreams, DoT, hostname bootstrap, and logs remain incomplete.
+Native macOS candidate tests remain pending. The historical Linux restart failure still blocks release.
+A fresh unclassified Linux restart failure also blocks this candidate's acceptance.
 
 ## Targets
 
@@ -32,8 +35,8 @@ nixfmt --check flake.nix
 `zig build check` checks binary compilation without linking.
 `zig build test-compile` checks unit test compilation without linking.
 `zig build test-unit` runs the dependency API and startup tests.
-Tests exercise dependency APIs, not resolver behavior. The benchmark smoke
-checks the helper only. It is not a DNS performance result.
+Tests cover dependency APIs, resolver policy, and local socket exchanges.
+The benchmark smoke checks the helper only. It is not a DNS performance result.
 See [dependency decisions](docs/decisions.md) for known limits.
 
 ## License
