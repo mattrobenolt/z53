@@ -11,7 +11,7 @@ The earlier Linux restart bind failures remain unexplained. Full SPEC acceptance
 These features remain incomplete:
 
 - Upstream health exclusion and probes
-- Listener and upstream hostname bootstrap
+- Listener hostname bootstrap
 - Upstream health transition logs
 
 This document is the contract for the first implementation.
@@ -326,6 +326,9 @@ The legacy `localhost.<domain>` prefix form is out. RFC 6761 names only.
 Upstream list, in configured order. Each upstream has an address, an optional
 TLS block, and an optional `force_tcp` flag.
 
+Deployments use literal IPv4 or IPv6 upstream addresses. Upstream hostname bootstrap is outside this contract.
+TLS `server_name` supplies certificate verification and SNI, not address resolution.
+
 - Plain upstreams use UDP for UDP clients and TCP for TCP clients.
   `force_tcp` forces TCP regardless of client transport.
   TLS upstreams always speak TLS over TCP (DoT). Default TLS port: 853.
@@ -521,7 +524,7 @@ exact field names, types, and ergonomics.
 | `hosts` | zone | off | `.path`, `.ttl`, `.reload_s` |
 | `nodata` | zone | `[]` | Query types that get empty NOERROR |
 | `upstreams` | zone | required | Ordered list |
-| upstream `.address` | upstream | required | `host:port` |
+| upstream `.address` | upstream | required | Literal IP, optional port. See section 5.1 for parser compatibility. |
 | upstream `.tls.server_name` | upstream | — | Required for TLS |
 | upstream `.force_tcp` | upstream | false | Plain upstreams over TCP |
 | `max_fails` | zone | 2 | Consecutive failures before down |
@@ -560,10 +563,12 @@ These durations use finite `f64` seconds in [0.001, 86400]:
 - Health check interval
 - Idle connection expiry
 
-Addresses accept a hostname or IPv4 address, with an optional decimal port.
+Endpoint syntax accepts a hostname or IPv4 address, with an optional decimal port.
 IPv6 uses brackets, for example `[::1]:53`.
 Omitted ports are 53 for listeners and plain upstreams, or 853 for TLS upstreams.
 Explicit ports are in [1, 65535].
+Upstream hostnames remain syntactically accepted but unsupported at runtime. No upstream bootstrap implementation is required.
+Listener hostname support remains a requirement.
 
 The loader performs no hostname resolution or socket operations.
 It rejects an empty or invalid DNS hostname in `server_name`.
@@ -806,9 +811,12 @@ The wire decoder must have a fuzz target. The ztls fuzz pattern applies.
 
 ### 9.4 Benchmarks
 
-Benchmarks cover the wire codec, the suffix matcher, and the cache lookup.
+Benchmarks cover the wire codec, the suffix matcher, and the real resolver/cache path.
+Cache baselines distinguish index scans, response delivery, and insertion with eviction.
+Captures record capacity, occupancy, hit position, build mode, and timed boundaries.
+Directly seeded fixtures must identify their setup policy. They do not measure production cache population.
 zig-benchmark is the harness. Commit a capture for any performance claim.
-CI runs a short benchmark smoke run.
+CI runs a short benchmark smoke run. In-process timings do not establish end-to-end throughput or production soak acceptance.
 
 ### 9.5 Nix and CI
 

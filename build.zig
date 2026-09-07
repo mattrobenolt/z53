@@ -68,7 +68,7 @@ fn addTests(b: *std.Build, executable: *std.Build.Step.Compile, tls: *std.Build.
     runtime.add(b, executable, ztest, test_step, test_compile);
     config.add(b, executable, ztest, test_step, test_compile);
     resolver.add(b, executable, ztest, test_step, test_compile);
-    benchmark.addSmoke(b, &target, test_step);
+    benchmark.addSmoke(b, &target, tls, test_step, test_compile);
     wire.add(
         b,
         &target,

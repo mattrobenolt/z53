@@ -5,6 +5,7 @@ test {
     _ = @import("resolver/reload.zig");
     _ = @import("resolver/rotation.zig");
     _ = @import("resolver/cache.zig");
+    _ = @import("resolver/cache_stress.zig");
     _ = @import("resolver/cache_errors.zig");
     _ = @import("resolver/cache_boundaries.zig");
     _ = @import("resolver/cache_rcode.zig");

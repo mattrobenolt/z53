@@ -8,7 +8,9 @@ Literal upstreams support UDP, TCP, verified TLS 1.3, sequential transport failo
 TLS connections use the system trust bundle and retain sessions across queries.
 Hosts, synthetic answers, NODATA rules, and answer rotation also work.
 Query logs show the actual selected upstream transport, including DoT.
-Health checks and hostname bootstrap remain incomplete.
+Health checks and listener hostname bootstrap remain incomplete.
+Upstreams use literal IPs. Hostname syntax remains accepted but unsupported at runtime.
+TLS `server_name` supplies certificate verification and SNI, not DNS bootstrap.
 Earlier Linux restart bind failures remain unexplained. Native macOS forwarding feedback remains pending.
 
 ## Targets
@@ -77,8 +79,28 @@ nixfmt --check flake.nix
 `zig build test-compile` checks unit test compilation without linking.
 `zig build test-unit` runs the dependency API and startup tests.
 Tests cover dependency APIs, resolver policy, and local socket exchanges.
-The benchmark smoke checks the helper only. It is not a DNS performance result.
+The benchmark smoke exercises real DNS paths with eight iterations per case.
+It supplies no stable timing result.
 See [dependency decisions](docs/decisions.md) for known limits.
+
+
+## Cache baselines and bounded stress
+
+Inside `nix develop`, run these commands:
+
+```sh
+zig build bench -Doptimize=ReleaseSafe -- baseline
+zig build bench-build -Doptimize=ReleaseSafe
+perf stat -e cycles,instructions -- ./zig-out/bin/dns-benchmark profile
+zig build test-resolver -Doptimize=ReleaseSafe
+zig build test-runtime -Doptimize=ReleaseSafe -Druntime-filter='cache stress native'
+```
+
+The benchmark always uses ReleaseSafe. Modes are `smoke`, `baseline`, `wire`, `route`, `index`, `cache`, `churn`, `profile`, and `layout`.
+Counts are fixed and bounded. The [capture and boundaries](docs/benchmarks/README.md) include capacities through 100000 entries per bank.
+Microbenchmarks exclude logging and kernel I/O. They do not establish end-to-end QPS or maximum capacity.
+Native stress uses owned loopback peers and a test-only memory sink for normal log formatting.
+These checks do not supply overnight or production soak evidence. They exclude the historical restart cases.
 
 ## License
 

@@ -3238,3 +3238,116 @@ test "logging native concurrent TCP accepts retain distinct peers" {
     try testing.expectEqual(0, logs.count("client=unknown"));
     try harness.stop();
 }
+
+// SPEC §§1.3, 3.2, 3.7, 3.9, 4: eight clients retain identities through a full cache (#1).
+test "cache stress native full cache mixed concurrent clients and upstream reuse" {
+    var harness: Harness = undefined;
+    try harness.init();
+    defer harness.deinit();
+    harness.zones[0].cache = .{ .capacity = 128, .min_ttl_s = 60 };
+    harness.zones[0].read_timeout_s = 0.2;
+    try harness.start();
+    var logs: logging.Capture = .{};
+    harness.service.forward.logger = logs.sink();
+    var clients: [8]?system.fd_t = @splat(null);
+    defer for (clients) |client| {
+        if (client) |descriptor| _ = system.close(descriptor);
+    };
+    for (&clients, 0..) |*client, index|
+        client.* = try harness.client(if (index < 4) system.SOCK.DGRAM else system.SOCK.STREAM);
+    const packet = try testing.allocator.create(wire.Packet);
+    defer testing.allocator.destroy(packet);
+    const deadline_ns = try runtime.nowNs() + 10 * std.time.ns_per_s;
+    try fillStressCache(&harness, clients[0].?, &logs, packet, deadline_ns);
+    const allocations = harness.allocator.alloc_index;
+    harness.allocator.fail_index = allocations;
+    var input: [512]u8 = undefined;
+    var output: [512]u8 = undefined;
+    for (0..64) |round| {
+        logs = .{};
+        for (clients, 0..) |client, index| {
+            try testing.expect(try runtime.nowNs() < deadline_ns);
+            const key: u16 = @intCast((round * 17 + index * 31) % 128);
+            const id: u16 = @intCast(1000 + round * 8 + index);
+            const bytes = try stressQuery(input[2..], id, key);
+            try wire.framePrefix(&input, bytes.len);
+            try send(client.?, if (index < 4) bytes else input[0 .. bytes.len + 2]);
+        }
+        for (clients, 0..) |client, index| {
+            const bytes = if (index < 4)
+                output[0..try harness.receive(client.?, &output)]
+            else
+                try harness.frame(client.?, &output);
+            try stressAnswer(
+                packet,
+                bytes,
+                @intCast(1000 + round * 8 + index),
+                @intCast((round * 17 + index * 31) % 128),
+            );
+            try logs.client(client.?, if (index < 4) .udp else .tcp);
+        }
+        try testing.expectEqual(8, logs.count("event=query"));
+        try testing.expectEqual(8, logs.count("src=cache"));
+        try testing.expectEqual(0, logs.count("upstream="));
+    }
+    try testing.expectEqual(allocations, harness.allocator.alloc_index);
+    try testing.expect(!harness.allocator.has_induced_failure);
+    try harness.stop();
+}
+
+fn stressQuery(output: []u8, id: u16, key: u16) ![]const u8 {
+    var text: [64]u8 = undefined;
+    return query(output, id, try std.fmt.bufPrint(&text, "key{d}.stress.example.", .{key}));
+}
+
+fn stressAnswer(packet: *wire.Packet, bytes: []const u8, id: u16, key: u16) !void {
+    try packet.parse(bytes);
+    try testing.expectEqual(id, packet.header.id);
+    try testing.expectEqual(0, packet.header.bits & 15);
+    try testing.expectEqual(1, packet.header.counts[1]);
+    var expected: [512]u8 = undefined;
+    const request = try stressQuery(&expected, id, key);
+    var cursor: usize = 12;
+    const question = try packet.readQuestion(&cursor);
+    var name: wire.Name = undefined;
+    try packet.name(&name, question.name);
+    try testing.expectEqualSlices(u8, request[12 .. request.len - 4], name.wire());
+    try testing.expectEqual(1, question.kind);
+    try testing.expectEqual(1, question.class);
+    const record = packet.records[0];
+    try testing.expect(record.ttl_s > 0);
+    try testing.expect(record.ttl_s <= 60);
+    try testing.expectEqualSlices(
+        u8,
+        &.{ 192, 0, 2, 0 },
+        bytes[record.data_start..record.data_end],
+    );
+}
+
+fn fillStressCache(
+    harness: *Harness,
+    client: system.fd_t,
+    logs: *logging.Capture,
+    packet: *wire.Packet,
+    deadline_ns: u64,
+) !void {
+    var input: [512]u8 = undefined;
+    var upstream: [512]u8 = undefined;
+    var response: [512]u8 = undefined;
+    var output: [512]u8 = undefined;
+    var generation: ?u31 = null;
+    for (0..128) |index| {
+        try testing.expect(try runtime.nowNs() < deadline_ns);
+        logs.* = .{};
+        try send(client, try stressQuery(&input, @intCast(index), @intCast(index)));
+        const request = try harness.request(&upstream);
+        const current = harness.service.forward.sessions[request.session].generation;
+        if (generation) |value| try testing.expectEqual(value, current);
+        generation = current;
+        try send(harness.peer.?, try answer(&response, request.bytes, 0, 1));
+        const length = try harness.receive(client, &output);
+        try stressAnswer(packet, output[0..length], @intCast(index), @intCast(index));
+        try testing.expectEqual(1, logs.count("src=forward"));
+        try testing.expectEqual(1, logs.count("upstream_proto=tcp"));
+    }
+}

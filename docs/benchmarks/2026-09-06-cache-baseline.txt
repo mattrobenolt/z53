@@ -1,0 +1,367 @@
+Production source: 822e3aa5424b8aaa034af7688104ba51697d07d2
+Mon Sep  7 02:38:54 AM UTC 2026
+Linux launchpad 7.2.3 #1-NixOS SMP PREEMPT Wed Sep  2 12:33:21 UTC 2026 aarch64 GNU/Linux
+0.16.0
+perf version 7.2.3
+LLVM (http://llvm.org/):
+  LLVM version 21.1.8
+  Optimized build.
+
+
+  Registered Targets:
+    aarch64     - AArch64 (little endian)
+    aarch64_32  - AArch64 (little endian ILP32)
+    aarch64_be  - AArch64 (big endian)
+    amdgcn      - AMD GCN GPUs
+    arm         - ARM
+    arm64       - ARM64 (little endian)
+    arm64_32    - ARM64 (little endian ILP32)
+    armeb       - ARM (big endian)
+    avr         - Atmel AVR Microcontroller
+    bpf         - BPF (host endian)
+    bpfeb       - BPF (big endian)
+    bpfel       - BPF (little endian)
+    hexagon     - Hexagon
+    lanai       - Lanai
+    loongarch32 - 32-bit LoongArch
+    loongarch64 - 64-bit LoongArch
+    mips        - MIPS (32-bit big endian)
+    mips64      - MIPS (64-bit big endian)
+    mips64el    - MIPS (64-bit little endian)
+    mipsel      - MIPS (32-bit little endian)
+    msp430      - MSP430 [experimental]
+    nvptx       - NVIDIA PTX 32-bit
+    nvptx64     - NVIDIA PTX 64-bit
+    ppc32       - PowerPC 32
+    ppc32le     - PowerPC 32 LE
+    ppc64       - PowerPC 64
+    ppc64le     - PowerPC 64 LE
+    r600        - AMD GPUs HD2XXX-HD6XXX
+    riscv32     - 32-bit RISC-V
+    riscv64     - 64-bit RISC-V
+    sparc       - Sparc
+    sparcel     - Sparc LE
+    sparcv9     - Sparc V9
+    spirv       - SPIR-V Logical
+    spirv32     - SPIR-V 32-bit
+    spirv64     - SPIR-V 64-bit
+    systemz     - SystemZ
+    thumb       - Thumb
+    thumbeb     - Thumb (big endian)
+    ve          - VE
+    wasm32      - WebAssembly 32-bit
+    wasm64      - WebAssembly 64-bit
+    x86         - 32-bit X86: Pentium-Pro and above
+    x86-64      - 64-bit X86: EM64T and AMD64
+    xcore       - XCore
+OpenSSL 3.6.3 9 Jun 2026 (Library: OpenSSL 3.6.3 9 Jun 2026)
+
+CPU
+Architecture:                            aarch64
+CPU op-mode(s):                          64-bit
+Byte Order:                              Little Endian
+CPU(s):                                  4
+On-line CPU(s) list:                     0-3
+Vendor ID:                               ARM
+Model name:                              Neoverse-V3
+Model:                                   1
+Thread(s) per core:                      1
+Core(s) per socket:                      4
+Socket(s):                               1
+Stepping:                                r0p1
+BogoMIPS:                                2000.00
+Flags:                                   fp asimd evtstrm aes pmull sha1 sha2 crc32 atomics fphp asimdhp cpuid asimdrdm jscvt fcma lrcpc dcpop sha3 asimddp sha512 sve asimdfhm dit uscat ilrcpc flagm sb paca pacg dcpodp sve2 sveaes svepmull svebitperm svesha3 flagm2 frint svei8mm svebf16 i8mm bf16 dgh rng bti ecv afp wfxt
+L1d cache:                               256 KiB (4 instances)
+L1i cache:                               256 KiB (4 instances)
+L2 cache:                                8 MiB (4 instances)
+L3 cache:                                48 MiB (1 instance)
+NUMA node(s):                            1
+NUMA node0 CPU(s):                       0-3
+Vulnerability Gather data sampling:      Not affected
+Vulnerability Ghostwrite:                Not affected
+Vulnerability Indirect target selection: Not affected
+Vulnerability Itlb multihit:             Not affected
+Vulnerability L1tf:                      Not affected
+Vulnerability Mds:                       Not affected
+Vulnerability Meltdown:                  Not affected
+Vulnerability Mmio stale data:           Not affected
+Vulnerability Old microcode:             Not affected
+Vulnerability Reg file data sampling:    Not affected
+Vulnerability Retbleed:                  Not affected
+Vulnerability Spec rstack overflow:      Not affected
+Vulnerability Spec store bypass:         Mitigation; Speculative Store Bypass disabled via prctl
+Vulnerability Spectre v1:                Mitigation; __user pointer sanitization
+Vulnerability Spectre v2:                Mitigation; CSV2, BHB
+Vulnerability Srbds:                     Not affected
+Vulnerability Tsa:                       Not affected
+Vulnerability Tsx async abort:           Not affected
+Vulnerability Vmscape:                   Not affected
+
+Build: zig build bench-build -Doptimize=ReleaseSafe
+Run: ./zig-out/bin/dns-benchmark baseline
+zig_os: linux
+zig_arch: aarch64
+zig_abi: gnu
+zig_cpu: neoverse_v3
+zig_mode: ReleaseSafe
+WireDecodeAResponse	  100000	      1636 ns/op	       0 B/op	       0 allocs/op
+WireDecodeAResponse	  100000	      1636 ns/op	       0 B/op	       0 allocs/op
+WireDecodeAResponse	  100000	      1636 ns/op	       0 B/op	       0 allocs/op
+LongestSuffix64	  100000	      1445 ns/op	       0 B/op	       0 allocs/op
+LongestSuffix64	  100000	      1443 ns/op	       0 B/op	       0 allocs/op
+LongestSuffix64	  100000	      1443 ns/op	       0 B/op	       0 allocs/op
+CacheHitPipeline1	  100000	     19371 ns/op	       0 B/op	       0 allocs/op
+CacheHitPipeline1	  100000	     19370 ns/op	       0 B/op	       0 allocs/op
+CacheHitPipeline1	  100000	     19372 ns/op	       0 B/op	       0 allocs/op
+index_empty_miss/capacity=128	   78125	        45.95 ns/op	       0 B/op	       0 allocs/op
+index_empty_miss/capacity=128	   78125	        46.06 ns/op	       0 B/op	       0 allocs/op
+index_empty_miss/capacity=128	   78125	        46.01 ns/op	       0 B/op	       0 allocs/op
+index_sparse_miss/capacity=128	   78125	       161.9 ns/op	       0 B/op	       0 allocs/op
+index_sparse_miss/capacity=128	   78125	       161.8 ns/op	       0 B/op	       0 allocs/op
+index_sparse_miss/capacity=128	   78125	       161.6 ns/op	       0 B/op	       0 allocs/op
+index_full_miss/capacity=128	   78125	       934.6 ns/op	       0 B/op	       0 allocs/op
+index_full_miss/capacity=128	   78125	       933.4 ns/op	       0 B/op	       0 allocs/op
+index_full_miss/capacity=128	   78125	       934.4 ns/op	       0 B/op	       0 allocs/op
+index_full_first/capacity=128	  100000	        23.60 ns/op	       0 B/op	       0 allocs/op
+index_full_first/capacity=128	  100000	        23.61 ns/op	       0 B/op	       0 allocs/op
+index_full_first/capacity=128	  100000	        23.52 ns/op	       0 B/op	       0 allocs/op
+index_full_last/capacity=128	   78125	       944.5 ns/op	       0 B/op	       0 allocs/op
+index_full_last/capacity=128	   78125	       944.1 ns/op	       0 B/op	       0 allocs/op
+index_full_last/capacity=128	   78125	       944.0 ns/op	       0 B/op	       0 allocs/op
+index_full_random/capacity=128	   78125	       538.7 ns/op	       0 B/op	       0 allocs/op
+index_full_random/capacity=128	   78125	       539.2 ns/op	       0 B/op	       0 allocs/op
+index_full_random/capacity=128	   78125	       539.1 ns/op	       0 B/op	       0 allocs/op
+index_empty_miss/capacity=1024	    9765	       381.2 ns/op	       0 B/op	       0 allocs/op
+index_empty_miss/capacity=1024	    9765	       379.2 ns/op	       0 B/op	       0 allocs/op
+index_empty_miss/capacity=1024	    9765	       378.4 ns/op	       0 B/op	       0 allocs/op
+index_sparse_miss/capacity=1024	    9765	      1174 ns/op	       0 B/op	       0 allocs/op
+index_sparse_miss/capacity=1024	    9765	      1174 ns/op	       0 B/op	       0 allocs/op
+index_sparse_miss/capacity=1024	    9765	      1175 ns/op	       0 B/op	       0 allocs/op
+index_full_miss/capacity=1024	    9765	      6789 ns/op	       0 B/op	       0 allocs/op
+index_full_miss/capacity=1024	    9765	      6783 ns/op	       0 B/op	       0 allocs/op
+index_full_miss/capacity=1024	    9765	      6791 ns/op	       0 B/op	       0 allocs/op
+index_full_first/capacity=1024	  100000	        23.50 ns/op	       0 B/op	       0 allocs/op
+index_full_first/capacity=1024	  100000	        23.50 ns/op	       0 B/op	       0 allocs/op
+index_full_first/capacity=1024	  100000	        23.47 ns/op	       0 B/op	       0 allocs/op
+index_full_last/capacity=1024	    9765	      6796 ns/op	       0 B/op	       0 allocs/op
+index_full_last/capacity=1024	    9765	      6786 ns/op	       0 B/op	       0 allocs/op
+index_full_last/capacity=1024	    9765	      6786 ns/op	       0 B/op	       0 allocs/op
+index_full_random/capacity=1024	    9765	      3924 ns/op	       0 B/op	       0 allocs/op
+index_full_random/capacity=1024	    9765	      3927 ns/op	       0 B/op	       0 allocs/op
+index_full_random/capacity=1024	    9765	      3928 ns/op	       0 B/op	       0 allocs/op
+index_empty_miss/capacity=10000	    1000	      5346 ns/op	       0 B/op	       0 allocs/op
+index_empty_miss/capacity=10000	    1000	      5244 ns/op	       0 B/op	       0 allocs/op
+index_empty_miss/capacity=10000	    1000	      5315 ns/op	       0 B/op	       0 allocs/op
+index_sparse_miss/capacity=10000	    1000	     12020 ns/op	       0 B/op	       0 allocs/op
+index_sparse_miss/capacity=10000	    1000	     12115 ns/op	       0 B/op	       0 allocs/op
+index_sparse_miss/capacity=10000	    1000	     12033 ns/op	       0 B/op	       0 allocs/op
+index_full_miss/capacity=10000	    1000	     59304 ns/op	       0 B/op	       0 allocs/op
+index_full_miss/capacity=10000	    1000	     59217 ns/op	       0 B/op	       0 allocs/op
+index_full_miss/capacity=10000	    1000	     59252 ns/op	       0 B/op	       0 allocs/op
+index_full_first/capacity=10000	  100000	        23.62 ns/op	       0 B/op	       0 allocs/op
+index_full_first/capacity=10000	  100000	        23.49 ns/op	       0 B/op	       0 allocs/op
+index_full_first/capacity=10000	  100000	        23.60 ns/op	       0 B/op	       0 allocs/op
+index_full_last/capacity=10000	    1000	     67150 ns/op	       0 B/op	       0 allocs/op
+index_full_last/capacity=10000	    1000	     67075 ns/op	       0 B/op	       0 allocs/op
+index_full_last/capacity=10000	    1000	     67125 ns/op	       0 B/op	       0 allocs/op
+index_full_random/capacity=10000	    1000	     35270 ns/op	       0 B/op	       0 allocs/op
+index_full_random/capacity=10000	    1000	     35281 ns/op	       0 B/op	       0 allocs/op
+index_full_random/capacity=10000	    1000	     35268 ns/op	       0 B/op	       0 allocs/op
+index_empty_miss/capacity=100000	     128	    125422 ns/op	       0 B/op	       0 allocs/op
+index_empty_miss/capacity=100000	     128	    120296 ns/op	       0 B/op	       0 allocs/op
+index_empty_miss/capacity=100000	     128	    121651 ns/op	       0 B/op	       0 allocs/op
+index_sparse_miss/capacity=100000	     128	    173231 ns/op	       0 B/op	       0 allocs/op
+index_sparse_miss/capacity=100000	     128	    174438 ns/op	       0 B/op	       0 allocs/op
+index_sparse_miss/capacity=100000	     128	    176898 ns/op	       0 B/op	       0 allocs/op
+index_full_miss/capacity=100000	     128	    561446 ns/op	       0 B/op	       0 allocs/op
+index_full_miss/capacity=100000	     128	    555974 ns/op	       0 B/op	       0 allocs/op
+index_full_miss/capacity=100000	     128	    560638 ns/op	       0 B/op	       0 allocs/op
+index_full_first/capacity=100000	  100000	        23.68 ns/op	       0 B/op	       0 allocs/op
+index_full_first/capacity=100000	  100000	        23.44 ns/op	       0 B/op	       0 allocs/op
+index_full_first/capacity=100000	  100000	        23.65 ns/op	       0 B/op	       0 allocs/op
+index_full_last/capacity=100000	     128	    636902 ns/op	       0 B/op	       0 allocs/op
+index_full_last/capacity=100000	     128	    632788 ns/op	       0 B/op	       0 allocs/op
+index_full_last/capacity=100000	     128	    635033 ns/op	       0 B/op	       0 allocs/op
+index_full_random/capacity=100000	     128	    342674 ns/op	       0 B/op	       0 allocs/op
+index_full_random/capacity=100000	     128	    342286 ns/op	       0 B/op	       0 allocs/op
+index_full_random/capacity=100000	     128	    347097 ns/op	       0 B/op	       0 allocs/op
+lookup_positive_last/capacity=128	   78125	      9569 ns/op	       0 B/op	       0 allocs/op
+lookup_positive_last/capacity=128	   78125	      9576 ns/op	       0 B/op	       0 allocs/op
+lookup_positive_last/capacity=128	   78125	      9598 ns/op	       0 B/op	       0 allocs/op
+lookup_denial_last/capacity=128	   78125	     11187 ns/op	       0 B/op	       0 allocs/op
+lookup_denial_last/capacity=128	   78125	     11172 ns/op	       0 B/op	       0 allocs/op
+lookup_denial_last/capacity=128	   78125	     11170 ns/op	       0 B/op	       0 allocs/op
+lookup_sparse_miss/capacity=128	   78125	       211.6 ns/op	       0 B/op	       0 allocs/op
+lookup_sparse_miss/capacity=128	   78125	       212.2 ns/op	       0 B/op	       0 allocs/op
+lookup_sparse_miss/capacity=128	   78125	       212.0 ns/op	       0 B/op	       0 allocs/op
+pipeline_positive_last/capacity=128	   78125	     20316 ns/op	       0 B/op	       0 allocs/op
+pipeline_positive_last/capacity=128	   78125	     20311 ns/op	       0 B/op	       0 allocs/op
+pipeline_positive_last/capacity=128	   78125	     20314 ns/op	       0 B/op	       0 allocs/op
+lookup_positive_last/capacity=1024	    9765	     15350 ns/op	       0 B/op	       0 allocs/op
+lookup_positive_last/capacity=1024	    9765	     15357 ns/op	       0 B/op	       0 allocs/op
+lookup_positive_last/capacity=1024	    9765	     15355 ns/op	       0 B/op	       0 allocs/op
+lookup_denial_last/capacity=1024	    9765	     22761 ns/op	       0 B/op	       0 allocs/op
+lookup_denial_last/capacity=1024	    9765	     22714 ns/op	       0 B/op	       0 allocs/op
+lookup_denial_last/capacity=1024	    9765	     22660 ns/op	       0 B/op	       0 allocs/op
+lookup_sparse_miss/capacity=1024	    9765	      1686 ns/op	       0 B/op	       0 allocs/op
+lookup_sparse_miss/capacity=1024	    9765	      1686 ns/op	       0 B/op	       0 allocs/op
+lookup_sparse_miss/capacity=1024	    9765	      1687 ns/op	       0 B/op	       0 allocs/op
+pipeline_positive_last/capacity=1024	    9765	     26140 ns/op	       0 B/op	       0 allocs/op
+pipeline_positive_last/capacity=1024	    9765	     26193 ns/op	       0 B/op	       0 allocs/op
+pipeline_positive_last/capacity=1024	    9765	     26144 ns/op	       0 B/op	       0 allocs/op
+lookup_positive_last/capacity=10000	    1000	     74243 ns/op	       0 B/op	       0 allocs/op
+lookup_positive_last/capacity=10000	    1000	     74184 ns/op	       0 B/op	       0 allocs/op
+lookup_positive_last/capacity=10000	    1000	     74254 ns/op	       0 B/op	       0 allocs/op
+lookup_denial_last/capacity=10000	    1000	    134564 ns/op	       0 B/op	       0 allocs/op
+lookup_denial_last/capacity=10000	    1000	    135259 ns/op	       0 B/op	       0 allocs/op
+lookup_denial_last/capacity=10000	    1000	    135133 ns/op	       0 B/op	       0 allocs/op
+lookup_sparse_miss/capacity=10000	    1000	     18165 ns/op	       0 B/op	       0 allocs/op
+lookup_sparse_miss/capacity=10000	    1000	     18246 ns/op	       0 B/op	       0 allocs/op
+lookup_sparse_miss/capacity=10000	    1000	     18249 ns/op	       0 B/op	       0 allocs/op
+pipeline_positive_last/capacity=10000	    1000	     85782 ns/op	       0 B/op	       0 allocs/op
+pipeline_positive_last/capacity=10000	    1000	     85714 ns/op	       0 B/op	       0 allocs/op
+pipeline_positive_last/capacity=10000	    1000	     85705 ns/op	       0 B/op	       0 allocs/op
+lookup_positive_last/capacity=100000	     128	    614358 ns/op	       0 B/op	       0 allocs/op
+lookup_positive_last/capacity=100000	     128	    616462 ns/op	       0 B/op	       0 allocs/op
+lookup_positive_last/capacity=100000	     128	    614230 ns/op	       0 B/op	       0 allocs/op
+lookup_denial_last/capacity=100000	     128	   1238805 ns/op	       0 B/op	       0 allocs/op
+lookup_denial_last/capacity=100000	     128	   1207747 ns/op	       0 B/op	       0 allocs/op
+lookup_denial_last/capacity=100000	     128	   1228865 ns/op	       0 B/op	       0 allocs/op
+lookup_sparse_miss/capacity=100000	     128	    319012 ns/op	       0 B/op	       0 allocs/op
+lookup_sparse_miss/capacity=100000	     128	    318886 ns/op	       0 B/op	       0 allocs/op
+lookup_sparse_miss/capacity=100000	     128	    314814 ns/op	       0 B/op	       0 allocs/op
+pipeline_positive_last/capacity=100000	     128	    640138 ns/op	       0 B/op	       0 allocs/op
+pipeline_positive_last/capacity=100000	     128	    643366 ns/op	       0 B/op	       0 allocs/op
+pipeline_positive_last/capacity=100000	     128	    638495 ns/op	       0 B/op	       0 allocs/op
+insert_evict/capacity=128	   78125	     16744 ns/op	      58 B/op	       1 allocs/op
+insert_evict/capacity=128	   78125	     16745 ns/op	      58 B/op	       1 allocs/op
+insert_evict/capacity=128	   78125	     16746 ns/op	      58 B/op	       1 allocs/op
+insert_evict/capacity=1024	    9765	     24420 ns/op	      58 B/op	       1 allocs/op
+insert_evict/capacity=1024	    9765	     24375 ns/op	      58 B/op	       1 allocs/op
+insert_evict/capacity=1024	    9765	     24385 ns/op	      58 B/op	       1 allocs/op
+insert_evict/capacity=10000	    1000	     91649 ns/op	      58 B/op	       1 allocs/op
+insert_evict/capacity=10000	    1000	     91590 ns/op	      58 B/op	       1 allocs/op
+insert_evict/capacity=10000	    1000	     91593 ns/op	      58 B/op	       1 allocs/op
+insert_evict/capacity=100000	     128	    879526 ns/op	      58 B/op	       1 allocs/op
+insert_evict/capacity=100000	     128	    932032 ns/op	      58 B/op	       1 allocs/op
+insert_evict/capacity=100000	     128	    882619 ns/op	      58 B/op	       1 allocs/op
+
+Run: ./zig-out/bin/dns-benchmark layout
+Entry=312 bytes, Key=262 bytes, alignment=8 bytes
+Entry offsets: key=44, bytes=0, inserted_s=16, previous=28, next=36
+capacity=128: two metadata arrays=79872 bytes
+capacity=1024: two metadata arrays=638976 bytes
+capacity=10000: two metadata arrays=6240000 bytes
+capacity=100000: two metadata arrays=62400000 bytes
+Sizes exclude packets, allocator overhead, runtime storage, and kernel memory.
+
+Run: perf stat -e cycles,instructions,cache-references,cache-misses,task-clock,page-faults -- ./zig-out/bin/dns-benchmark profile
+zig_os: linux
+zig_arch: aarch64
+zig_abi: gnu
+zig_cpu: neoverse_v3
+zig_mode: ReleaseSafe
+ProfilePipelinePositiveLast10000	   50000	     86348 ns/op	       0 B/op	       0 allocs/op
+
+ Performance counter stats for './zig-out/bin/dns-benchmark profile':
+
+    14,242,114,236      cycles:u                                                                (74.97%)
+    82,385,343,316      instructions:u                                                          (75.02%)
+    18,237,949,145      cache-references:u                                                      (75.05%)
+       214,126,270      cache-misses:u                                                          (49.93%)
+          4,392.55 msec task-clock:u                                                          
+             2,285      page-faults:u                                                         
+
+       4.393442769 seconds time elapsed
+
+       4.343014000 seconds user
+       0.000000000 seconds sys
+
+
+
+Run: perf record -e cycles:u -F 499 -o .tmp/cache-baseline/perf.data -- ./zig-out/bin/dns-benchmark profile
+zig_os: linux
+zig_arch: aarch64
+zig_abi: gnu
+zig_cpu: neoverse_v3
+zig_mode: ReleaseSafe
+ProfilePipelinePositiveLast10000	   50000	     87006 ns/op	       0 B/op	       0 allocs/op
+[ perf record: Woken up 1 times to write data ]
+[ perf record: Captured and wrote 0.086 MB .tmp/cache-baseline/perf.data (2218 samples) ]
+
+Run: perf report --stdio --no-children --percent-limit 1 -i .tmp/cache-baseline/perf.data
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 2K of event 'cycles:u'
+# Event count (approx.): 14283118205
+#
+# Overhead  Command        Shared Object          Symbol                              
+# ........  .............  .....................  ....................................
+#
+    78.47%  dns-benchmark  dns-benchmark          [.] cache.Cache.lookup
+    19.45%  dns-benchmark  dns-benchmark          [.] compiler_rt.memset
+     1.18%  dns-benchmark  dns-benchmark          [.] compiler_rt.memcpy.memcpyFast
+
+
+#
+# (Tip: Customize output of perf script with: perf script -F event,ip,sym)
+#
+
+Disassembly: llvm-objdump --disassemble --no-show-raw-insn --start-address=0x1073738 --stop-address=0x107376c zig-out/bin/dns-benchmark
+
+zig-out/bin/dns-benchmark:	file format elf64-littleaarch64
+
+Disassembly of section .text:
+
+0000000001073620 <cache.Cache.lookup>:
+ 1073738:      	cbz	x1, 0x10737e8 <cache.Cache.lookup+0x1c8>
+ 107373c:      	mov	x20, xzr
+ 1073740:      	mov	w15, #0x30              // =48
+ 1073744:      	mov	w16, #0x138             // =312
+ 1073748:      	mov	w17, #0x20              // =32
+ 107374c:      	b	0x1073760 <cache.Cache.lookup+0x140>
+ 1073750:      	add	x20, x20, #0x1
+ 1073754:      	add	x15, x15, #0x138
+ 1073758:      	cmp	x20, x1
+ 107375c:      	b.eq	0x10737e8 <cache.Cache.lookup+0x1c8>
+ 1073760:      	madd	x18, x20, x16, x9
+ 1073764:      	ldr	x7, [x18]
+ 1073768:      	cbz	x7, 0x1073750 <cache.Cache.lookup+0x130>
+
+Validation excerpt: zig build test-resolver -Doptimize=ReleaseSafe
+ztest: Running 49 tests...
+[32/49] PASS: cache stress full capacity mixed keys and repeated LRU churn without hit allocation (17.94ms)
+[33/49] PASS: cache stress full positive and denial banks replace every entry twice (22.96ms)
+ztest: 49 passed, 0 failed, 0 skipped (of 49 total) in 146ms
+ALL TESTS PASSED
+
+Validation excerpt: zig build test-runtime -Doptimize=ReleaseSafe -Druntime-filter='cache stress native'
+ztest: Running 3 tests...
+[3/3] PASS: cache stress native full cache mixed concurrent clients and upstream reuse (69.22ms)
+ztest: 3 passed, 0 failed, 0 skipped (of 3 total) in 69ms
+ALL TESTS PASSED
+
+Validation excerpt: zig build test-runtime -Doptimize=ReleaseSafe -Druntime-filter=forward
+ztest: Running 54 tests...
+[46/54] PASS: cache stress native full cache mixed concurrent clients and upstream reuse (67.55ms)
+ztest: 54 passed, 0 failed, 0 skipped (of 54 total) in 6168ms
+ALL TESTS PASSED
+
+Mutation: omit bank.touch(index) in Cache.lookup only.
+Command: zig build test-resolver -Doptimize=ReleaseSafe
+[32/49] FAIL: cache stress full capacity mixed keys and repeated LRU churn without hit allocation — error.TestExpectedEqual (5.16ms)
+Exit 1 was expected. src/cache.zig returned byte-for-byte to its original state.
+The restored resolver result appears above.
+
+Additional successful commands:
+zig build test-wire test-config test-unit -Doptimize=ReleaseSafe
+zig build bench-smoke -Doptimize=ReleaseSafe
+zig build -Doptimize=ReleaseSafe
+zig fmt --check build.zig build.zig.zon src tests
+ziglint
+ziglint build.zig src tests
+zig build test-compile -Dtarget=aarch64-macos -Doptimize=ReleaseSafe
+git diff --check

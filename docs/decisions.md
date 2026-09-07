@@ -318,7 +318,7 @@ The endpoint parser retains hostnames. It does not resolve them.
 Later slices still own these features:
 
 - Sockets
-- DNS bootstrap
+- Listener DNS bootstrap
 - Upstream transport selection
 - The query pipeline
 
@@ -644,13 +644,13 @@ Zero disables periodic checks but not the initial load.
 Listener hostnames remain valid configuration.
 This slice rejects them with `UnresolvedListener` at startup.
 The rejection is temporary, not a schema restriction.
-Later bootstrap work must resolve both listener and upstream hostnames.
+Later bootstrap work must resolve listener hostnames. Upstream addresses remain literal IPs under the cache-baseline decision below.
 No blocking socket I/O exists beneath the proctor.
 The accepted synchronous hosts file API remains on the event thread.
 
 Later slices retain these obligations:
 
-- Listener and upstream hostname bootstrap.
+- Listener hostname bootstrap.
 - Forward transports and linked upstream read timeouts.
 - Upstream health and connection reuse.
 - Forward-cache publication and stale integration.
@@ -716,7 +716,7 @@ Neither kevent nor a pending registration borrows query buffers.
 Fatal and startup teardown closes kqueue and every owned socket before releasing storage.
 Runtime.stop remains an explicit API; daemon signals still rely on process teardown.
 The local pipeline, hosts startup/reload policy and unresolved-forward SERVFAIL are shared.
-Hostname bootstrap, upstream I/O/health, forward-cache/stale integration and logs remain later work.
+Listener hostname bootstrap, upstream I/O/health, forward-cache/stale integration and logs remain later work.
 
 ### Candidate evidence and blockers
 
@@ -894,7 +894,7 @@ It preserves configured order and attempts each member at most once per transact
 An unsupported zone miss remains uncached local SERVFAIL without stale fallback or health effects.
 Local responses and cache hits retain their existing pipeline order.
 Health exclusion and probes remain incomplete even for supported zones.
-Ordinary UDP upstreams, DoT, hostname bootstrap, and logs remain later work.
+Ordinary UDP upstreams, DoT, listener hostname bootstrap, and logs remain later work.
 
 ### Ownership and bounds
 
@@ -1123,7 +1123,7 @@ This stage replaces the earlier whole-zone support restriction.
 A later TLS or hostname member no longer disables an earlier supported member.
 Selection of an unsupported member returns uncached local SERVFAIL and stops the sequence.
 The POC never skips that member or counts its absence as transport exhaustion.
-DoT, health checks, bootstrap, and query logs remain incomplete.
+DoT, health checks, listener bootstrap, and query logs remain incomplete.
 
 The Linux loopback tests cover replies, cache hits, rejected datagrams, TCP retries, and timeout dispositions.
 Manual queries through `examples/poc.zon` returned public DNS answers over UDP and TCP.
@@ -1174,7 +1174,7 @@ A real query check used the new binary with `examples/dot.zon` on port 8853 and 
 Cloudflare returned NOERROR and two A records for `example.com` over a UDP client and `example.net` over a TCP client.
 A repeat query also succeeded. The owned resolver process exited afterward; the existing port 5353 listener remained untouched.
 The macOS runtime and test roots pass semantic compilation on Linux. Native macOS execution remains pending.
-Health checks, bootstrap, query logs, and historical Linux restart diagnosis remain outside this slice.
+Health checks, listener bootstrap, query logs, and historical Linux restart diagnosis remain outside this slice.
 
 
 ## Query completion logs (#1)
@@ -1220,3 +1220,17 @@ The first UDP query reported `src=forward upstream=1.1.1.1:853 upstream_proto=do
 Its repeat reported `src=cache` with no upstream fields. An uncached TCP query reported DoT and its actual client port.
 The owned resolver exited afterward. The existing port 5353 listener remained untouched.
 Native macOS execution remains separate from semantic compilation on Linux.
+
+
+## Cache scaling baseline (#1)
+
+Matt selected cache scaling measurements before further feature work or optimization.
+The [baseline](benchmarks/README.md) separates physical index scans from DNS response work and packet allocation.
+Directly seeded large caches avoid quadratic setup. Separate churn cases use production insertion and eviction.
+ReleaseSafe is the reference candidate mode. Packaging still has no specified release profile.
+No cache index, entry layout, runtime policy, or dependency pin changes accompany this baseline.
+
+Upstream addresses always use literal IPs. Upstream hostname bootstrap is not required.
+The parser still accepts upstream hostname syntax, but selection returns uncached local SERVFAIL without further attempts.
+TLS `server_name` remains necessary for certificate verification and SNI, not DNS bootstrap.
+Listener hostname support remains required. Health probes and final packaging requirements remain unchanged.
