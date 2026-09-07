@@ -10,9 +10,7 @@ Native macOS forwarding feedback and Linux IPv6 execution remain pending.
 The earlier Linux restart bind failures remain unexplained. Full SPEC acceptance remains incomplete.
 These features remain incomplete:
 
-- Upstream health exclusion and probes
 - Listener hostname bootstrap
-- Upstream health transition logs
 
 This document is the contract for the first implementation.
 
@@ -153,7 +151,8 @@ Full upstream transport and deployment acceptance remain incomplete.
 
 Both backends retain these fixed limits:
 
-- 32 foreground transactions and 32 reusable UDP/TCP/TLS sessions
+- 32 shared transactions and 32 reusable UDP/TCP/TLS sessions
+- At most two concurrent probes, within those shared pools
 - No overflow queue
 - 1024 endpoint entries, at most 64 bytes each
 - One original query of at most 65535 bytes per transaction
@@ -348,14 +347,24 @@ TLS `server_name` supplies certificate verification and SNI, not address resolut
 
 Health:
 
-- After `max_fails` consecutive failed exchanges, mark the upstream down.
-  Default 2.
-- Skip down upstreams in the sequence.
-- Probe each down upstream every `health_check_interval`. Default 500 ms.
-- The probe is a DNS query for `.` with RD set, sent over that upstream's
-  transport. Any response restores the upstream. The query type belongs to
-  the implementer.
-- DoT probes ride the TLS connection.
+- Count consecutive transport failures separately for each configured endpoint and zone, even when addresses match.
+- After `max_fails` consecutive failed exchanges, mark the endpoint down. The default is 2. Counters saturate at the maximum `u32`.
+- A zero `max_fails` disables exclusion and probes.
+- Skip down endpoints in the sequence. If all members are down, use the existing exhausted, stale, or SERVFAIL policy.
+- Only transport errors, timeouts, and TLS certificate rejection penalize health. Local resource and crypto failures do not penalize health.
+- Encoding errors and unsupported hostnames do not penalize health. Idle close, shutdown, and client cancellation do not penalize health.
+- An admitted DNS response resets the failure count and restores health, including SERVFAIL and REFUSED. No RCODE triggers failover.
+- A retired failed probe contributes one failure. Linux retains both linked completions and close retirement before failure accounting.
+- Schedule down endpoints at `health_check_interval_s`, with a default of 500 ms. Failed probes schedule their next interval after retirement.
+- Probes query `.` for NS with RD set and a fresh secure ID. They use the existing response admission rules and deadlines.
+- Probes use UDP unless `force_tcp` or TLS selects TCP or verified DoT. They reuse normal connections, including TLS connections.
+- Probes bypass the client cache, answer rotation, client delivery, and query-completion logs.
+
+The scheduler admits clients first and rotates fairly across due endpoints.
+At most two probes share the existing transaction and session pools. Each endpoint permits at most one in-flight probe.
+Resource pressure defers probes without a health penalty. A ten-millisecond retry floor prevents overdue timer loops under pressure.
+The scheduler does not guarantee simultaneous probes for all 1024 endpoint slots.
+Probe storage survives the existing Linux cancellation and drain barriers, or Darwin EV_DELETE, before reuse or release.
 
 Connections:
 
@@ -504,8 +513,8 @@ Failed upstream attempts emit bounded `event=upstream_failure` lines with the en
 DoT failures include the TLS name and the causal certificate error when the TLS engine supplies it.
 The completion line identifies the successful fallback, if one answers.
 These diagnostics do not alter retry or cache policy.
-Health counters, probes, and down/restored transition logs remain incomplete.
-The remaining health implementation must log each state transition once, with the upstream address, new state, and failure count.
+Each health transition emits one `event=upstream_health` line with the endpoint, upstream transport, state, and failure count.
+DoT transitions include `tls_name`. States are `down` and `restored`. Restored transitions report a zero failure count.
 Attempt failures never claim a health state or a failure count.
 
 The formatter uses a fixed 3072-byte buffer and the existing parser workspace.
@@ -627,7 +636,7 @@ Listener hostnames remain valid configuration, but startup returns `UnresolvedLi
 The POC supports literal upstreams over UDP, TCP, or authenticated TLS 1.3.
 It tries configured members in order. A later unsupported member does not prevent an earlier supported member from a successful exchange.
 Selection of an unsupported hostname member returns uncached SERVFAIL, without stale fallback, health effects, or further attempts.
-Health exclusion and probes remain incomplete, even for supported upstreams.
+Supported endpoints implement health exclusion, bounded probes, and transition logs.
 The POC does not change the final transport, health, or logging requirements.
 
 ## 6. Reference configs
@@ -816,7 +825,11 @@ in-process queries:
 - NODATA: AAAA query returns empty NOERROR, AA set, COOKIE echoed.
 - Zone routing: the `ts.net.`-style zone hits its own upstream.
 - Failover: stop the first upstream. The second answers. The log shows the failed attempt and the selected fallback.
-  Health acceptance also requires down and restore logs.
+  New uncached queries skip the down primary. Down and restored transitions each produce one log line.
+- Health: owned UDP, TCP, and verified DoT fixtures prove recovery without client traffic.
+  Root probes retain RD, transport selection, identity admission, and the original deadline after rejection.
+  Fake-clock tests cover thresholds 1, 2, 0, and maximum `u32`, with endpoint and zone isolation.
+  Pressure defers probes fairly without client-buffer reuse. Stop retains pending probes without a health penalty.
 - DoT: run an in-process DoT upstream with the ztls server role and a
   self-signed CA. z53 must resolve through it. A wrong CA must fail the
   handshake and count toward `max_fails`.

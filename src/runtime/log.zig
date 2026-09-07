@@ -174,6 +174,22 @@ pub fn failure(sink: *const Sink, io: std.Io, upstream: *const Upstream, reason:
     sink.write(io, sink.context, writer.buffered()) catch return;
 }
 
+pub fn health(
+    sink: *const Sink,
+    io: std.Io,
+    upstream: *const Upstream,
+    state: enum { down, restored },
+    failures: u32,
+) void {
+    var buffer: [line_bytes_max]u8 = undefined;
+    var writer: std.Io.Writer = .fixed(&buffer);
+    timestamp(&writer, std.Io.Timestamp.now(io, .real).toMilliseconds()) catch return;
+    writer.writeAll(" event=upstream_health") catch return;
+    upstreamFields(&writer, upstream) catch return;
+    writer.print(" state={s} failures={d}\n", .{ @tagName(state), failures }) catch return;
+    sink.write(io, sink.context, writer.buffered()) catch return;
+}
+
 fn timestamp(writer: *std.Io.Writer, unix_ms: i64) std.Io.Writer.Error!void {
     if (unix_ms < 0) return writer.writeAll("timestamp=unknown");
     if (unix_ms > 253402300799999) return writer.writeAll("timestamp=unknown");

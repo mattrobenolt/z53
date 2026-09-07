@@ -7,6 +7,7 @@ const wire = runtime.pipeline.wire;
 
 test {
     _ = @import("runtime_forward.zig");
+    _ = @import("runtime_health.zig");
     _ = @import("runtime_log.zig");
     if (builtin.os.tag == .linux) {
         _ = @import("runtime_transport.zig");

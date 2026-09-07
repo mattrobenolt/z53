@@ -299,9 +299,15 @@ pub const Runtime = struct {
     }
 
     pub fn deliverForwards(self: *Runtime) Error!void {
-        for (&self.forward.transactions) |*transaction| {
+        for (&self.forward.transactions, 0..) |*transaction, transaction_index| {
             if (transaction.state != .deliver) continue;
-            const destination = transaction.destination;
+            const destination = switch (transaction.purpose) {
+                .client => |destination| destination,
+                .probe => {
+                    self.forward.finishProbe(@intCast(transaction_index));
+                    continue;
+                },
+            };
             const output: []u8 = switch (destination.transport) {
                 .tcp => self.clients[destination.index].output[2..],
                 .udp => &self.responses[destination.index].output,

@@ -30,28 +30,40 @@ pub const Driver = struct {
         const now_ns = try runtime.nowNs();
         for (&service.forward.transactions, 0..) |*transaction, index| {
             if (transaction.state != .ready) continue;
-            const selected = service.forward.select(@intCast(index), now_ns) orelse continue;
-            const session = &service.forward.sessions[selected.session];
-            service.forward.prepare(selected.session, &service.pipeline) catch {
-                transaction.completion = .local_failure;
-                transaction.state = .deliver;
-                session.transaction = null;
-                if (selected.action != .connect) try self.close(service, selected.session, .retire);
-                continue;
-            };
-            switch (selected.action) {
-                .connect => try self.connect(service, selected.session),
-                .reuse => {
-                    session.state = .writing;
-                    if (session.transport == .tls) {
-                        try self.pumpTls(service, selected.session);
-                    } else try self.arm(service, selected.session);
-                },
-                .replace => try self.close(service, selected.session, .replace),
-            }
+            try self.start(service, @intCast(index), now_ns);
+        }
+        try service.deliverForwards();
+        for (0..forward.probes_max) |_| {
+            const probe_now_ns = try runtime.nowNs();
+            const index = service.forward.probe(probe_now_ns) orelse break;
+            try self.start(service, index, probe_now_ns);
         }
         try service.deliverForwards();
         try self.timer(service);
+    }
+
+    fn start(self: *Driver, service: *runtime.Runtime, index: u16, now_ns: u64) runtime.Error!void {
+        const selected = service.forward.select(index, now_ns) orelse return;
+        const session = &service.forward.sessions[selected.session];
+        service.forward.prepare(selected.session, &service.pipeline) catch {
+            service.forward.localCompletion(
+                selected.session,
+                if (selected.action == .connect) .immediate else .close,
+                now_ns,
+            );
+            if (selected.action != .connect) try self.close(service, selected.session, .retire);
+            return;
+        };
+        switch (selected.action) {
+            .connect => try self.connect(service, selected.session),
+            .reuse => {
+                session.state = .writing;
+                if (session.transport == .tls) {
+                    try self.pumpTls(service, selected.session);
+                } else try self.arm(service, selected.session);
+            },
+            .replace => try self.close(service, selected.session, .replace),
+        }
     }
 
     fn connect(self: *Driver, service: *runtime.Runtime, index: u16) runtime.Error!void {
@@ -65,7 +77,7 @@ pub const Driver = struct {
             0,
         );
         if (linux.errno(result) != .SUCCESS) {
-            self.localFailure(service, index);
+            try self.localFailure(service, index);
             return;
         }
         const descriptor: linux.fd_t = @intCast(result);
@@ -74,7 +86,7 @@ pub const Driver = struct {
             file_start + @as(u32, index),
             &.{descriptor},
         ) catch {
-            self.localFailure(service, index);
+            try self.localFailure(service, index);
             return;
         };
         if (session.generation == std.math.maxInt(u31)) return error.GenerationExhausted;
@@ -84,14 +96,11 @@ pub const Driver = struct {
         try self.arm(service, index);
     }
 
-    fn localFailure(self: *Driver, service: *runtime.Runtime, index: u16) void {
+    fn localFailure(self: *Driver, service: *runtime.Runtime, index: u16) runtime.Error!void {
         _ = self;
         service.forward.failed(index, "local_resource");
         const session = &service.forward.sessions[index];
-        const transaction = &service.forward.transactions[session.transaction.?];
-        transaction.completion = .local_failure;
-        transaction.state = .deliver;
-        session.transaction = null;
+        service.forward.localCompletion(index, .immediate, try runtime.nowNs());
         session.state = .vacant;
     }
 
@@ -178,7 +187,7 @@ pub const Driver = struct {
         operation.kind = .none;
         if (kind == .close) {
             if (operation.result.? < 0) return error.TransportFailed;
-            service.forward.closed(index);
+            service.forward.closed(index, try runtime.nowNs());
             if (service.forward.sessions[index].disposition == .replace)
                 try self.connect(service, index);
             return;
@@ -198,6 +207,7 @@ pub const Driver = struct {
         if (count < 0) {
             service.forward.sessions[index].failure_reason = @tagName(completionError(count));
             switch (completionError(count)) {
+                .CANCELED => return self.abortLocal(service, index),
                 .MFILE, .NFILE, .NOBUFS, .NOMEM => return self.abortLocal(service, index),
                 else => return self.close(service, index, .retry),
             }
@@ -207,11 +217,7 @@ pub const Driver = struct {
 
     fn abortLocal(self: *Driver, service: *runtime.Runtime, index: u16) runtime.Error!void {
         service.forward.failed(index, service.forward.sessions[index].failure_reason);
-        const session = &service.forward.sessions[index];
-        const transaction = &service.forward.transactions[session.transaction.?];
-        transaction.completion = .local_failure;
-        transaction.state = .deliver;
-        session.transaction = null;
+        service.forward.localCompletion(index, .close, try runtime.nowNs());
         try self.close(service, index, .retire);
     }
 
@@ -325,7 +331,7 @@ pub const Driver = struct {
     }
 
     fn timer(self: *Driver, service: *runtime.Runtime) runtime.Error!void {
-        var nearest: ?u64 = null;
+        var nearest = service.forward.probeDeadline();
         for (&service.forward.sessions) |*session| {
             if (session.state != .idle) continue;
             nearest = @min(nearest orelse session.deadline_ns, session.deadline_ns);

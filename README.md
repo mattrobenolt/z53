@@ -8,7 +8,8 @@ Literal upstreams support UDP, TCP, verified TLS 1.3, sequential transport failo
 TLS connections use the system trust bundle and retain sessions across queries.
 Hosts, synthetic answers, NODATA rules, and answer rotation also work.
 Query logs show the actual selected upstream transport, including DoT.
-Health checks and listener hostname bootstrap remain incomplete.
+Health exclusion and bounded probes restore failed endpoints without client traffic.
+Listener hostname bootstrap remains incomplete.
 Upstreams use literal IPs. Hostname syntax remains accepted but unsupported at runtime.
 TLS `server_name` supplies certificate verification and SNI, not DNS bootstrap.
 Earlier Linux restart bind failures remain unexplained. Native macOS forwarding feedback remains pending.
@@ -49,7 +50,8 @@ Every answered query emits one completion line on stderr.
 `tls_name` identifies its certificate hostname. Reused TLS connections retain these fields.
 Cache hits show `src=cache` without upstream fields or a new TLS exchange.
 Failed attempts report their endpoint and reason, including certificate errors.
-Health state transitions remain incomplete.
+Health transitions report `event=upstream_health`, the endpoint, transport, state, and failure count.
+DoT transitions include the configured TLS name.
 
 ```sh
 dig @127.0.0.1 -p 8853 example.com A
@@ -61,6 +63,18 @@ The log uses numeric DNS types and full response codes.
 Hostile name bytes use hexadecimal escapes. Malformed questions use explicit placeholders.
 The bounded stderr sink is synchronous. A slow consumer can delay the event thread.
 Sink failures lose logs without a DNS failure. [SPEC §4](SPEC.md#4-observability) defines the fields and timing.
+
+## Upstream health
+
+Each configured endpoint and zone retains its own consecutive failure count. The default threshold is two.
+An admitted DNS response resets that count, including SERVFAIL and REFUSED. RCODEs never trigger failover.
+Transport failures and timeouts penalize health. Local resource failures and cancellation do not.
+A zero `max_fails` disables exclusion and probes. An all-down sequence uses the existing stale or SERVFAIL policy.
+
+Root NS probes set RD and use the configured UDP, forced TCP, or verified DoT transport.
+They bypass the client cache and query-completion logs. Clients receive priority within the shared fixed pools.
+At most two concurrent probes rotate across due endpoints. Resource pressure defers probes, without simultaneous service guarantees for every endpoint.
+Native Linux fixtures cover health recovery. macOS and x86 Linux semantic checks do not establish native execution.
 
 ## Development
 

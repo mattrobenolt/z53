@@ -17,9 +17,16 @@ pub const Destination = struct {
     generation: u31,
     transport: pipeline.Transport,
 };
+pub const Failure = enum { transport, local, cancelled };
+pub const Health = struct {
+    failures: u32 = 0,
+    due_ns: u64 = 0,
+    probe: ?u16 = null,
+};
+pub const probes_max = 2;
 pub const Transaction = struct {
     state: enum { free, ready, active, deliver } = .free,
-    destination: Destination,
+    purpose: union(enum) { client: Destination, probe: u16 },
     zone: u16,
     cursor: u16,
     length: u32,
@@ -96,6 +103,9 @@ pub const Forward = struct {
     support: [config.zones_max]enum { unsupported, supported },
     endpoints: [endpoints_max]std.Io.net.IpAddress,
     protocols: [endpoints_max]?Transport,
+    health: [endpoints_max]Health,
+    probe_cursor: u16,
+    probe_retry_ns: u64,
     transactions: [transactions_max]Transaction,
     sessions: [sessions_max]Session,
     random: std.Random.DefaultCsprng,
@@ -114,6 +124,9 @@ pub const Forward = struct {
         self.trust.bundle = .empty;
         self.support = @splat(.unsupported);
         self.protocols = @splat(null);
+        self.health = @splat(.{});
+        self.probe_cursor = 0;
+        self.probe_retry_ns = 0;
         for (&self.transactions) |*transaction| transaction.state = .free;
         for (&self.sessions) |*session| {
             session.state = .vacant;
@@ -163,7 +176,7 @@ pub const Forward = struct {
         for (&self.transactions, 0..) |*transaction, index| {
             if (transaction.state != .free) continue;
             transaction.state = .ready;
-            transaction.destination = destination.*;
+            transaction.purpose = .{ .client = destination.* };
             transaction.zone = zone;
             transaction.cursor = 0;
             transaction.length = @intCast(input.len);
@@ -176,6 +189,14 @@ pub const Forward = struct {
     pub fn select(self: *Forward, index: u16, now_ns: u64) ?Selection {
         const transaction = &self.transactions[index];
         std.debug.assert(transaction.state == .ready);
+        if (transaction.purpose == .client) {
+            const length = self.config.zones[transaction.zone].upstreams.len;
+            while (transaction.cursor < length) : (transaction.cursor += 1) {
+                const endpoint = transaction.zone * @as(u16, config.upstreams_max) +
+                    transaction.cursor;
+                if (!self.down(endpoint)) break;
+            }
+        }
         if (transaction.cursor == self.config.zones[transaction.zone].upstreams.len) {
             transaction.completion = .exhausted;
             transaction.state = .deliver;
@@ -188,10 +209,15 @@ pub const Forward = struct {
             transaction.state = .deliver;
             return null;
         };
-        const transport: Transport = if (configured == .tls)
-            .tls
-        else if (transaction.destination.transport == .tcp) .tcp else configured;
+        const transport: Transport = switch (transaction.purpose) {
+            .probe => configured,
+            .client => |destination| if (configured == .tls)
+                .tls
+            else if (destination.transport == .tcp) .tcp else configured,
+        };
         const selected = self.selectSession(endpoint, transport, now_ns) orelse {
+            if (transaction.purpose == .probe)
+                self.probe_retry_ns = now_ns + 10 * std.time.ns_per_ms;
             transaction.completion = .local_failure;
             transaction.state = .deliver;
             return null;
@@ -206,6 +232,114 @@ pub const Forward = struct {
         session.deadline_ns = now_ns +
             duration(self.config.zones[transaction.zone].read_timeout_s);
         return selected;
+    }
+
+    pub fn down(self: *const Forward, endpoint: u16) bool {
+        const maximum = self.config.zones[endpoint / config.upstreams_max].max_fails;
+        if (maximum == 0) return false;
+        return self.health[endpoint].failures >= maximum;
+    }
+
+    /// Only retired transport exchanges penalize their configured endpoint.
+    pub fn failedExchange(self: *Forward, index: u16, failure: Failure, now_ns: u64) void {
+        if (failure != .transport) return;
+        const endpoint = self.sessions[index].endpoint;
+        const was_down = self.down(endpoint);
+        const health = &self.health[endpoint];
+        health.failures +|= 1;
+        if (!self.down(endpoint)) return;
+        if (was_down) {
+            const transaction = self.sessions[index].transaction orelse return;
+            if (self.transactions[transaction].purpose != .probe) return;
+        }
+        const zone = &self.config.zones[endpoint / config.upstreams_max];
+        health.due_ns = now_ns + duration(zone.health_check_interval_s);
+        if (was_down) return;
+        const selected = self.selectedUpstream(index);
+        log.health(&self.logger, self.io, &selected, .down, health.failures);
+    }
+
+    fn restored(self: *Forward, index: u16) void {
+        const endpoint = self.sessions[index].endpoint;
+        const was_down = self.down(endpoint);
+        self.health[endpoint].failures = 0;
+        if (!was_down) return;
+        const selected = self.selectedUpstream(index);
+        log.health(&self.logger, self.io, &selected, .restored, 0);
+    }
+
+    fn probesActive(self: *const Forward) u16 {
+        var count: u16 = 0;
+        for (&self.health) |*health| {
+            if (health.probe != null) count += 1;
+        }
+        std.debug.assert(count <= probes_max);
+        return count;
+    }
+
+    pub fn probeDeadline(self: *const Forward) ?u64 {
+        if (self.probesActive() == probes_max) return null;
+        var nearest: ?u64 = null;
+        for (self.config.zones, 0..) |*zone, zone_index| {
+            for (zone.upstreams, 0..) |_, cursor| {
+                const endpoint: u16 = @intCast(zone_index * config.upstreams_max + cursor);
+                if (!self.down(endpoint)) continue;
+                const health = &self.health[endpoint];
+                if (health.probe != null) continue;
+                const due_ns = @max(health.due_ns, self.probe_retry_ns);
+                nearest = @min(nearest orelse due_ns, due_ns);
+            }
+        }
+        return nearest;
+    }
+
+    /// Clients take the shared pools first. Pressure defers probes without an overdue timer loop.
+    pub fn probe(self: *Forward, now_ns: u64) ?u16 {
+        if (self.probesActive() == probes_max) return null;
+        if (now_ns < self.probe_retry_ns) return null;
+        for (0..endpoints_max) |_| {
+            const endpoint = self.probe_cursor;
+            self.probe_cursor = (endpoint + 1) % endpoints_max;
+            if (self.protocols[endpoint] == null) continue;
+            if (!self.down(endpoint)) continue;
+            const health = &self.health[endpoint];
+            if (health.probe != null) continue;
+            if (now_ns < health.due_ns) continue;
+            if (self.selectSession(endpoint, self.protocols[endpoint].?, now_ns) == null) {
+                self.probe_retry_ns = now_ns + 10 * std.time.ns_per_ms;
+                return null;
+            }
+            for (&self.transactions, 0..) |*transaction, index| {
+                if (transaction.state != .free) continue;
+                // RFC 1035 §4.1.2: root NS, IN, RD. prepare supplies a fresh secure ID and OPT.
+                const query = [_]u8{ 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 1 };
+                transaction.purpose = .{ .probe = endpoint };
+                transaction.zone = endpoint / config.upstreams_max;
+                transaction.cursor = endpoint % config.upstreams_max;
+                transaction.length = query.len;
+                @memcpy(transaction.input[0..query.len], &query);
+                transaction.state = .ready;
+                health.probe = @intCast(index);
+                health.due_ns = now_ns +
+                    duration(self.config.zones[transaction.zone].health_check_interval_s);
+                return @intCast(index);
+            }
+            self.probe_retry_ns = now_ns + 10 * std.time.ns_per_ms;
+            return null;
+        }
+        return null;
+    }
+
+    /// Probe completion never enters the client pipeline or its completion logger.
+    pub fn finishProbe(self: *Forward, index: u16) void {
+        const transaction = &self.transactions[index];
+        std.debug.assert(transaction.state == .deliver);
+        const endpoint = transaction.purpose.probe;
+        std.debug.assert(self.health[endpoint].probe == index);
+        self.health[endpoint].probe = null;
+        if (transaction.completion == .response)
+            self.sessions[transaction.completion.response].transaction = null;
+        transaction.state = .free;
     }
 
     fn selectSession(self: *Forward, endpoint: u16, transport: Transport, now_ns: u64) ?Selection {
@@ -371,6 +505,7 @@ pub const Forward = struct {
     pub fn accepted(self: *Forward, index: u16, now_ns: u64) void {
         const session = &self.sessions[index];
         const transaction = &self.transactions[session.transaction.?];
+        self.restored(index);
         transaction.completion = .{ .response = index };
         transaction.state = .deliver;
         session.state = .idle;
@@ -408,13 +543,45 @@ pub const Forward = struct {
         return session.input[2..session.length];
     }
 
-    pub fn closed(self: *Forward, index: u16) void {
+    pub fn localCompletion(
+        self: *Forward,
+        index: u16,
+        retention: enum { immediate, close },
+        now_ns: u64,
+    ) void {
+        const session = &self.sessions[index];
+        const transaction = &self.transactions[session.transaction.?];
+        transaction.completion = .local_failure;
+        if (transaction.purpose == .probe)
+            self.probe_retry_ns = now_ns + 10 * std.time.ns_per_ms;
+        if (retention == .close) {
+            if (transaction.purpose == .probe) return;
+        }
+        transaction.state = .deliver;
+        session.transaction = null;
+    }
+
+    pub fn closed(self: *Forward, index: u16, now_ns: u64) void {
         const session = &self.sessions[index];
         std.debug.assert(session.state == .cancelling);
         if (session.tls.handshake != null) session.tls.deinit();
         session.state = .vacant;
         if (session.transaction) |transaction| {
-            if (session.disposition == .retry) self.transactions[transaction].state = .ready;
+            if (session.disposition == .retire) {
+                if (self.transactions[transaction].purpose == .probe)
+                    self.transactions[transaction].state = .deliver;
+            }
+            if (session.disposition == .retry) {
+                self.failedExchange(index, .transport, now_ns);
+                const value = &self.transactions[transaction];
+                switch (value.purpose) {
+                    .client => value.state = .ready,
+                    .probe => {
+                        value.completion = .exhausted;
+                        value.state = .deliver;
+                    },
+                }
+            }
         }
         if (session.disposition != .replace) session.transaction = null;
     }
@@ -427,7 +594,7 @@ pub fn duration(seconds: f64) u64 {
 }
 
 comptime {
-    std.debug.assert(@sizeOf(std.Io.net.IpAddress) <= 64);
+    std.debug.assert(@sizeOf(std.Io.net.IpAddress) + @sizeOf(?Transport) + @sizeOf(Health) <= 64);
     std.debug.assert(@sizeOf(Forward) <= storage_bytes_max);
 }
 

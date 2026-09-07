@@ -815,6 +815,7 @@ test "forward native cancellation in each upstream phase" {
         try testing.expect(!harness.service.proctor.pending());
         try testing.expectEqual(.active, harness.service.forward.transactions[transaction].state);
         try testing.expectEqual(generation, harness.service.forward.sessions[index].generation);
+        try testing.expectEqual(0, harness.service.forward.health[0].failures);
     }
 }
 
@@ -846,7 +847,7 @@ test "forward native pool exhaustion retains thirty-two owned requests" {
             (try wire.Header.decode(transaction.input[0..transaction.length])).id,
         );
         try testing.expectEqual(1, transaction.cursor);
-        const destination = transaction.destination;
+        const destination = transaction.purpose.client;
         if (builtin.os.tag == .linux) {
             try testing.expectEqual(.reserved, harness.service.responses[destination.index].state);
         } else {
@@ -889,6 +890,7 @@ test "forward native socket resource exhaustion stays uncached" {
         harness.service.pipeline.zones[0].cache.denial.entries.items(.bytes)[0],
     );
     try testing.expectEqual(1, harness.service.forward.transactions[0].cursor);
+    try testing.expectEqual(0, harness.service.forward.health[0].failures);
     for (&harness.service.forward.sessions) |*session|
         try testing.expectEqual(.vacant, session.state);
     try testing.expectEqual(0, system.setrlimit(.NOFILE, &previous));
@@ -1270,7 +1272,7 @@ const Darwin = struct {
         harness.service.forward.sessions[first.session].deadline_ns = try runtime.nowNs();
         const stored_length = entry.items(.bytes)[0].?.len;
         @memcpy(response[0..stored_length], entry.items(.bytes)[0].?);
-        for ([_]system.E{ .NOMEM, .NOBUFS, .MFILE, .NFILE }) |failure| {
+        for ([_]system.E{ .NOMEM, .NOBUFS, .MFILE, .NFILE, .CANCELED }) |failure| {
             for ([_]enum { socket, syscall }{ .socket, .syscall }) |source| {
                 harness.service.upstreams.test_connect_error = switch (source) {
                     .socket => .{ .socket = failure },
@@ -1282,6 +1284,7 @@ const Darwin = struct {
                 // Retry mutations fail here, before any response wait.
                 try testing.expectEqual(1, harness.service.forward.transactions[0].cursor);
                 try testing.expectEqual(.vacant, harness.service.forward.sessions[index].state);
+                try testing.expectEqual(0, harness.service.forward.health[0].failures);
                 const length = try harness.receive(client, &output);
                 const header = try wire.Header.decode(output[0..length]);
                 try testing.expectEqual(2, header.bits & 15);
@@ -1927,6 +1930,78 @@ const LinuxPair = struct {
             try testing.expectEqual(1, logs.count("event=query proto=tcp client=unknown "));
         }
     };
+
+    // SPEC §§1.1, 3.6, 4: synthetic orders retain probe identity through both owners.
+    // The fixture question stays synthetic. Native health tests prove the actual root query.
+    test "health driver pair probe response publication and stale generations" {
+        for (orders) |order| {
+            var fixture: Fixture = undefined;
+            try fixture.init();
+            defer fixture.deinit();
+            const service = fixture.service;
+            fixture.zones[0].max_fails = 1;
+            service.forward.health[0] = .{ .failures = 1, .probe = 0 };
+            service.forward.transactions[0].purpose = .{ .probe = 0 };
+            var logs: logging.Capture = .{};
+            service.forward.logger = logs.sink();
+            const token = service.proctor.ownership[fixture.slot].token(fixture.slot);
+            const before = fixture.snapshot();
+            try fixture.pair(order, try fixture.response(), negative(.CANCELED));
+            try testing.expectEqual(0, service.forward.health[0].failures);
+            try testing.expectEqual(1, logs.count("state=restored failures=0"));
+            try service.deliverForwards();
+            try service.deliverForwards();
+            try testing.expectEqual(.free, service.forward.transactions[0].state);
+            try testing.expectEqual(null, service.forward.health[0].probe);
+            try testing.expectEqual(.waiting, service.clients[0].phase);
+            try testing.expectEqual(
+                before.client_hash,
+                std.hash.Wyhash.hash(0, &service.clients[0].output),
+            );
+            try testing.expectEqual(0, logs.count("event=query"));
+            try fixture.empty();
+            _ = try service.proctor.arm(fixture.slot);
+            try testing.expectError(
+                error.InvalidCompletion,
+                service.proctor.ownership[fixture.slot].complete(token, .terminal),
+            );
+            try testing.expectEqual(0, service.forward.health[0].failures);
+            try testing.expectEqual(1, logs.count("event=upstream_health"));
+        }
+    }
+
+    // SPEC §§1.1, 3.6: only close retirement counts a probe failure, not either linked CQE alone.
+    test "health driver pair probe local and transport retirement exactly once" {
+        for ([_]linux.E{ .CONNRESET, .NOMEM, .CANCELED }) |failure| {
+            for (orders) |order| {
+                var fixture: Fixture = undefined;
+                try fixture.init();
+                defer fixture.deinit();
+                const service = fixture.service;
+                fixture.zones[0].max_fails = 1;
+                service.forward.health[0] = .{ .failures = 1, .probe = 0 };
+                service.forward.transactions[0].purpose = .{ .probe = 0 };
+                var logs: logging.Capture = .{};
+                service.forward.logger = logs.sink();
+                try fixture.pair(order, negative(failure), negative(.CANCELED));
+                try testing.expectEqual(1, service.forward.health[0].failures);
+                try testing.expectEqual(@as(?u16, 0), service.forward.health[0].probe);
+                try testing.expectEqual(.active, service.forward.transactions[0].state);
+                try fixture.close(if (failure == .CONNRESET) .retry else .retire);
+                const expected: u32 = if (failure == .CONNRESET) 2 else 1;
+                try testing.expectEqual(expected, service.forward.health[0].failures);
+                try testing.expectEqual(.deliver, service.forward.transactions[0].state);
+                try service.deliverForwards();
+                try service.deliverForwards();
+                try testing.expectEqual(null, service.forward.health[0].probe);
+                try testing.expectEqual(expected, service.forward.health[0].failures);
+                try testing.expectEqual(1, logs.count("event=upstream_failure"));
+                try testing.expectEqual(0, logs.count("event=upstream_health"));
+                try testing.expectEqual(0, logs.count("event=query"));
+                try fixture.empty();
+            }
+        }
+    }
 
     fn socketPair() ![2]linux.fd_t {
         var descriptors: [2]linux.fd_t = undefined;
@@ -2788,7 +2863,7 @@ test "forward UDP native truncation and client TCP retry" {
 }
 
 // SPEC §3.6, §4: a silent UDP primary times out before the next configured TCP member answers.
-test "forward UDP native timeout advances to TCP fallback logging" {
+test "health forward UDP native timeout advances to TCP fallback logging" {
     var harness: Harness = undefined;
     try harness.init();
     defer harness.deinit();
@@ -2804,6 +2879,8 @@ test "forward UDP native timeout advances to TCP fallback logging" {
     harness.upstreams[0].force_tcp = false;
     harness.zones[0].upstreams = &harness.upstreams;
     harness.zones[0].read_timeout_s = 0.05;
+    harness.zones[0].max_fails = 1;
+    harness.zones[0].health_check_interval_s = 60;
     try harness.start();
     var logs: logging.Capture = .{};
     harness.service.forward.logger = logs.sink();
@@ -2832,6 +2909,20 @@ test "forward UDP native timeout advances to TCP fallback logging" {
         "src=forward upstream={s} upstream_proto=tcp",
         .{harness.upstreams[1].address},
     ));
+    try send(client, try query(&input, 54, "skip-primary.example."));
+    const next = try harness.request(&upstream);
+    try testing.expectEqual(1, harness.service.forward.sessions[next.session].endpoint);
+    try send(harness.peer.?, try answer(&response, next.bytes, 0, 1));
+    _ = try harness.receive(client, &output);
+    try testing.expectEqual(1, logs.count("event=upstream_failure"));
+    try testing.expectEqual(1, logs.count("state=down failures=1"));
+    try testing.expectEqual(2, logs.count("event=query"));
+    try testing.expectEqual(system.E.AGAIN, std.posix.errno(system.recv(
+        peer.descriptor,
+        &upstream,
+        upstream.len,
+        0,
+    )));
     try harness.stop();
 }
 
@@ -2908,11 +2999,13 @@ const DotPeer = struct {
     request_length: u32 = 0,
     requests: u32 = 0,
     connections: u32 = 0,
+    answer_count: u16 = 1,
 
     fn init(self: *DotPeer) !void {
         self.descriptor = null;
         self.requests = 0;
         self.connections = 0;
+        self.answer_count = 1;
         self.chain = .{@embedFile("fixtures/dot-ca.der")};
         self.signer = try .fromPem(.ecdsa_secp256r1_sha256, @embedFile("fixtures/dot-key.pem"));
         self.reset();
@@ -2995,7 +3088,7 @@ const DotPeer = struct {
         if (self.request_length < length) return;
         try testing.expectEqual(length, self.request_length);
         var response: [512]u8 = undefined;
-        const framed = try answer(&response, self.request[2..length], 0, 1);
+        const framed = try answer(&response, self.request[2..length], 0, self.answer_count);
         // KeyUpdate requires a response before the next request can use the new keys.
         try self.write(try self.handshake.sendKeyUpdate(&self.output, .update_requested));
         try self.write(try self.handshake.sendApplicationData(framed[0..1], &self.output));
@@ -3085,7 +3178,7 @@ test "forward TLS native encrypted exchange reuse and key update logging" {
 }
 
 // SPEC §3.6: CA and hostname failures are transport failures, never plaintext on the TLS member.
-test "forward TLS native rejects wrong hostname and untrusted CA" {
+test "health forward TLS native rejects wrong hostname and untrusted CA probes" {
     for ([_]enum { hostname, authority }{ .hostname, .authority }) |failure| {
         var harness: Harness = undefined;
         try harness.init();
@@ -3095,7 +3188,11 @@ test "forward TLS native rejects wrong hostname and untrusted CA" {
         else
             "dns.example" };
         harness.zones[0].cache = .{ .capacity = 1 };
+        harness.zones[0].max_fails = 1;
+        harness.zones[0].health_check_interval_s = 0.01;
         try harness.start();
+        var logs: logging.Capture = .{};
+        harness.service.forward.logger = logs.sink();
         if (failure == .hostname) try dotTrust(&harness);
         var peer: DotPeer = undefined;
         try peer.init();
@@ -3111,6 +3208,19 @@ test "forward TLS native rejects wrong hostname and untrusted CA" {
         try testing.expectEqual(1, peer.connections);
         const denial = harness.service.pipeline.zones[0].cache.denial.entries.get(0);
         try testing.expectEqual(5, denial.lifetime_s);
+        try testing.expectEqual(1, harness.service.forward.health[0].failures);
+        for (0..256) |_| {
+            try peer.step(harness.listener.?);
+            if (harness.service.forward.health[0].failures == 2) break;
+            try testing.expect(try harness.service.step());
+        }
+        try testing.expectEqual(2, harness.service.forward.health[0].failures);
+        try testing.expectEqual(0, peer.requests);
+        try testing.expectEqual(2, peer.connections);
+        try testing.expectEqual(1, logs.count("event=query"));
+        try testing.expectEqual(2, logs.count("event=upstream_failure"));
+        try testing.expectEqual(1, logs.count("state=down failures=1"));
+        try testing.expectEqual(0, logs.count("state=restored"));
         try harness.stop();
     }
 }
@@ -3351,6 +3461,263 @@ fn stressAnswer(packet: *wire.Packet, bytes: []const u8, id: u16, key: u16) !voi
         &.{ 192, 0, 2, 0 },
         bytes[record.data_start..record.data_end],
     );
+}
+
+// SPEC §§3.6, 4: an uncached query skips the down primary.
+// The UDP probe restores health without client traffic.
+test "health native UDP exclusion recovery error rcode and no probe completion log" {
+    var harness: Harness = undefined;
+    try harness.init();
+    defer harness.deinit();
+    var peer: DatagramPeer = undefined;
+    try peer.init(&harness);
+    defer _ = system.close(peer.descriptor);
+    harness.upstreams[0].force_tcp = false;
+    harness.zones[0].max_fails = 1;
+    harness.zones[0].read_timeout_s = 0.02;
+    harness.zones[0].health_check_interval_s = 0.1;
+    try harness.start();
+    var logs: logging.Capture = .{};
+    harness.service.forward.logger = logs.sink();
+    const allocations = harness.allocator.alloc_index;
+    harness.allocator.fail_index = allocations;
+    const client = try harness.client(system.SOCK.DGRAM);
+    defer _ = system.close(client);
+    var input: [512]u8 = undefined;
+    var upstream: [512]u8 = undefined;
+    var response: [512]u8 = undefined;
+    var output: [512]u8 = undefined;
+    try send(client, try query(&input, 81, "down.example."));
+    _ = try peer.request(&harness, &upstream);
+    _ = try harness.receive(client, &output);
+    try testing.expectEqual(1, harness.service.forward.health[0].failures);
+    try send(client, try query(&input, 82, "uncached.example."));
+    _ = try harness.receive(client, &output);
+    try testing.expectEqual(1, logs.count("event=upstream_failure"));
+    try testing.expectEqual(2, logs.count("event=query"));
+    const probe = try peer.request(&harness, &upstream);
+    try healthQuestion(probe);
+    try healthRejectedDatagrams(&harness, &peer, probe);
+    const framed = try answer(&response, probe, 2, 0);
+    try peer.respond(framed[2..]);
+    try healthRecovered(&harness);
+    try testing.expectEqual(1, logs.count("state=down failures=1"));
+    try testing.expectEqual(1, logs.count("state=restored failures=0"));
+    try testing.expectEqual(2, logs.count("event=query"));
+    try send(client, try query(&input, 83, "recovered.example."));
+    const request = try peer.request(&harness, &upstream);
+    const valid = try answer(&response, request, 0, 1);
+    try peer.respond(valid[2..]);
+    const length = try harness.receive(client, &output);
+    try testing.expectEqual(1, (try wire.Header.decode(output[0..length])).counts[1]);
+    try testing.expectEqual(allocations, harness.allocator.alloc_index);
+    try testing.expect(!harness.allocator.has_induced_failure);
+    try harness.stop();
+}
+
+fn healthRejectedDatagrams(harness: *Harness, peer: *DatagramPeer, request: []const u8) !void {
+    const index = try harness.phase(.read_datagram);
+    const session = &harness.service.forward.sessions[index];
+    const deadline_ns = session.deadline_ns;
+    const slot = if (builtin.os.tag == .linux) 225 + @as(u32, index) * 2 else 177 + @as(u32, index);
+    const owner = &harness.service.proctor.ownership[slot];
+    for ([_]enum { identifier, question, malformed }{ .identifier, .question, .malformed }) |bad| {
+        var response: [512]u8 = undefined;
+        const framed = try answer(&response, request, 0, 0);
+        switch (bad) {
+            .identifier => response[2] ^= 1,
+            .question => response[17] ^= 1,
+            .malformed => response[6] = 0xff,
+        }
+        const generation = owner.generation;
+        try peer.respond(framed[2..]);
+        for (0..16) |_| {
+            if (owner.generation > generation) break;
+            try testing.expect(try harness.service.step());
+        }
+        try testing.expect(owner.generation > generation);
+        try testing.expectEqual(.read_datagram, session.state);
+        try testing.expectEqual(deadline_ns, session.deadline_ns);
+        try testing.expectEqual(1, harness.service.forward.health[0].failures);
+    }
+}
+
+fn healthQuestion(bytes: []const u8) !void {
+    const header = try wire.Header.decode(bytes);
+    try testing.expect(header.has(.recursion_desired));
+    try testing.expectEqual(1, header.counts[0]);
+    try testing.expectEqualSlices(u8, &.{ 0, 0, 2, 0, 1 }, bytes[12..17]);
+}
+
+fn healthRecovered(harness: *Harness) !void {
+    for (0..256) |_| {
+        if (harness.service.forward.health[0].failures == 0) return;
+        try testing.expect(try harness.service.step());
+    }
+    return error.HealthNotRestored;
+}
+
+// SPEC §§3.6, 3.7: an all-down query retains stale bytes without another transport attempt.
+test "health native all down stale and forced TCP probe recovery reuse" {
+    var harness: Harness = undefined;
+    try harness.init();
+    defer harness.deinit();
+    harness.zones[0].max_fails = 1;
+    harness.zones[0].cache = .{ .capacity = 1 };
+    harness.zones[0].serve_stale_s = 300;
+    harness.zones[0].read_timeout_s = 0.05;
+    harness.zones[0].health_check_interval_s = 0.1;
+    try harness.start();
+    var logs: logging.Capture = .{};
+    harness.service.forward.logger = logs.sink();
+    const client = try harness.client(system.SOCK.DGRAM);
+    defer _ = system.close(client);
+    var input: [512]u8 = undefined;
+    var upstream: [512]u8 = undefined;
+    var response: [512]u8 = undefined;
+    var output: [512]u8 = undefined;
+    const bytes = try query(&input, 84, "stale-health.example.");
+    try send(client, bytes);
+    const first = try harness.request(&upstream);
+    try send(harness.peer.?, try answer(&response, first.bytes, 0, 1));
+    _ = try harness.receive(client, &output);
+    const entry = harness.service.pipeline.zones[0].cache.positive.entries.slice();
+    const stored = entry.items(.bytes)[0].?.ptr;
+    entry.items(.inserted_s)[0] = (try runtime.now()) - entry.items(.lifetime_s)[0];
+    try send(client, bytes);
+    _ = try harness.receive(client, &output);
+    try testing.expectEqual(1, harness.service.forward.health[0].failures);
+    try send(client, bytes);
+    _ = try harness.receive(client, &output);
+    try testing.expectEqual(2, logs.count("src=stale"));
+    try testing.expectEqual(1, logs.count("event=upstream_failure"));
+    try testing.expectEqual(stored, entry.items(.bytes)[0].?.ptr);
+    _ = system.close(harness.peer.?);
+    harness.peer = null;
+    const probe = try harness.request(&upstream);
+    try healthQuestion(probe.bytes);
+    const session = &harness.service.forward.sessions[probe.session];
+    try testing.expectEqual(.tcp, session.transport);
+    const generation = session.generation;
+    try send(harness.peer.?, try answer(&response, probe.bytes, 5, 0));
+    try healthRecovered(&harness);
+    try testing.expectEqual(3, logs.count("event=query"));
+    try testing.expectEqual(stored, entry.items(.bytes)[0].?.ptr);
+    try send(client, bytes);
+    const recovered = try harness.request(&upstream);
+    try testing.expectEqual(probe.session, recovered.session);
+    try testing.expectEqual(generation, session.generation);
+    try send(harness.peer.?, try answer(&response, recovered.bytes, 0, 1));
+    _ = try harness.receive(client, &output);
+    try testing.expectEqual(1, logs.count("state=restored failures=0"));
+    try harness.stop();
+}
+
+// SPEC §§1.1, 1.2, 3.6: stop retains an active probe through native cancellation.
+// Cancellation causes no health penalty.
+test "health native pending UDP probe stop retains buffers and counters" {
+    var harness: Harness = undefined;
+    try harness.init();
+    defer harness.deinit();
+    var peer: DatagramPeer = undefined;
+    try peer.init(&harness);
+    defer _ = system.close(peer.descriptor);
+    harness.upstreams[0].force_tcp = false;
+    harness.zones[0].max_fails = 1;
+    harness.zones[0].read_timeout_s = 0.02;
+    harness.zones[0].health_check_interval_s = 0.01;
+    try harness.start();
+    var logs: logging.Capture = .{};
+    harness.service.forward.logger = logs.sink();
+    const client = try harness.client(system.SOCK.DGRAM);
+    defer _ = system.close(client);
+    var input: [512]u8 = undefined;
+    var upstream: [512]u8 = undefined;
+    var output: [512]u8 = undefined;
+    try send(client, try query(&input, 85, "stop-health.example."));
+    _ = try peer.request(&harness, &upstream);
+    _ = try harness.receive(client, &output);
+    const probe = try peer.request(&harness, &upstream);
+    try healthQuestion(probe);
+    const index = try harness.phase(.read_datagram);
+    const session = &harness.service.forward.sessions[index];
+    const transaction = session.transaction.?;
+    const generation = session.generation;
+    const output_length = @as(u32, wire.integer(u16, session.output[0..2])) + 2;
+    const hash = std.hash.Wyhash.hash(0, session.output[0..output_length]);
+    try harness.stop();
+    try testing.expect(!harness.service.proctor.pending());
+    try testing.expectEqual(1, harness.service.forward.health[0].failures);
+    try testing.expectEqual(transaction, harness.service.forward.health[0].probe.?);
+    try testing.expectEqual(.active, harness.service.forward.transactions[transaction].state);
+    try testing.expectEqual(generation, session.generation);
+    try testing.expectEqual(hash, std.hash.Wyhash.hash(0, session.output[0..output_length]));
+    try testing.expectEqual(1, logs.count("event=query"));
+    try testing.expectEqual(1, logs.count("event=upstream_failure"));
+    harness.release();
+    try testing.expectEqual(harness.allocator.allocated_bytes, harness.allocator.freed_bytes);
+}
+
+// SPEC §§3.6, 4: a verified DoT probe restores health without client traffic.
+// Subsequent client requests reuse its TLS connection.
+test "health native verified DoT probe and authenticated connection reuse" {
+    var harness: Harness = undefined;
+    try harness.init();
+    defer harness.deinit();
+    harness.upstreams[0].tls = .{ .server_name = "dns.example" };
+    harness.zones[0].max_fails = 1;
+    harness.zones[0].cache = .{ .capacity = 1 };
+    harness.zones[0].rotate = true;
+    harness.zones[0].read_timeout_s = 0.02;
+    harness.zones[0].health_check_interval_s = 0.1;
+    try harness.start();
+    try dotTrust(&harness);
+    var peer: DotPeer = undefined;
+    try peer.init();
+    defer peer.deinit();
+    var logs: logging.Capture = .{};
+    harness.service.forward.logger = logs.sink();
+    const client = try harness.client(system.SOCK.DGRAM);
+    defer _ = system.close(client);
+    var input: [512]u8 = undefined;
+    var output: [512]u8 = undefined;
+    try send(client, try query(&input, 86, "dot-health.example."));
+    // The owned TCP listener remains silent through the first handshake deadline.
+    _ = try harness.receive(client, &output);
+    try testing.expectEqual(1, harness.service.forward.health[0].failures);
+    const abandoned = system.accept(harness.listener.?, null, null);
+    try testing.expect(abandoned >= 0);
+    _ = system.close(abandoned);
+    harness.zones[0].read_timeout_s = 2;
+    peer.answer_count = 2;
+    const rotation = harness.service.pipeline.random;
+    for (0..512) |_| {
+        try peer.step(harness.listener.?);
+        if (harness.service.forward.health[0].failures == 0) break;
+        try testing.expect(try harness.service.step());
+    }
+    try testing.expectEqual(0, harness.service.forward.health[0].failures);
+    try testing.expectEqual(1, peer.requests);
+    try healthQuestion(peer.request[2..]);
+    try testing.expectEqualSlices(
+        u8,
+        std.mem.asBytes(&rotation),
+        std.mem.asBytes(&harness.service.pipeline.random),
+    );
+    try testing.expectEqual(
+        null,
+        harness.service.pipeline.zones[0].cache.positive.entries.items(.bytes)[0],
+    );
+    try testing.expectEqual(1, logs.count("event=query"));
+    try logs.contains("upstream_proto=dot tls_name=\"dns.example\" state=restored failures=0");
+    const connections = peer.connections;
+    peer.answer_count = 1;
+    try send(client, try query(&input, 87, "dot-recovered.example."));
+    const length = try dotReceive(&harness, &peer, client, &output);
+    try testing.expectEqual(1, (try wire.Header.decode(output[0..length])).counts[1]);
+    try testing.expectEqual(connections, peer.connections);
+    try testing.expectEqual(2, peer.requests);
+    try harness.stop();
 }
 
 fn fillStressCache(

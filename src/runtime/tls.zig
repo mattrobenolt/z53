@@ -154,7 +154,7 @@ pub const Connection = struct {
     }
 };
 
-fn classify(err: engine.errors.HandshakeError) Error {
+pub fn classify(err: engine.errors.HandshakeError) Error {
     return switch (engine.errors.classify(err)) {
         .internal, .buffer, .options => error.LocalFailure,
         else => error.TransportFailure,

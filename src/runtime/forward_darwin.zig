@@ -11,7 +11,7 @@ const Operation = struct {
     address: runtime.address.Address,
     peer: struct { endpoint: u16, generation: u31 },
 };
-const ConnectResult = enum { success, transport_failure, local_resource };
+const ConnectResult = enum { success, transport_failure, local_resource, cancelled };
 const ConnectError = union(enum) { socket: system.E, syscall: system.E };
 
 pub const Driver = struct {
@@ -40,30 +40,7 @@ pub const Driver = struct {
         for (0..16) |_| {
             for (&service.forward.transactions, 0..) |*transaction, index| {
                 if (transaction.state != .ready) continue;
-                const selected = service.forward.select(@intCast(index), try runtime.nowNs()) orelse
-                    continue;
-                const session = &service.forward.sessions[selected.session];
-                service.forward.prepare(selected.session, &service.pipeline) catch {
-                    transaction.completion = .local_failure;
-                    transaction.state = .deliver;
-                    session.transaction = null;
-                    if (selected.action != .connect)
-                        try self.close(service, selected.session, .retire);
-                    continue;
-                };
-                switch (selected.action) {
-                    .connect => try self.connect(service, selected.session),
-                    .reuse => {
-                        session.state = .writing;
-                        if (session.transport == .tls) {
-                            try self.pumpTls(service, selected.session);
-                        } else try self.arm(service, selected.session);
-                    },
-                    .replace => {
-                        try self.close(service, selected.session, .replace);
-                        try self.connect(service, selected.session);
-                    },
-                }
+                try self.start(service, @intCast(index), try runtime.nowNs());
             }
         }
         // The final synchronous failure can exhaust the last entry without another socket event.
@@ -72,7 +49,40 @@ pub const Driver = struct {
                 _ = service.forward.select(@intCast(index), try runtime.nowNs());
         }
         try service.deliverForwards();
+        for (0..forward.probes_max) |_| {
+            const now_ns = try runtime.nowNs();
+            const index = service.forward.probe(now_ns) orelse break;
+            try self.start(service, index, now_ns);
+        }
+        try service.deliverForwards();
         try self.timer(service);
+    }
+
+    fn start(self: *Driver, service: *runtime.Runtime, index: u16, now_ns: u64) runtime.Error!void {
+        const selected = service.forward.select(index, now_ns) orelse return;
+        const session = &service.forward.sessions[selected.session];
+        service.forward.prepare(selected.session, &service.pipeline) catch {
+            service.forward.localCompletion(
+                selected.session,
+                if (selected.action == .connect) .immediate else .close,
+                now_ns,
+            );
+            if (selected.action != .connect) try self.close(service, selected.session, .retire);
+            return;
+        };
+        switch (selected.action) {
+            .connect => try self.connect(service, selected.session),
+            .reuse => {
+                session.state = .writing;
+                if (session.transport == .tls) {
+                    try self.pumpTls(service, selected.session);
+                } else try self.arm(service, selected.session);
+            },
+            .replace => {
+                try self.close(service, selected.session, .replace);
+                try self.connect(service, selected.session);
+            },
+        }
     }
 
     fn connect(self: *Driver, service: *runtime.Runtime, index: u16) runtime.Error!void {
@@ -100,27 +110,19 @@ pub const Driver = struct {
         if (result < 0) {
             switch (std.posix.errno(result)) {
                 .INPROGRESS, .INTR => {},
-                .MFILE, .NFILE, .NOBUFS, .NOMEM => {
-                    const transaction = &service.forward.transactions[session.transaction.?];
-                    transaction.completion = .local_failure;
-                    transaction.state = .deliver;
-                    session.transaction = null;
-                    return self.close(service, index, .retire);
-                },
+                .CANCELED => return self.abortLocal(service, index),
+                .MFILE, .NFILE, .NOBUFS, .NOMEM => return self.abortLocal(service, index),
                 else => return self.close(service, index, .retry),
             }
         }
         try self.arm(service, index);
     }
 
-    fn localFailure(self: *Driver, service: *runtime.Runtime, index: u16) void {
+    fn localFailure(self: *Driver, service: *runtime.Runtime, index: u16) runtime.Error!void {
         _ = self;
         service.forward.failed(index, "local_resource");
         const session = &service.forward.sessions[index];
-        const transaction = &service.forward.transactions[session.transaction.?];
-        transaction.completion = .local_failure;
-        transaction.state = .deliver;
-        session.transaction = null;
+        service.forward.localCompletion(index, .immediate, try runtime.nowNs());
         session.state = .vacant;
     }
 
@@ -147,7 +149,7 @@ pub const Driver = struct {
         if (session.state == .connecting) {
             switch (self.connected(descriptor)) {
                 .transport_failure => return self.close(service, index, .retry),
-                .local_resource => return self.abortLocal(service, index),
+                .local_resource, .cancelled => return self.abortLocal(service, index),
                 .success => {
                     service.forward.connected(index) catch |err|
                         return self.tlsFailed(service, index, err);
@@ -175,6 +177,7 @@ pub const Driver = struct {
         if (count < 0) {
             switch (std.posix.errno(count)) {
                 .AGAIN, .INTR => return self.arm(service, index),
+                .CANCELED => return self.abortLocal(service, index),
                 .MFILE, .NFILE, .NOBUFS, .NOMEM => return self.abortLocal(service, index),
                 else => return self.close(service, index, .retry),
             }
@@ -213,6 +216,7 @@ pub const Driver = struct {
         if (count < 0) {
             switch (std.posix.errno(count)) {
                 .AGAIN, .INTR => return self.arm(service, index),
+                .CANCELED => return self.abortLocal(service, index),
                 .MFILE, .NFILE, .NOBUFS, .NOMEM => return self.abortLocal(service, index),
                 else => return self.close(service, index, .retry),
             }
@@ -247,11 +251,7 @@ pub const Driver = struct {
 
     fn abortLocal(self: *Driver, service: *runtime.Runtime, index: u16) runtime.Error!void {
         service.forward.failed(index, service.forward.sessions[index].failure_reason);
-        const session = &service.forward.sessions[index];
-        const transaction = &service.forward.transactions[session.transaction.?];
-        transaction.completion = .local_failure;
-        transaction.state = .deliver;
-        session.transaction = null;
+        service.forward.localCompletion(index, .close, try runtime.nowNs());
         try self.close(service, index, .retire);
     }
 
@@ -275,7 +275,7 @@ pub const Driver = struct {
         self.operations[index].descriptor = null;
         service.forward.sessions[index].state = .cancelling;
         service.forward.sessions[index].disposition = disposition;
-        service.forward.closed(index);
+        service.forward.closed(index, try runtime.nowNs());
     }
 
     pub fn expired(self: *Driver, service: *runtime.Runtime) runtime.Error!void {
@@ -296,7 +296,7 @@ pub const Driver = struct {
     }
 
     fn timer(self: *Driver, service: *runtime.Runtime) runtime.Error!void {
-        var nearest: ?u64 = null;
+        var nearest = service.forward.probeDeadline();
         for (&service.forward.sessions) |*session| {
             switch (session.state) {
                 .vacant, .cancelling => continue,
@@ -316,6 +316,7 @@ pub const Driver = struct {
             .socket => |failure| classifyConnect(failure),
             .syscall => |failure| switch (classifyConnect(failure)) {
                 .local_resource => .local_resource,
+                .cancelled => .cancelled,
                 else => .transport_failure,
             },
         };
@@ -346,6 +347,7 @@ pub const Driver = struct {
 fn classifyConnect(failure: system.E) ConnectResult {
     return switch (failure) {
         .SUCCESS => .success,
+        .CANCELED => .cancelled,
         .MFILE, .NFILE, .NOBUFS, .NOMEM => .local_resource,
         else => .transport_failure,
     };

@@ -1309,3 +1309,44 @@ Tests cover every class boundary, full-size DNS delivery, exhausted refresh, cla
 A mutation disables same-class reuse. The full-arena refresh test fails with `expected .stored, found .exhausted` before source restoration.
 The final resolver suite passes 59 tests. The config suite passes 16 tests, and the forward selection passes all 54 tests.
 The forwarding fixture now accounts for the extra startup allocation without any runtime teardown change.
+
+## Upstream health (#1)
+
+Scope approval: [#1](https://github.com/mattrobenolt/z53/issues/1#issuecomment-5575078580).
+Health precedes packaging. This slice does not change deployment, dependency pins, or production teardown.
+
+Each configured endpoint and zone retains separate consecutive failure counters, even when addresses match.
+Counters saturate at the maximum `u32`. The default threshold remains two.
+A zero `max_fails` disables exclusion and probes. An all-down sequence uses existing exhausted, stale, or SERVFAIL handling instead of random known-down retries.
+These two edge decisions are explicit additions to SPEC section 3.6.
+
+An admitted DNS response resets failures before client encoding, including SERVFAIL and REFUSED.
+A local encoding failure cannot turn that response into a transport failure.
+Typed transport disposition supplies health accounting. Diagnostic strings never select a health penalty.
+Local resources, crypto failures, and cancellation remain non-penalties.
+
+Transactions explicitly distinguish client destinations from probe endpoints.
+Probes occupy at most two of the existing 32 transactions and 32 sessions. No additional packet buffers or general allocator calls exist.
+They query root NS with RD and a fresh CSPRNG identifier. Normal response admission rejects stale identities without deadline renewal.
+Probes bypass cache lookup, cache publication, rotation, client buffers, and completion logs.
+The configured transport selects UDP, forced TCP, or authenticated DoT. Reusable connections retain the same transport and endpoint checks.
+
+Clients take the shared pools first. A bounded round-robin scan selects due endpoints.
+Each endpoint retains at most one active probe. Full probe capacity waits for ordinary exchange completion or timeout.
+Other local resource pressure imposes a ten-millisecond retry floor, without an overdue deadline loop or health penalty.
+The configured interval starts at down transition and failed probe retirement. Deferral prevents a simultaneous-probe guarantee across all 1024 slots.
+
+Linux accounts for failure after close retirement, after both linked CQEs and any cancellation acknowledgements.
+A local probe failure also retains its transaction through close retirement. Late generations cannot release or penalize a replacement exchange.
+Darwin retains the existing EV_DELETE barrier before socket close and session retirement.
+Runtime stop suppresses dispatch and leaves probe storage alive through existing cancellation and teardown barriers.
+No production teardown redesign accompanies these changes.
+
+Each down or restored transition produces one bounded health event with transport and endpoint fields.
+DoT events include the TLS name. Restored events report zero failures.
+Existing attempt-failure events remain separate. Probes never emit query-completion events.
+
+Native Linux fixtures exercise UDP, forced TCP, verified DoT, idle recovery, and pending-probe stop.
+Synthetic linked-order tests cover ownership permutations, not kernel completion order.
+Foreign semantic compilation does not establish native macOS or x86 Linux execution.
+Parent-owned live configuration checks and native foreign execution remain separate. Historical restart failures remain unresolved and untested in this slice.
