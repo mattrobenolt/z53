@@ -1254,4 +1254,8 @@ Tests cover collision continuation, exact capacities, slot reuse, and allocated 
 Existing tests retain stale, cross-bank replacement, LRU, and allocation-failure rollback checks.
 A mutation accepted fingerprints without complete key equality.
 The dense-index regression failed with `expected null, found 0`. The source was restored before the passing resolver run.
-Performance evidence follows the tested candidate commit. The earlier baseline capture remains unchanged.
+The [paired capture](benchmarks/2026-09-06-cache-soa.txt) measures committed candidate `8c8204b` against the preserved baseline binary.
+At default capacity, median random-index latency falls 97.48%. The pipeline guardrail falls 75.33%.
+First-slot index latency rises from 23.64 to 50.58 nanoseconds. Default metadata allocation rises from 6240000 to 6300000 bytes.
+The [benchmark notes](benchmarks/README.md#stdlib-soa-comparison-1) record boundaries, variation, and remaining limits.
+The earlier baseline capture remains unchanged. Packet slab storage remains a separate slice.

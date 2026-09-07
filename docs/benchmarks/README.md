@@ -1,5 +1,7 @@
 # Cache baseline (#1)
 
+The [retained stdlib SoA comparison](#stdlib-soa-comparison-1) follows the original baseline below.
+
 [Raw trials, counters, profile, and disassembly](2026-09-06-cache-baseline.txt) use production source `822e3aa5424b8aaa034af7688104ba51697d07d2`.
 The host is launchpad: aarch64 Neoverse-V3, Linux 7.2.3, Zig 0.16.0, and ReleaseSafe.
 The flake supplies the tools. Dependency pins and production algorithms remain unchanged.
@@ -91,3 +93,83 @@ The first native fixture attempt incorrectly treated a response as `resolver.Req
 
 Native macOS execution, overnight soak, production load, and cold population timing remain unproved.
 Health probes, listener bootstrap, final packaging, and historical restart issues remain separate work.
+
+## Stdlib SoA comparison (#1)
+
+[Raw comparison, profile, and disassembly](2026-09-06-cache-soa.txt) compare `ff72269` with candidate `8c8204b` on the same host.
+The baseline production source remains `822e3aa`. Its binary was copied before edits.
+The tested candidate was committed before measurement. Both binaries use ReleaseSafe and three trials per case.
+The baseline ran first, then the candidate. No CPU affinity, frequency control, or isolation applies.
+
+The retained change uses preallocated `std.MultiArrayList(Entry)` columns and stdlib scalar-search functions.
+A dense fingerprint column selects candidates. Complete DNS key equality rejects collisions.
+Packet ownership, configured capacities, stable slots, and LRU policy remain unchanged.
+This is not the separate packet slab experiment.
+
+### Boundaries
+
+The original workload counts, occupancy, physical hit positions, and timer boundaries remain unchanged.
+`index_*` still times production `Bank.find` with prebuilt keys. It now includes fingerprint construction inside that call.
+`Cache.lookup` and `Pipeline.answer` also retain all fingerprint work inside their timers.
+Direct setup uses production `Bank.put` for fingerprints and LRU links. It does not measure production cache population.
+
+### Results
+
+Values are medians of three trials, in microseconds per operation. Each cell shows baseline → candidate.
+
+| Capacity per bank | Random index hit | Last-slot index hit | Pipeline last-slot hit | Insert and evict |
+|---:|---:|---:|---:|---:|
+| 128 | 0.539 → 0.058 | 0.938 → 0.061 | 20.299 → 19.394 | 16.696 → 15.763 |
+| 1024 | 3.900 → 0.130 | 6.726 → 0.198 | 26.200 → 19.570 | 23.933 → 16.198 |
+| 10000 | 34.921 → 0.8812 | 66.493 → 1.574 | 86.114 → 21.241 | 88.717 → 20.952 |
+| 100000 | 338.271 → 8.611 | 628.598 → 15.646 | 641.939 → 36.275 | 838.962 → 65.742 |
+
+The primary random-index metric falls 97.48% at default capacity, well beyond the 5% retention threshold.
+The paired pipeline guardrail falls 75.33%. No measured pipeline case materially regresses.
+The earlier reference medians were 35.270 microseconds for random index hits and 85.714 microseconds for the default pipeline.
+The paired baseline stays within 1% of both reference values.
+
+At default capacity, empty index misses fall from 5.285 to 1.621 microseconds.
+Full index misses fall from 58.660 to 1.550 microseconds.
+Sparse two-bank lookup misses fall from 18.737 to 3.113 microseconds.
+Denial hits fall from 132.833 to 12.834 microseconds. The raw capture includes every smaller and larger case.
+
+First-slot index hits regress from 23.64 to 50.58 nanoseconds at default capacity, approximately 114% slower.
+Fingerprint construction adds work even when the first slot matches. The disassembly retains that work inside `Bank.find`.
+The one-entry pipeline changes from 19.351 to 19.368 microseconds, below 0.1%.
+Unchanged routing changes from 1.458 to 1.508 microseconds. These short runs do not isolate code-layout effects from host noise.
+
+The 100000-entry churn trials vary from 64.511 to 132.412 microseconds in the candidate.
+The median remains lower than the baseline, but three trials do not characterize this variation or tail latency.
+All measured hits and misses report zero allocations. Churn still allocates one 58-byte packet per operation.
+
+### Layout and profile
+
+The reconstructed `Entry` occupies 320 bytes. Actual stdlib columns allocate 315 bytes per configured slot.
+Two default-capacity banks allocate 6300000 metadata bytes, versus 6240000 before this change: a 0.96% increase.
+At maximum capacity, metadata occupies 63000000 bytes. The fingerprint column occupies eight bytes per slot within those totals.
+These values exclude packet allocations and allocator overhead. They are not RSS measurements.
+
+The 50000-hit profile records 3.723 billion cycles and 13.934 billion instructions over 1.137 seconds.
+Process counters include setup and teardown. The separate sample run contains 1170 samples with none lost.
+Sampled cycles attribute 85.54% to `memset`, 7.28% to `std.mem.findScalarPos`, and 3.29% to `memcpy`.
+No wire initialization change accompanies this result.
+
+The retained disassembly shows stdlib vector loads and `cmeq v*.2d` comparisons over dense 64-bit values.
+It also shows the scalar tail and complete key comparisons after fingerprint matches.
+No handwritten `@Vector` scanner exists in the cache.
+
+### Correctness evidence
+
+The candidate passes 52 resolver tests and 54 forward-selected tests, including the native cache stress case.
+A separate native stress run, benchmark smoke, and native ReleaseSafe build pass.
+Formatting and both lint invocations pass. Runtime and resolver tests pass macOS and x86_64 Linux semantic compilation.
+These compilation checks do not establish native execution on either target.
+
+Three new tests cover fingerprint equivalence, collision continuation, exact capacities, slot reuse, and allocated metadata bytes.
+Existing tests retain cross-bank replacement, stale, LRU, allocation guards, and transactional startup rollback coverage.
+The collision mutation accepts fingerprints without complete key equality. The new index test rejects it with `expected null, found 0`.
+The restored resolver run passes all 52 tests. The raw capture records commands and the failure.
+
+The change meets the local performance retention gate. Parent review and full resolver acceptance remain separate.
+Native foreign-target execution, production load, soak, and packet slab storage remain outside this slice.
