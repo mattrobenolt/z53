@@ -766,9 +766,19 @@ The numbers below come from the CoreDNS 1.14.6 source tree, not from memory.
 - Inputs: nixpkgs (`nixos-unstable`). Build the binary with the Zig 0.16
   toolchain and OpenSSL, following the ztls flake pattern for a Zig package
   that links libcrypto through pkg-config.
-- Outputs: `packages.default` for all three systems, `nixosModules.default`,
-  `darwinModules.default`, a devshell (Zig 0.16, just, dig, ziglint, OpenSSL
-  pkg-config), and `checks` that build and test on all three systems.
+- Outputs: `packages.z53` and `packages.default` for all three systems, plus `nixosModules.default` and `darwinModules.default`.
+- The devshell supplies Zig 0.16, just, dig, ziglint, and OpenSSL through pkg-config.
+- Packages use ReleaseSafe and the baseline CPU target. Each installed output contains only `bin/z53`.
+- A fixed-output Nix fetch supplies all six manifest-pinned dependencies, including transitive lazy helpers.
+  Normal sandbox builds use Zig's `--system` mode without network access or a local package cache.
+- Native install checks require the OpenSSL runtime path and execute CLI validation without library-path environment overrides.
+  Test private keys and verification bypasses never enter the installed package.
+- `checks` include the package, portable tests, module assertions, and source formatting/lints on each target.
+  Portable tests cover TLS APIs, configuration, resolver policy, wire behavior, and the benchmark smoke.
+  The sandbox selects the three TLS foundation tests with `-Dunit-filter=TLS` because the system-root test requires host trust files.
+  Default `test-unit` and `test` remain unfiltered. Host checks must separately run the system-root test.
+  The full native runtime/restart suite remains a separate acceptance gate. No check suppresses its failures.
+- The pinned Nix-only nix-darwin input supplies module evaluation and follows the root nixpkgs input.
 - Formatter: nixfmt. Match the mattrobenolt/nix-darwin repo.
 
 ### 8.2 NixOS module
@@ -782,6 +792,7 @@ Options: `services.z53.enable`, `services.z53.config` (text, required),
 - `LimitNOFILE = 1048576`
 - Config file at `/etc/z53/z53.zon` through `environment.etc`
 - `restartTriggers` on the config file, so a switch restarts after changes
+- Existing journald policy supplies retention, without global policy overrides
 
 ### 8.3 nix-darwin module
 
@@ -792,6 +803,13 @@ mattrobenolt/nix-darwin:
 - `RunAtLoad = true`, `KeepAlive = true`
 - `StandardOutPath` and `StandardErrorPath` at `/var/log/z53.log`
 - Config file at `/etc/z53/z53.zon` through `environment.etc`
+- The plist includes the content-addressed config source as `Z53_CONFIG_SOURCE`.
+  A config change changes the plist, so nix-darwin reloads the daemon during activation.
+  The daemon still reads `/etc/z53/z53.zon`. It does not consume this environment variable.
+- An hourly one-shot logrotate job retains seven compressed archives, with daily rotation and a 10 MiB size threshold.
+  Its config resides at `/etc/z53/logrotate.conf`. Its state resides at `/var/log/z53-logrotate.status`.
+  `copytruncate` preserves launchd's inherited file descriptors, so logs continue after rotation without a resolver restart.
+  Writes between the copy and truncation can disappear. Retention is best-effort, not lossless or a hard byte cap between checks.
 
 ### 8.4 Integration
 
@@ -800,6 +818,12 @@ z53 as a flake input, imports the modules on launchpad and
 Matts-MacBook-Pro, and swaps `services.coredns` for `services.z53` with the
 translated configs. The `enforce-dns` daemon on the Mac needs no change: it
 points at `127.0.0.1`, not at coredns by name.
+
+Modules do not disable CoreDNS or change host DNS configuration.
+Both resolvers can coexist on distinct configured ports. Config text enters the Nix store and must not contain secrets.
+Package and module acceptance does not authorize a port-53 cutover or establish native execution on another platform.
+The deployment owner controls cutover and retains the previous service configuration and system generation for rollback.
+A rollback must release the replacement listener before the previous resolver reclaims its port.
 
 ## 9. Acceptance criteria
 

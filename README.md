@@ -76,6 +76,79 @@ They bypass the client cache and query-completion logs. Clients receive priority
 At most two concurrent probes rotate across due endpoints. Resource pressure defers probes, without simultaneous service guarantees for every endpoint.
 Native Linux fixtures cover health recovery. macOS and x86 Linux semantic checks do not establish native execution.
 
+## Nix package and modules (#1)
+
+Build the native package with local builders:
+
+```sh
+nix build .#z53 --builders ''
+```
+
+`packages.default` aliases `packages.z53` on all three targets.
+The ReleaseSafe package contains only `bin/z53`, with OpenSSL in its runtime closure.
+Nix fetches the pinned dependency archives separately. Normal sandbox builds require neither network access nor a local Zig package cache.
+
+Add the input to the deployment flake:
+
+```nix
+inputs.z53.url = "github:mattrobenolt/z53";
+inputs.z53.inputs.nixpkgs.follows = "nixpkgs";
+```
+
+Import the NixOS module in the host configuration:
+
+```nix
+{ inputs, ... }:
+{
+  imports = [ inputs.z53.nixosModules.default ];
+  services.z53 = {
+    enable = true;
+    config = builtins.readFile ./z53.zon;
+    # Optional: package = inputs.z53.packages.aarch64-linux.z53;
+  };
+}
+```
+
+For nix-darwin, use `inputs.z53.darwinModules.default` instead.
+Set an unused loopback port in `z53.zon` before any trial activation.
+Keep secrets out of `services.z53.config`, because its text enters the Nix store.
+
+Both modules require config text when enabled and install it at `/etc/z53/z53.zon`.
+A config change restarts the service during a system switch.
+NixOS uses a dynamic user, the bind capability, and existing journald retention.
+Darwin uses a root launchd daemon and `/var/log/z53.log` for both output streams.
+
+Darwin runs a one-shot logrotate job hourly, with daily rotation, a 10 MiB threshold, and seven compressed archives.
+Copytruncate preserves launchd's open descriptors without a resolver restart.
+Writes between the copy and truncation can disappear. The active file can exceed the threshold between checks.
+No persistent log daemon or global retention override accompanies either module.
+
+### Checks and deployment boundary
+
+Run the native sandbox checks:
+
+```sh
+nix flake check --builders ''
+```
+
+Inside `nix develop`, run the separate host trust check:
+
+```sh
+zig build -j2 test-unit
+```
+
+Sandbox checks cover three TLS APIs, both reference configs, resolver policy, wire behavior, and benchmark smoke.
+The sandbox foundation filter excludes only the host-root scan. Default Zig test commands retain that test.
+Module checks cover service flags, config changes, package overrides, disablement, and retention.
+The full runtime/restart suite remains separate. These checks do not establish deployment readiness or foreign native execution.
+
+Modules never disable CoreDNS or change host DNS policy. Distinct configured ports permit coexistence.
+Deployment configuration and the eventual port-53 cutover belong in `mattrobenolt/nix-darwin`, not this repository.
+
+Retain the previous system generation and resolver configuration before cutover.
+If rollback is necessary, stop the replacement resolver before the previous service reclaims its port.
+Restore the previous host configuration through its normal system switch.
+
 ## Development
 
 Enter `nix develop`, then run:
@@ -86,7 +159,8 @@ zig build test
 zig build bench-smoke
 zig fmt --check build.zig build.zig.zon src tests
 ziglint
-nixfmt --check flake.nix
+ziglint build.zig src tests
+nixfmt --check flake.nix nix/*.nix nix/modules/*.nix nix/tests/*.nix
 ```
 
 `zig build check` checks binary compilation without linking.

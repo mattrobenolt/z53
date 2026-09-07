@@ -2,6 +2,10 @@
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
     flake-parts.url = "github:hercules-ci/flake-parts";
+    nix-darwin = {
+      url = "github:nix-darwin/nix-darwin";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
     mattware = {
       url = "github:mattrobenolt/nixpkgs";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -13,6 +17,7 @@
       flake-parts,
       nixpkgs,
       mattware,
+      self,
       ...
     }:
     flake-parts.lib.mkFlake { inherit inputs; } {
@@ -22,6 +27,11 @@
         "aarch64-darwin"
       ];
 
+      flake = {
+        nixosModules.default = import ./nix/modules/nixos.nix { inherit self; };
+        darwinModules.default = import ./nix/modules/darwin.nix { inherit self; };
+      };
+
       perSystem =
         { system, ... }:
         let
@@ -29,8 +39,18 @@
             inherit system;
             overlays = [ mattware.overlays.default ];
           };
+          build = import ./nix/package.nix { inherit pkgs; };
         in
         {
+          packages.z53 = build.package;
+          packages.default = build.package;
+          formatter = pkgs.nixfmt;
+          checks = {
+            package = build.package;
+            portable = build.portable;
+            modules = import ./nix/tests/modules.nix { inherit inputs self pkgs; };
+            style = import ./nix/tests/style.nix { inherit pkgs; };
+          };
           devShells.default = pkgs.mkShell {
             packages =
               with pkgs;

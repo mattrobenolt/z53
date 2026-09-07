@@ -49,7 +49,10 @@ fn addTests(b: *std.Build, executable: *std.Build.Step.Compile, tls: *std.Build.
     const target = executable.root_module.resolved_target.?;
     const unit_step = b.step("test-unit", "Run dependency API and startup tests");
     test_step.dependOn(unit_step);
+    // SPEC §9.5: sandbox checks select TLS APIs without a host trust-store dependency.
+    const filter = b.option([]const u8, "unit-filter", "Select a foundation test");
     const options: std.Build.TestOptions = .{
+        .filters = if (filter) |value| &.{value} else &.{},
         .root_module = b.createModule(.{
             .root_source_file = b.path("tests/foundation.zig"),
             .target = target,
