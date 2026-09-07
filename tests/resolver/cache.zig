@@ -63,7 +63,7 @@ test "cache denial clamps ignore positive minimum and share positive maximum cap
     try fixture.record(5, .answer, 100, 0);
     try fixture.record(6, .authority, 100, 100);
     _ = try fixture.forward(0);
-    const entry = &fixture.cache.denial.entries[fixture.cache.denial.first.?];
+    const entry = fixture.cache.denial.entries.get(fixture.cache.denial.first.?);
     try testing.expectEqual(@as(u32, 30), entry.lifetime_s);
 }
 
@@ -84,7 +84,7 @@ test "cache key dimensions and per-client question EDNS COOKIE rewriting" {
     };
     try wire.rewrite.writeOpt(&fixture.encoder, &edns);
     _ = try fixture.forward(0);
-    const stored = fixture.cache.positive.entries[fixture.cache.positive.first.?].bytes.?;
+    const stored = fixture.cache.positive.entries.items(.bytes)[fixture.cache.positive.first.?].?;
     try fixture.client.response.parse(stored);
     try testing.expectEqual(null, fixture.client.response.opt);
     try testing.expectEqual(@as(u16, 0), fixture.client.response.header.id);
@@ -191,7 +191,7 @@ test "cache LRU eviction is independent for positive and denial entries" {
     try testing.expectEqual(@as(usize, 2), fixture.cache.positive.entries.len);
     try testing.expectEqual(@as(usize, 2), fixture.cache.denial.entries.len);
     // The denial replacement removed the matching positive entries, rather than shadowing them.
-    for (fixture.cache.positive.entries) |entry| try testing.expectEqual(null, entry.bytes);
+    for (fixture.cache.positive.entries.items(.bytes)) |bytes| try testing.expectEqual(null, bytes);
 }
 
 // SPEC §3.7; RFC 2308 §5: incomplete and uncacheable errors cannot evict an existing answer.

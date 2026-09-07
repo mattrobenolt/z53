@@ -36,11 +36,9 @@ pub const Cache = struct {
         std.debug.assert(settings.capacity <= config.cache_capacity_max);
         std.debug.assert(settings.min_ttl_s <= settings.max_ttl_s);
         std.debug.assert(settings.denialMaximum() >= 5);
-        self.positive.entries = try allocator.alloc(Entry, settings.capacity);
-        @memset(self.positive.entries, .{});
+        try self.positive.init(allocator, settings.capacity);
         errdefer self.positive.deinit(allocator);
-        self.denial.entries = try allocator.alloc(Entry, settings.capacity);
-        @memset(self.denial.entries, .{});
+        try self.denial.init(allocator, settings.capacity);
     }
 
     pub fn deinit(self: *Cache) void {
@@ -61,9 +59,9 @@ pub const Cache = struct {
         key.init(request);
         for ([_]*store.Bank{ &self.positive, &self.denial }) |bank| {
             const index = bank.find(&key) orelse continue;
-            const entry = &bank.entries[index];
+            const entry = bank.entries.get(index);
             if (entry.age(now_s) >= entry.lifetime_s) return null;
-            const answer = try serve(entry, request, now_s, workspace, output, .cache);
+            const answer = try serve(&entry, request, now_s, workspace, output, .cache);
             bank.touch(index);
             return answer;
         }
@@ -172,9 +170,10 @@ pub const Cache = struct {
         key.init(request);
         for ([_]*store.Bank{ &self.positive, &self.denial }) |bank| {
             const index = bank.find(&key) orelse continue;
-            if (!bank.entries[index].stale(now_s, self.grace_s)) continue;
+            const entry = bank.entries.get(index);
+            if (!entry.stale(now_s, self.grace_s)) continue;
             const answer = try serve(
-                &bank.entries[index],
+                &entry,
                 request,
                 now_s,
                 workspace,
@@ -210,16 +209,15 @@ pub const Cache = struct {
         const bank = if (selected.bank == .positive) &self.positive else &self.denial;
         const other = if (selected.bank == .positive) &self.denial else &self.positive;
         const index = bank.slot(key);
-        if (bank.entries[index].bytes != null) bank.remove(self.allocator, index);
+        if (bank.entries.items(.bytes)[index] != null) bank.remove(self.allocator, index);
         if (other.find(key)) |old| other.remove(self.allocator, old);
-        bank.entries[index] = .{
+        bank.put(index, &.{
             .key = key.*,
             .bytes = owned,
             .inserted_s = now_s,
             .lifetime_s = selected.lifetime_s,
             .category = if (selected.category == .answer) .answer else .failure,
-        };
-        bank.prepend(index);
+        });
         return .stored;
     }
 };

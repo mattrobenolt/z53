@@ -250,8 +250,8 @@ test "local pipeline and explicit unresolved forwarding" {
     const missing = (try pipeline.answer(try encoder.finish(), &output, .tcp, 0)).?;
     try testing.expectEqual(.servfail, missing.source);
     try testing.expectEqual(2, (try wire.Header.decode(missing.bytes)).bits & 15);
-    try testing.expectEqual(null, pipeline.zones[0].cache.positive.entries[0].bytes);
-    try testing.expectEqual(null, pipeline.zones[0].cache.denial.entries[0].bytes);
+    try testing.expectEqual(null, pipeline.zones[0].cache.positive.entries.items(.bytes)[0]);
+    try testing.expectEqual(null, pipeline.zones[0].cache.denial.entries.items(.bytes)[0]);
     try testing.expectEqual(allocations, allocator.alloc_index);
     try testing.expect(!allocator.has_induced_failure);
 }

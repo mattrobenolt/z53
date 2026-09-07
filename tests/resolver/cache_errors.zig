@@ -105,8 +105,8 @@ test "cache rejects RewriteTooLarge before insertion" {
     }
     try testing.expectError(error.RewriteTooLarge, fixture.forward(0));
     try testing.expectEqual(null, try fixture.lookup(0));
-    for (fixture.cache.positive.entries) |entry| try testing.expectEqual(null, entry.bytes);
-    for (fixture.cache.denial.entries) |entry| try testing.expectEqual(null, entry.bytes);
+    for (fixture.cache.positive.entries.items(.bytes)) |bytes| try testing.expectEqual(null, bytes);
+    for (fixture.cache.denial.entries.items(.bytes)) |bytes| try testing.expectEqual(null, bytes);
 }
 
 // SPEC §3.7: capacity-one churn stays within two entry arrays and two packet allocations at peak.

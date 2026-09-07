@@ -109,11 +109,11 @@ test "cache stress full positive and denial banks replace every entry twice" {
         try identity(&fixture, @intCast(capacity + index), 2000);
         try testing.expectEqual(null, try fixture.lookup(102));
     }
-    for (fixture.cache.positive.entries) |entry| try testing.expectEqual(null, entry.bytes);
+    for (fixture.cache.positive.entries.items(.bytes)) |bytes| try testing.expectEqual(null, bytes);
     for (0..capacity) |index| {
         try identity(&fixture, @intCast(index), @intCast(3000 + index));
         try insert(&fixture, .positive);
         try hit(&fixture, 103, 0);
     }
-    for (fixture.cache.denial.entries) |entry| try testing.expectEqual(null, entry.bytes);
+    for (fixture.cache.denial.entries.items(.bytes)) |bytes| try testing.expectEqual(null, bytes);
 }

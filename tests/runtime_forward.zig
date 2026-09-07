@@ -373,7 +373,7 @@ test "forward native SERVFAIL stops failover and caches five seconds" {
     try testing.expectEqual(2, (try wire.Header.decode(&output)).bits & 15);
     try testing.expectEqual(
         5,
-        harness.service.pipeline.zones[0].cache.denial.entries[0].lifetime_s,
+        harness.service.pipeline.zones[0].cache.denial.entries.items(.lifetime_s)[0],
     );
     const generation = harness.service.forward.sessions[request.session].generation;
     const allocations = harness.allocator.alloc_index;
@@ -602,9 +602,9 @@ test "forward native precise silent deadline and terminal cache" {
     try send(client, try query(&input, 19, "silent.example."));
     const length = try harness.receive(client, &output);
     try testing.expectEqual(2, (try wire.Header.decode(output[0..length])).bits & 15);
-    const entry = &harness.service.pipeline.zones[0].cache.denial.entries[0];
-    try testing.expectEqual(5, entry.lifetime_s);
-    try testing.expect(entry.bytes != null);
+    const entry = harness.service.pipeline.zones[0].cache.denial.entries.slice();
+    try testing.expectEqual(5, entry.items(.lifetime_s)[0]);
+    try testing.expect(entry.items(.bytes)[0] != null);
     try testing.expectEqual(1, harness.service.forward.transactions[0].cursor);
     try harness.stop();
 }
@@ -628,7 +628,10 @@ test "forward native unsupported first upstream stays uncached" {
     try testing.expectEqual(2, (try wire.Header.decode(output[0..length])).bits & 15);
     for (&harness.service.forward.sessions) |*session|
         try testing.expectEqual(.vacant, session.state);
-    try testing.expectEqual(null, harness.service.pipeline.zones[0].cache.denial.entries[0].bytes);
+    try testing.expectEqual(
+        null,
+        harness.service.pipeline.zones[0].cache.denial.entries.items(.bytes)[0],
+    );
     try harness.stop();
 }
 
@@ -730,10 +733,10 @@ test "forward native stale follows transport exhaustion without replacement" {
     const request = try harness.request(&upstream);
     try send(harness.peer.?, try answer(&response, request.bytes, 0, 1));
     _ = try harness.receive(client, &output);
-    const entry = &harness.service.pipeline.zones[0].cache.positive.entries[0];
-    try testing.expectEqual(5, entry.lifetime_s);
-    const stored = entry.bytes.?.ptr;
-    entry.inserted_s = (try runtime.now()) - entry.lifetime_s;
+    const entry = harness.service.pipeline.zones[0].cache.positive.entries.slice();
+    try testing.expectEqual(5, entry.items(.lifetime_s)[0]);
+    const stored = entry.items(.bytes)[0].?.ptr;
+    entry.items(.inserted_s)[0] = (try runtime.now()) - entry.items(.lifetime_s)[0];
     harness.zones[0].read_timeout_s = 0.001;
     try send(client, bytes);
     const length = try harness.receive(client, &output);
@@ -742,8 +745,11 @@ test "forward native stale follows transport exhaustion without replacement" {
     try packet.parse(output[0..length]);
     try testing.expectEqual(1, packet.header.counts[1]);
     try testing.expectEqual(30, packet.records[0].ttl_s);
-    try testing.expectEqual(stored, entry.bytes.?.ptr);
-    try testing.expectEqual(null, harness.service.pipeline.zones[0].cache.denial.entries[0].bytes);
+    try testing.expectEqual(stored, entry.items(.bytes)[0].?.ptr);
+    try testing.expectEqual(
+        null,
+        harness.service.pipeline.zones[0].cache.denial.entries.items(.bytes)[0],
+    );
     try harness.stop();
 }
 
@@ -848,7 +854,10 @@ test "forward native pool exhaustion retains thirty-two owned requests" {
             try testing.expect(harness.service.responses[destination.index].listener != null);
         }
     }
-    try testing.expectEqual(null, harness.service.pipeline.zones[0].cache.denial.entries[0].bytes);
+    try testing.expectEqual(
+        null,
+        harness.service.pipeline.zones[0].cache.denial.entries.items(.bytes)[0],
+    );
     try harness.stop();
     try testing.expect(!harness.service.proctor.pending());
 }
@@ -875,7 +884,10 @@ test "forward native socket resource exhaustion stays uncached" {
     try send(client, bytes);
     const length = try harness.receive(client, &output);
     try testing.expectEqual(2, (try wire.Header.decode(output[0..length])).bits & 15);
-    try testing.expectEqual(null, harness.service.pipeline.zones[0].cache.denial.entries[0].bytes);
+    try testing.expectEqual(
+        null,
+        harness.service.pipeline.zones[0].cache.denial.entries.items(.bytes)[0],
+    );
     try testing.expectEqual(1, harness.service.forward.transactions[0].cursor);
     for (&harness.service.forward.sessions) |*session|
         try testing.expectEqual(.vacant, session.state);
@@ -949,17 +961,20 @@ test "forward native rotation encoding failure never publishes or serves stale" 
     const first = try harness.request(&upstream);
     try send(harness.peer.?, try answer(&response, first.bytes, 0, 1));
     _ = try harness.frame(client, &output);
-    const entry = &harness.service.pipeline.zones[0].cache.positive.entries[0];
-    const stored = entry.bytes.?.ptr;
-    entry.inserted_s = (try runtime.now()) - entry.lifetime_s;
+    const entry = harness.service.pipeline.zones[0].cache.positive.entries.slice();
+    const stored = entry.items(.bytes)[0].?.ptr;
+    entry.items(.inserted_s)[0] = (try runtime.now()) - entry.items(.lifetime_s)[0];
     try send(client, input[0 .. bytes.len + 2]);
     const next = try harness.request(&upstream);
     try send(harness.peer.?, try expansionAnswer(&response, next.bytes));
     const received = try harness.frame(client, &output);
     try testing.expectEqual(2, (try wire.Header.decode(received)).bits & 15);
     try testing.expectEqual(0, (try wire.Header.decode(received)).counts[1]);
-    try testing.expectEqual(stored, entry.bytes.?.ptr);
-    try testing.expectEqual(null, harness.service.pipeline.zones[0].cache.denial.entries[0].bytes);
+    try testing.expectEqual(stored, entry.items(.bytes)[0].?.ptr);
+    try testing.expectEqual(
+        null,
+        harness.service.pipeline.zones[0].cache.denial.entries.items(.bytes)[0],
+    );
     try harness.stop();
 }
 
@@ -1201,8 +1216,8 @@ test "forward bounded partial receive and transmit offsets" {
 
 fn emptyCache(harness: *Harness) !void {
     const cache = &harness.service.pipeline.zones[0].cache;
-    try testing.expectEqual(null, cache.positive.entries[0].bytes);
-    try testing.expectEqual(null, cache.denial.entries[0].bytes);
+    try testing.expectEqual(null, cache.positive.entries.items(.bytes)[0]);
+    try testing.expectEqual(null, cache.denial.entries.items(.bytes)[0]);
 }
 
 fn extraQuestion(output: []u8, request: []const u8) ![]const u8 {
@@ -1249,12 +1264,12 @@ const Darwin = struct {
         const first = try harness.request(&upstream);
         try send(harness.peer.?, try answer(&response, first.bytes, 0, 1));
         _ = try harness.receive(client, &output);
-        const entry = &harness.service.pipeline.zones[0].cache.positive.entries[0];
-        const stored = entry.bytes.?.ptr;
-        entry.inserted_s = (try runtime.now()) - entry.lifetime_s;
+        const entry = harness.service.pipeline.zones[0].cache.positive.entries.slice();
+        const stored = entry.items(.bytes)[0].?.ptr;
+        entry.items(.inserted_s)[0] = (try runtime.now()) - entry.items(.lifetime_s)[0];
         harness.service.forward.sessions[first.session].deadline_ns = try runtime.nowNs();
-        const stored_length = entry.bytes.?.len;
-        @memcpy(response[0..stored_length], entry.bytes.?);
+        const stored_length = entry.items(.bytes)[0].?.len;
+        @memcpy(response[0..stored_length], entry.items(.bytes)[0].?);
         for ([_]system.E{ .NOMEM, .NOBUFS, .MFILE, .NFILE }) |failure| {
             for ([_]enum { socket, syscall }{ .socket, .syscall }) |source| {
                 harness.service.upstreams.test_connect_error = switch (source) {
@@ -1271,11 +1286,15 @@ const Darwin = struct {
                 const header = try wire.Header.decode(output[0..length]);
                 try testing.expectEqual(2, header.bits & 15);
                 try testing.expectEqual(0, header.counts[1]);
-                try testing.expectEqual(stored, entry.bytes.?.ptr);
-                try testing.expectEqualSlices(u8, response[0..stored_length], entry.bytes.?);
+                try testing.expectEqual(stored, entry.items(.bytes)[0].?.ptr);
+                try testing.expectEqualSlices(
+                    u8,
+                    response[0..stored_length],
+                    entry.items(.bytes)[0].?,
+                );
                 try testing.expectEqual(
                     null,
-                    harness.service.pipeline.zones[0].cache.denial.entries[0].bytes,
+                    harness.service.pipeline.zones[0].cache.denial.entries.items(.bytes)[0],
                 );
             }
         }
@@ -1805,8 +1824,8 @@ const LinuxPair = struct {
 
         fn empty(self: *const Fixture) !void {
             const cache = &self.service.pipeline.zones[0].cache;
-            try testing.expectEqual(null, cache.positive.entries[0].bytes);
-            try testing.expectEqual(null, cache.denial.entries[0].bytes);
+            try testing.expectEqual(null, cache.positive.entries.items(.bytes)[0]);
+            try testing.expectEqual(null, cache.denial.entries.items(.bytes)[0]);
         }
 
         fn complete(self: *Fixture, event: Event, result: i32) !void {
@@ -1899,12 +1918,12 @@ const LinuxPair = struct {
             try testing.expectEqual(linux.IORING_OP.SEND, entry.opcode);
             try testing.expectEqual(32, entry.fd);
             const cache = &service.pipeline.zones[0].cache;
-            const positive = cache.positive.entries[0].bytes;
-            const denial = cache.denial.entries[0].bytes;
+            const positive = cache.positive.entries.items(.bytes)[0];
+            const denial = cache.denial.entries.items(.bytes)[0];
             try service.deliverForwards();
             try testing.expectEqual(tail, service.proctor.ring.sq.sqe_tail);
-            try testing.expectEqual(positive, cache.positive.entries[0].bytes);
-            try testing.expectEqual(denial, cache.denial.entries[0].bytes);
+            try testing.expectEqual(positive, cache.positive.entries.items(.bytes)[0]);
+            try testing.expectEqual(denial, cache.denial.entries.items(.bytes)[0]);
             try testing.expectEqual(1, logs.count("event=query proto=tcp client=unknown "));
         }
     };
@@ -2009,8 +2028,13 @@ const LinuxPair = struct {
             try fixture.empty();
             try fixture.delivered(0);
             try testing.expectEqual(null, service.forward.sessions[fixture.session].transaction);
-            try testing.expect(service.pipeline.zones[0].cache.positive.entries[0].bytes != null);
-            try testing.expectEqual(null, service.pipeline.zones[0].cache.denial.entries[0].bytes);
+            try testing.expect(
+                service.pipeline.zones[0].cache.positive.entries.items(.bytes)[0] != null,
+            );
+            try testing.expectEqual(
+                null,
+                service.pipeline.zones[0].cache.denial.entries.items(.bytes)[0],
+            );
         }
     }
 
@@ -2040,9 +2064,11 @@ const LinuxPair = struct {
                 try fixture.delivered(2);
                 try testing.expectEqual(
                     null,
-                    service.pipeline.zones[0].cache.positive.entries[0].bytes,
+                    service.pipeline.zones[0].cache.positive.entries.items(.bytes)[0],
                 );
-                try testing.expect(service.pipeline.zones[0].cache.denial.entries[0].bytes != null);
+                try testing.expect(
+                    service.pipeline.zones[0].cache.denial.entries.items(.bytes)[0] != null,
+                );
             }
         }
     }
@@ -2081,7 +2107,7 @@ const LinuxPair = struct {
                         try testing.expectEqual(.exhausted, transaction.completion);
                         try fixture.delivered(2);
                         try testing.expect(
-                            service.pipeline.zones[0].cache.denial.entries[0].bytes != null,
+                            service.pipeline.zones[0].cache.denial.entries.items(.bytes)[0] != null,
                         );
                     },
                 }
@@ -2655,7 +2681,9 @@ test "forward UDP native answer with unused TLS fallback and cache hit logging" 
     try testing.expectEqual(42, header.id);
     try testing.expectEqual(0, header.bits & 15);
     try testing.expectEqual(1, header.counts[1]);
-    try testing.expect(harness.service.pipeline.zones[0].cache.positive.entries[0].bytes != null);
+    try testing.expect(
+        harness.service.pipeline.zones[0].cache.positive.entries.items(.bytes)[0] != null,
+    );
     try send(client, try query(&input, 43, "udp.example."));
     const cached = try harness.receive(client, &output);
     try testing.expectEqual(43, (try wire.Header.decode(output[0..cached])).id);
@@ -2832,7 +2860,7 @@ test "forward UDP native timeout distinguishes exhaustion from unsupported hostn
         _ = try peer.request(&harness, &upstream);
         const length = try harness.receive(client, &output);
         try testing.expectEqual(2, (try wire.Header.decode(output[0..length])).bits & 15);
-        const denial = &harness.service.pipeline.zones[0].cache.denial.entries[0];
+        const denial = harness.service.pipeline.zones[0].cache.denial.entries.get(0);
         switch (ending) {
             .exhausted => {
                 try testing.expect(denial.bytes != null);
@@ -3080,7 +3108,7 @@ test "forward TLS native rejects wrong hostname and untrusted CA" {
         try testing.expectEqual(2, (try wire.Header.decode(output[0..length])).bits & 15);
         try testing.expectEqual(0, peer.requests);
         try testing.expectEqual(1, peer.connections);
-        const denial = &harness.service.pipeline.zones[0].cache.denial.entries[0];
+        const denial = harness.service.pipeline.zones[0].cache.denial.entries.get(0);
         try testing.expectEqual(5, denial.lifetime_s);
         try harness.stop();
     }

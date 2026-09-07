@@ -1,4 +1,4 @@
-//! SPEC §§1.3, 3.7, 9.4: cache scaling, without a production index change (#1).
+//! SPEC §§1.3, 3.7, 9.4: cache scaling with identical timed production boundaries (#1).
 const std = @import("std");
 const benchmark = @import("benchmark");
 const pipeline = @import("pipeline").pipeline;
@@ -149,13 +149,12 @@ const Fixture = struct {
                 &name,
                 if (kind == .positive) .positive else .denial,
             );
-            bank.entries[index] = .{
+            bank.put(@intCast(index), &.{
                 .key = .{ .name = name, .kind = 1, .class = 1, .dnssec = .ordinary },
                 .bytes = try allocator.dupe(u8, bytes),
                 .inserted_s = 100,
                 .lifetime_s = 300,
-            };
-            bank.prepend(@intCast(index));
+            });
         }
     }
 };
@@ -330,9 +329,12 @@ pub fn layout() void {
             @offsetOf(Entry, "next"),
         },
     );
-    for (capacities) |capacity| std.debug.print("capacity={d}: two metadata arrays={d} bytes\n", .{
-        capacity, 2 * @as(u64, capacity) * @sizeOf(Entry),
-    });
+    const columns = std.MultiArrayList(Entry);
+    inline for (capacities) |capacity| {
+        std.debug.print("capacity={d}: two metadata column allocations={d} bytes\n", .{
+            capacity, 2 * columns.capacityInBytes(capacity),
+        });
+    }
     std.debug.print(
         "Sizes exclude packets, allocator overhead, runtime storage, and kernel memory.\n",
         .{},

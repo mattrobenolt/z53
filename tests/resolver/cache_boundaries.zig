@@ -22,7 +22,7 @@ test "denial default maximum stale and positive replacement" {
     const hit = (try fixture.lookup(1802)).?;
     try fixture.ttl(&hit, 59);
     try testing.expectEqual(@as(u16, 0), fixture.client.response.header.bits & 15);
-    for (fixture.cache.denial.entries) |entry| try testing.expectEqual(null, entry.bytes);
+    for (fixture.cache.denial.entries.items(.bytes)) |bytes| try testing.expectEqual(null, bytes);
 }
 
 // SPEC §3.7, §3.9; RFC 7873 §4: DO-clear EDNS shares plain data, not another client's COOKIE.

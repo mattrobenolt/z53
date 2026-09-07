@@ -169,11 +169,11 @@ The combined cap includes zone metadata and a separate 256 KiB allowance for Lin
 The mapping allowance includes page rounding for the submission, completion, and provided-buffer mappings.
 Configuration retains its separate section 5.1 bounds. Kernel socket memory is outside these userspace storage caps.
 
-The cache exclusion covers both allocated entry arrays and packet allocations.
+The cache exclusion covers both allocated metadata columns and packet allocations.
 The cache retains these separate bounds, exclusive of allocator overhead:
 
 - 1000000 aggregate positive and denial entries across all zones
-- At most 320 bytes of metadata per `Entry`
+- At most 320 bytes of allocated metadata per configured entry slot
 - At most 65535 packet bytes per entry
 - At most one additional 65535-byte packet during transactional insertion
 
@@ -391,6 +391,9 @@ Connections:
   A terminal failure never replaces its stale candidate.
 - Capacity: 10000 positive and 10000 negative entries. Evict the
   least-recently-used entry when full.
+  Each bank preallocates fixed `std.MultiArrayList` columns at its configured capacity.
+  A dense 64-bit fingerprint scan selects candidates. Exact key equality resolves collisions.
+  Slots and LRU links remain stable. Queries never resize these columns.
 - Rewrite the served TTL to the clamped value.
 - Only forwarded answers and terminal forward-stage SERVFAIL enter the
   cache. hosts, NODATA, and RFC 6761 answers bypass it.

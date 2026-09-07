@@ -440,17 +440,16 @@ SERVFAIL entries expire after five seconds and are not stale candidates.
 The grace interval includes expiry and excludes expiry plus grace.
 Subtraction avoids overflow.
 
-Each enabled cache allocates two fixed entry arrays at startup.
+Each enabled cache allocates two fixed `std.MultiArrayList` banks at startup.
 Positive and denial entries have independent capacities and intrusive LRU lists.
 SERVFAIL consumes denial capacity.
 A successful replacement removes the same key from the other bank.
-Lookup scans bounded arrays.
-Eviction and recency updates use links.
+Lookup scans dense fingerprint columns through `std.mem.findScalarPos` and checks complete keys at matching slots.
+Eviction and recency updates use stable slot links.
 
-This is a correctness implementation, not a measured lookup optimization.
-Each entry owns one rewritten packet, at most 65535 bytes.
-Entry metadata has a tested upper budget of 320 bytes.
-Live storage is bounded by `2 * capacity * (sizeof(Entry) + 65535)`, exclusive of allocator overhead.
+Each entry still owns one rewritten packet, at most 65535 bytes.
+Allocated metadata has a tested upper budget of 320 bytes per configured slot.
+Live storage is bounded by `2 * capacity * (320 + 65535)`, exclusive of allocator overhead.
 Transactional insertion briefly owns at most one additional packet of 65535 bytes.
 
 Insertion allocates before eviction.
@@ -1234,3 +1233,25 @@ Upstream addresses always use literal IPs. Upstream hostname bootstrap is not re
 The parser still accepts upstream hostname syntax, but selection returns uncached local SERVFAIL without further attempts.
 TLS `server_name` remains necessary for certificate verification and SNI, not DNS bootstrap.
 Listener hostname support remains required. Health probes and final packaging requirements remain unchanged.
+
+## Dense cache columns (#1)
+
+Approval: [#1](https://github.com/mattrobenolt/z53/issues/1#issuecomment-5564692321).
+Matt selected stdlib SoA lookup before a separate packet slab experiment.
+This slice changes metadata only. Packet allocation and transactional publication remain unchanged.
+
+`std.MultiArrayList(Entry)` owns one exact-capacity allocation per bank.
+All columns retain the configured slot count, including empty slots. No query grows or compacts storage.
+`std.mem.findScalarPos` scans the fingerprint column. `std.mem.findScalar` finds an empty slot for insertion.
+The standard library selects vectorization. No custom SIMD scanner or hash table exists.
+
+The fingerprint uses Wyhash over initialized, ASCII-folded wire names and explicit type, class, and DO bytes.
+Framed labels retain binary dots and zero bytes. Padding and unused name tails never enter the hash.
+The low bit is set, so zero always means empty. Complete key equality rejects fingerprint collisions.
+`Bank.put` establishes the fingerprint and LRU links for production insertion and direct benchmark fixtures.
+
+Tests cover collision continuation, exact capacities, slot reuse, and allocated metadata bytes.
+Existing tests retain stale, cross-bank replacement, LRU, and allocation-failure rollback checks.
+A mutation accepted fingerprints without complete key equality.
+The dense-index regression failed with `expected null, found 0`. The source was restored before the passing resolver run.
+Performance evidence follows the tested candidate commit. The earlier baseline capture remains unchanged.

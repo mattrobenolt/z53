@@ -1,4 +1,5 @@
-//! Fixed entry arrays with intrusive LRU links. Only insertion allocates packet bytes.
+//! Fixed stdlib columns retain stable slots and intrusive LRU links (#1).
+//! Only insertion allocates packet bytes.
 const std = @import("std");
 const wire = @import("../wire.zig");
 const resolver = @import("../resolver.zig");
@@ -19,6 +20,20 @@ pub const Key = struct {
         }
     }
 
+    pub fn fingerprint(self: *const Key) u64 {
+        var canonical: [260]u8 = undefined;
+        const length: usize = self.name.length;
+        // Label lengths are below ASCII letters. Fold data only through the initialized name.
+        for (self.name.wire(), canonical[0..length]) |byte, *target| {
+            target.* = std.ascii.toLower(byte);
+        }
+        std.mem.writeInt(u16, canonical[length..][0..2], self.kind, .little);
+        std.mem.writeInt(u16, canonical[length + 2 ..][0..2], self.class, .little);
+        canonical[length + 4] = @intFromEnum(self.dnssec);
+        // Zero denotes an empty slot, never a valid fingerprint. Equality resolves collisions.
+        return std.hash.Wyhash.hash(0, canonical[0 .. length + 5]) | 1;
+    }
+
     fn equal(self: *const Key, other: *const Key) bool {
         if (self.kind != other.kind) return false;
         if (self.class != other.class) return false;
@@ -29,6 +44,7 @@ pub const Key = struct {
 
 pub const Entry = struct {
     key: Key = undefined,
+    fingerprint: u64 = 0,
     bytes: ?[]u8 = null,
     inserted_s: u64 = 0,
     lifetime_s: u32 = 0,
@@ -52,28 +68,47 @@ pub const Entry = struct {
 };
 
 pub const Bank = struct {
-    entries: []Entry = &.{},
+    entries: std.MultiArrayList(Entry) = .empty,
     first: ?u32 = null,
     last: ?u32 = null,
 
+    pub fn init(self: *Bank, allocator: std.mem.Allocator, capacity: u32) error{OutOfMemory}!void {
+        self.* = .{};
+        try self.entries.setCapacity(allocator, capacity);
+        self.entries.len = capacity;
+        for (0..capacity) |index| self.entries.set(index, .{});
+    }
+
     pub fn deinit(self: *Bank, allocator: std.mem.Allocator) void {
-        for (self.entries) |entry| if (entry.bytes) |bytes| allocator.free(bytes);
-        allocator.free(self.entries);
+        for (self.entries.items(.bytes)) |packet| if (packet) |bytes| allocator.free(bytes);
+        self.entries.deinit(allocator);
         self.* = undefined;
     }
 
     pub fn find(self: *const Bank, key: *const Key) ?u32 {
-        for (self.entries, 0..) |*entry, index| {
-            if (entry.bytes == null) continue;
-            if (entry.key.equal(key)) return @intCast(index);
+        const fingerprints = self.entries.items(.fingerprint);
+        const fingerprint = key.fingerprint();
+        var start: usize = 0;
+        while (std.mem.findScalarPos(u64, fingerprints, start, fingerprint)) |index| {
+            if (self.entries.items(.key)[index].equal(key)) return @intCast(index);
+            start = index + 1;
         }
         return null;
     }
 
+    /// Publish into an empty stable slot. Fixtures use this same metadata path.
+    pub fn put(self: *Bank, index: u32, entry: *const Entry) void {
+        std.debug.assert(self.entries.items(.bytes)[index] == null);
+        std.debug.assert(entry.bytes != null);
+        self.entries.set(index, entry.*);
+        self.entries.items(.fingerprint)[index] = entry.key.fingerprint();
+        self.prepend(index);
+    }
+
     pub fn remove(self: *Bank, allocator: std.mem.Allocator, index: u32) void {
         self.unlink(index);
-        allocator.free(self.entries[index].bytes.?);
-        self.entries[index] = .{};
+        allocator.free(self.entries.items(.bytes)[index].?);
+        self.entries.set(index, .{});
     }
 
     pub fn touch(self: *Bank, index: u32) void {
@@ -83,19 +118,19 @@ pub const Bank = struct {
 
     pub fn slot(self: *const Bank, key: *const Key) u32 {
         if (self.find(key)) |index| return index;
-        for (self.entries, 0..) |entry, index| {
-            if (entry.bytes == null) return @intCast(index);
+        if (std.mem.findScalar(u64, self.entries.items(.fingerprint), 0)) |index| {
+            return @intCast(index);
         }
         return self.last.?;
     }
 
-    pub fn prepend(self: *Bank, index: u32) void {
+    fn prepend(self: *Bank, index: u32) void {
         std.debug.assert(index < self.entries.len);
-        const entry = &self.entries[index];
-        std.debug.assert(entry.bytes != null);
-        entry.previous = null;
-        entry.next = self.first;
-        if (self.first) |first| self.entries[first].previous = index else self.last = index;
+        const columns = self.entries.slice();
+        std.debug.assert(columns.items(.bytes)[index] != null);
+        columns.items(.previous)[index] = null;
+        columns.items(.next)[index] = self.first;
+        if (self.first) |first| columns.items(.previous)[first] = index else self.last = index;
         self.first = index;
     }
 
@@ -103,13 +138,15 @@ pub const Bank = struct {
         std.debug.assert(index < self.entries.len);
         std.debug.assert(self.first != null);
         std.debug.assert(self.last != null);
-        const entry = &self.entries[index];
-        std.debug.assert(entry.bytes != null);
-        if (entry.previous) |previous| {
-            self.entries[previous].next = entry.next;
-        } else self.first = entry.next;
-        if (entry.next) |next| {
-            self.entries[next].previous = entry.previous;
-        } else self.last = entry.previous;
+        const columns = self.entries.slice();
+        std.debug.assert(columns.items(.bytes)[index] != null);
+        const previous = columns.items(.previous)[index];
+        const next = columns.items(.next)[index];
+        if (previous) |value| {
+            columns.items(.next)[value] = next;
+        } else self.first = next;
+        if (next) |value| {
+            columns.items(.previous)[value] = previous;
+        } else self.last = previous;
     }
 };
