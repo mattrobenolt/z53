@@ -8,6 +8,7 @@ test {
     _ = @import("resolver/cache_stress.zig");
     _ = @import("resolver/cache_index.zig");
     _ = @import("resolver/cache_errors.zig");
+    _ = @import("resolver/cache_packets.zig");
     _ = @import("resolver/cache_boundaries.zig");
     _ = @import("resolver/cache_rcode.zig");
     _ = @import("resolver/cache_dname.zig");

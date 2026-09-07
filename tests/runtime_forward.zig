@@ -2209,13 +2209,14 @@ const LinuxSubmittedTeardown = struct {
 
         fn check(self: *const Trace, runtime_address: usize) !void {
             try testing.expectEqual(0, self.overflow);
-            // Runtime, zone metadata, and both cache banks allocate before the snapshot.
-            try testing.expectEqual(9, self.count);
-            try testing.expectEqual(.snapshot, self.events[4].kind);
-            for (self.events[0..4]) |allocation| {
+            // Runtime, zone metadata, both banks, and packet backing precede the snapshot.
+            try testing.expectEqual(11, self.count);
+            try testing.expectEqual(8 * 1024 * 1024, self.events[4].length);
+            try testing.expectEqual(.snapshot, self.events[5].kind);
+            for (self.events[0..5]) |allocation| {
                 try testing.expectEqual(.allocation, allocation.kind);
                 var matches: u32 = 0;
-                for (self.events[5..9]) |released| {
+                for (self.events[6..11]) |released| {
                     try testing.expectEqual(.release, released.kind);
                     if (allocation.address == released.address) {
                         try testing.expectEqual(allocation.length, released.length);
@@ -2225,8 +2226,8 @@ const LinuxSubmittedTeardown = struct {
                 try testing.expectEqual(1, matches);
             }
             try testing.expectEqual(runtime_address, self.events[0].address);
-            try testing.expectEqual(runtime_address, self.events[8].address);
-            try testing.expectEqual(@sizeOf(runtime.Runtime), self.events[8].length);
+            try testing.expectEqual(runtime_address, self.events[10].address);
+            try testing.expectEqual(@sizeOf(runtime.Runtime), self.events[10].length);
         }
     };
     const Observation = struct {

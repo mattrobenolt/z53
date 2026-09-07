@@ -55,6 +55,9 @@ test "cache fingerprint folds case excludes tails and preserves binary framing" 
 // SPEC §§1.11, 3.7: stable slots, collisions, removal, reuse, and LRU.
 test "cache dense index first last tails collisions and slot reuse" {
     for ([_]u32{ 1, 3, 17, 33 }) |capacity| {
+        var packets: f.cache.packets.Storage = undefined;
+        try packets.init(testing.allocator, 64 * 1024);
+        defer packets.deinit(testing.allocator);
         var bank: Bank = .{};
         try bank.init(testing.allocator, capacity);
         defer bank.deinit(testing.allocator);
@@ -68,7 +71,7 @@ test "cache dense index first last tails collisions and slot reuse" {
             try testing.expectEqual(index, bank.slot(&key));
             bank.put(@intCast(index), &.{
                 .key = key,
-                .bytes = try testing.allocator.dupe(u8, &.{42}),
+                .bytes = try packets.copy(&.{42}),
             });
         }
         // Every candidate collides with the final key, including vector and scalar tails.
@@ -96,13 +99,13 @@ test "cache dense index first last tails collisions and slot reuse" {
         bank.touch(0);
         try testing.expectEqual(0, bank.first.?);
         try testing.expectEqual(if (capacity == 1) @as(u32, 0) else 1, bank.last.?);
-        bank.remove(testing.allocator, capacity - 1);
+        bank.remove(&packets, capacity - 1);
         try testing.expectEqual(0, bank.entries.items(.fingerprint)[capacity - 1]);
         try testing.expectEqual(null, bank.find(&key));
         try testing.expectEqual(capacity - 1, bank.slot(&key));
         bank.put(capacity - 1, &.{
             .key = key,
-            .bytes = try testing.allocator.dupe(u8, &.{43}),
+            .bytes = try packets.copy(&.{43}),
         });
         try testing.expectEqual(capacity - 1, bank.find(&key).?);
         try testing.expectEqual(capacity - 1, bank.first.?);
@@ -116,6 +119,6 @@ test "cache dense metadata byte budget matches actual allocations" {
     try cache.init(allocator.allocator(), &f.zone);
     defer cache.deinit();
     const bytes = std.MultiArrayList(f.cache.Entry).capacityInBytes(f.zone.cache.?.capacity);
-    try testing.expectEqual(2 * bytes, allocator.allocated_bytes);
+    try testing.expectEqual(2 * bytes + f.zone.cache.?.packet_bytes_max, allocator.allocated_bytes);
     try testing.expect(bytes <= 320 * f.zone.cache.?.capacity);
 }

@@ -2,13 +2,14 @@ const f = @import("cache_fixture.zig");
 const testing = f.testing;
 const wire = f.wire;
 
-// SPEC §1.10, §3.7: two startup arrays, one allocation per insert; lookups allocate nothing.
-test "cache allocation budget and transactional insertion exhaustion" {
+// SPEC §§1.10, 3.7: all general-purpose allocation ends at initialization.
+test "cache allocation budget covers insertion refresh lookup and stale delivery" {
     var allocator = testing.FailingAllocator.init(testing.allocator, .{});
     var fixture: f.Fixture = undefined;
     try fixture.init(allocator.allocator(), &f.zone);
     defer fixture.cache.deinit();
-    try testing.expectEqual(@as(usize, 2), allocator.allocations);
+    try testing.expectEqual(@as(usize, 3), allocator.allocations);
+    allocator.fail_index = allocator.alloc_index;
     try testing.expect(@sizeOf(f.cache.Entry) <= 320);
     try fixture.response(0x8500);
     try fixture.record(1, .answer, 5, 0);
@@ -23,16 +24,16 @@ test "cache allocation budget and transactional insertion exhaustion" {
     }
     try testing.expect(!allocator.has_induced_failure);
     const result = try fixture.forward(5);
-    try testing.expectEqual(.exhausted, result.insertion);
-    try testing.expect(allocator.has_induced_failure);
+    try testing.expectEqual(.stored, result.insertion);
+    try testing.expect(!allocator.has_induced_failure);
     try testing.expectEqual(held, allocator.allocated_bytes - allocator.freed_bytes);
-    try testing.expectEqual(.stale, (try fixture.failure(6)).answer.source);
+    try testing.expectEqual(.stale, (try fixture.failure(10)).answer.source);
     try testing.expectEqual(@as(usize, 3), allocator.allocations);
 }
 
-// SPEC §1.11, §3.7: each startup allocation failure releases any preceding owned array.
+// SPEC §§1.11, 3.7: each startup allocation failure releases all preceding owned storage.
 test "cache startup allocation failures roll back" {
-    for (0..2) |fail_index| {
+    for (0..3) |fail_index| {
         var allocator = testing.FailingAllocator.init(testing.allocator, .{
             .fail_index = fail_index,
         });
@@ -109,7 +110,7 @@ test "cache rejects RewriteTooLarge before insertion" {
     for (fixture.cache.denial.entries.items(.bytes)) |bytes| try testing.expectEqual(null, bytes);
 }
 
-// SPEC §3.7: capacity-one churn stays within two entry arrays and two packet allocations at peak.
+// SPEC §3.7: capacity-one churn reuses packet blocks within the startup allocation.
 test "cache bounded capacity one churn and zone isolation" {
     var allocator = testing.FailingAllocator.init(testing.allocator, .{});
     var fixture: f.Fixture = undefined;
@@ -117,6 +118,7 @@ test "cache bounded capacity one churn and zone isolation" {
     zone.cache.?.capacity = 1;
     try fixture.init(allocator.allocator(), &zone);
     defer fixture.cache.deinit();
+    allocator.fail_index = allocator.alloc_index;
     var isolated: f.cache.Cache = undefined;
     try isolated.init(testing.allocator, &zone);
     defer isolated.deinit();
@@ -126,7 +128,8 @@ test "cache bounded capacity one churn and zone isolation" {
         try fixture.record(1, .answer, 60, 0);
         _ = try fixture.forward(0);
         try testing.expectEqual(@as(usize, 3), allocator.allocations - allocator.deallocations);
-        const bound = 2 * @sizeOf(f.cache.Entry) + wire.message_bytes_max;
+        try testing.expect(!allocator.has_induced_failure);
+        const bound = 2 * @sizeOf(f.cache.Entry) + zone.cache.?.packet_bytes_max;
         try testing.expect(allocator.allocated_bytes - allocator.freed_bytes <= bound);
         try testing.expectEqual(null, try isolated.lookup(
             &fixture.client.request,

@@ -29,6 +29,7 @@ pub const Context = struct {
             return self.fail(zones_node, "zones exceeds 64 entries");
         }
         var entries: u32 = 0;
+        var packet_bytes: u64 = 0;
         for (target.zones, 0..) |*zone, index| {
             const node = self.element(zones_node, index);
             try self.zoneValidate(allocator, zone, node);
@@ -38,6 +39,13 @@ pub const Context = struct {
                 }
             }
             if (zone.cache) |cache| {
+                packet_bytes += cache.packet_bytes_max;
+                if (packet_bytes > config.cache_packet_bytes_total_max) {
+                    return self.fail(
+                        self.field(node, "cache"),
+                        "total cache packet storage exceeds 512 MiB",
+                    );
+                }
                 entries += cache.capacity * 2;
                 if (entries > config.cache_entries_max) {
                     return self.fail(
@@ -126,6 +134,18 @@ pub const Context = struct {
         }
         if (cache.denialMaximum() < 5) {
             return self.fail(node, "effective denial maximum must be at least 5 seconds");
+        }
+        if (cache.packet_bytes_max < config.cache_packet_bytes_min) {
+            return self.fail(
+                self.field(node, "packet_bytes_max"),
+                "cache packet storage must be at least 64 KiB",
+            );
+        }
+        if (cache.packet_bytes_max > config.cache_packet_bytes_max) {
+            return self.fail(
+                self.field(node, "packet_bytes_max"),
+                "cache packet storage exceeds 256 MiB",
+            );
         }
         if (cache.capacity == 0) {
             return self.fail(

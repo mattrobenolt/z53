@@ -76,7 +76,7 @@ const Fixture = struct {
         self.zones = .{.{
             .suffix = ".",
             .upstreams = &.{.{ .address = "127.0.0.1:9" }},
-            .cache = .{ .capacity = capacity },
+            .cache = .{ .capacity = capacity, .packet_bytes_max = 32 * 1024 * 1024 },
         }};
         self.settings = .{ .zones = &self.zones };
         self.service = try timer.allocator.create(pipeline.Pipeline);
@@ -90,14 +90,12 @@ const Fixture = struct {
         };
         // Direct seeding avoids quadratic setup. Every entry owns its packet and valid LRU links.
         try self.seed(
-            timer.allocator,
             &self.service.zones[0].cache.positive,
             occupancy,
             0,
             .positive,
         );
         if (case == .lookup_denial_last) try self.seed(
-            timer.allocator,
             &self.service.zones[0].cache.denial,
             capacity,
             capacity,
@@ -135,7 +133,6 @@ const Fixture = struct {
 
     fn seed(
         self: *Fixture,
-        allocator: std.mem.Allocator,
         bank: *Bank,
         count: u32,
         base: u32,
@@ -151,7 +148,8 @@ const Fixture = struct {
             );
             bank.put(@intCast(index), &.{
                 .key = .{ .name = name, .kind = 1, .class = 1, .dnssec = .ordinary },
-                .bytes = try allocator.dupe(u8, bytes),
+                .bytes = try self.service.zones[0].cache.packet_storage.copy(bytes),
+                .packet_class = resolver.cache.packets.class(bytes.len),
                 .inserted_s = 100,
                 .lifetime_s = 300,
             });
@@ -220,6 +218,11 @@ fn Runner(comptime capacity: u32, comptime case: Case) type {
                 .insert_evict => try churnLoop(timer, fixture, capacity),
                 else => try lookupLoop(case, timer, fixture),
             }
+            const storage = &fixture.service.zones[0].cache.packet_storage;
+            try timer.reportMetric(@floatFromInt(storage.fixed.buffer.len), "packet-reserved-B");
+            try timer.reportMetric(@floatFromInt(storage.fixed.end_index), "pool-consumed-B");
+            try timer.reportMetric(@floatFromInt(storage.live_bytes), "packet-live-B");
+            try timer.reportMetric(@floatFromInt(storage.live_class_bytes), "class-live-B");
         }
     };
 }
@@ -329,6 +332,9 @@ pub fn layout() void {
             @offsetOf(Entry, "next"),
         },
     );
+    std.debug.print("Packet pool control={d} bytes per zone, benchmark backing=33554432 bytes\n", .{
+        @sizeOf(resolver.cache.packets.Storage),
+    });
     const columns = std.MultiArrayList(Entry);
     inline for (capacities) |capacity| {
         std.debug.print("capacity={d}: two metadata column allocations={d} bytes\n", .{

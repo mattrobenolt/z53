@@ -169,13 +169,17 @@ The combined cap includes zone metadata and a separate 256 KiB allowance for Lin
 The mapping allowance includes page rounding for the submission, completion, and provided-buffer mappings.
 Configuration retains its separate section 5.1 bounds. Kernel socket memory is outside these userspace storage caps.
 
-The cache exclusion covers both allocated metadata columns and packet allocations.
-The cache retains these separate bounds, exclusive of allocator overhead:
+The cache exclusion covers allocated metadata columns and the fixed packet backing allocation.
+The cache retains these separate bounds, exclusive of general allocator bookkeeping for its three startup allocations:
 
 - 1000000 aggregate positive and denial entries across all zones
 - At most 320 bytes of allocated metadata per configured entry slot
-- At most 65535 packet bytes per entry
-- At most one additional 65535-byte packet during transactional insertion
+- At most 65535 live packet bytes per entry
+- Configured packet backing, including pool arena headers, alignment, free blocks, and unused arena capacity
+- At most 512 bytes of pool control per zone, also counted in the fixed runtime zone metadata
+
+Each enabled cache allocates all backing storage at startup. Cache operations never call the general allocator afterward.
+The existing fixed rewrite workspace supplies transactional packet preparation. Insertion requires no additional backing allocation.
 
 A transaction owns its original query before the listener returns or reuses its input buffer.
 A UDP response slot reserves its destination before admission and retains a non-wrapping generation.
@@ -394,6 +398,16 @@ Connections:
   Each bank preallocates fixed `std.MultiArrayList` columns at its configured capacity.
   A dense 64-bit fingerprint scan selects candidates. Exact key equality resolves collisions.
   Slots and LRU links remain stable. Queries never resize these columns.
+- Packet storage: `packet_bytes_max` defaults to 8 MiB per zone, shared across both banks.
+  One fixed allocation backs eleven `std.heap.MemoryPool` classes, from 64 through 65536 bytes in powers of two.
+  Each entry records its class. Freed blocks return to that class, without a general allocator fallback.
+  Pool arena headers and spare capacity consume the configured budget. Rounding can almost double packet storage.
+  Classes never rebalance. A free block in one class cannot satisfy another class.
+  Arena growth can fail before live packet bytes reach the budget. The minimum budget does not guarantee a full-size packet slot.
+  Exhaustion skips insertion and returns the valid upstream answer. It preserves existing and stale entries.
+  All fallible rewrites finish before replacement. A same-class destination victim or matching other-bank entry can transfer its block transactionally.
+  Other replacements obtain a block before removal. Byte pressure never evicts unrelated entries from the other bank.
+  Disabled caches allocate no packet storage.
 - Rewrite the served TTL to the clamped value.
 - Only forwarded answers and terminal forward-stage SERVFAIL enter the
   cache. hosts, NODATA, and RFC 6761 answers bypass it.
@@ -534,7 +548,7 @@ exact field names, types, and ergonomics.
 | `health_check_interval_s` | zone | 0.5 | Probe period while down |
 | `read_timeout_s` | zone | 2 | Per exchange |
 | `conn_expire_s` | zone | 10 | Idle upstream connection close |
-| `cache` | zone | on | `.max_ttl_s` 3600, `.min_ttl_s` 5, `.neg_max_ttl_s` 1800, `.capacity` 10000 |
+| `cache` | zone | on | `.max_ttl_s` 3600, `.min_ttl_s` 5, `.neg_max_ttl_s` 1800, `.capacity` 10000, `.packet_bytes_max` 8388608 |
 | `serve_stale_s` | zone | 0 (off) | RFC 8767 grace window |
 | `rotate` | zone | false | Answer rotation |
 
@@ -549,6 +563,10 @@ Hosts reload zero disables the periodic file check.
 `cache = null` disables the cache.
 Omitted `cache` or `.cache = .{}` enables defaults.
 Capacity applies separately to positive and denial entries.
+`cache.packet_bytes_max` applies to both banks together and uses `u32` bytes.
+Its default is 8388608 bytes. Valid values range from 65536 through 268435456 bytes, inclusive.
+Enabled zones together reserve at most 536870912 packet bytes.
+These product budgets do not establish a performance result.
 
 `nodata` accepts symbolic types, such as `.AAAA` and `.HTTPS`.
 It also accepts `.{ .number = 65280 }` for any numeric `u16` query type.
@@ -588,6 +606,8 @@ The load fails if any resource exceeds these bounds:
 | Upstreams per zone (at least one) / NODATA types | 16 / 256 |
 | Cache capacity per class per zone | 100000 entries, minimum 1 when enabled |
 | Total positive plus denial capacity across zones | 1000000 entries |
+| Packet backing per enabled zone | 256 MiB, minimum 64 KiB, default 8 MiB |
+| Aggregate packet backing across enabled zones | 512 MiB |
 | Hosts path | 4096 bytes, nonempty, no NUL |
 | Endpoint text / DNS hostname text | 320 / 253 bytes |
 

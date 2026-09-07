@@ -402,6 +402,30 @@ test "zone and aggregate cache capacity boundaries" {
     try equal(null, config.route(&harness.parsed, &name));
 }
 
+// SPEC §5.1: packet budgets count both banks together and all enabled zones.
+test "cache packet budget defaults boundaries and aggregate validation" {
+    var harness: Harness = undefined;
+    try harness.init();
+    defer harness.deinit();
+    try harness.parse(minimal);
+    try equal(8 * 1024 * 1024, harness.parsed.zones[0].cache.?.packet_bytes_max);
+    try harness.parse(zone_start ++ ".cache = .{ .packet_bytes_max = 65536 }" ++ zone_end);
+    try harness.parse(zone_start ++ ".cache = .{ .packet_bytes_max = 268435456 }" ++ zone_end);
+    try harness.rejects(
+        zone_start ++ ".cache = .{ .packet_bytes_max = 65535 }" ++ zone_end,
+        "at least 64 KiB",
+    );
+    try harness.rejects(
+        zone_start ++ ".cache = .{ .packet_bytes_max = 268435457 }" ++ zone_end,
+        "exceeds 256 MiB",
+    );
+    var buffer: [16384]u8 = undefined;
+    const cache = ".{ .capacity = 1, .packet_bytes_max = 268435456 }";
+    try harness.parse(try zonesSource(&buffer, 2, cache));
+    try harness.rejects(try zonesSource(&buffer, 3, cache), "exceeds 512 MiB");
+    try harness.parse(try zonesSource(&buffer, 64, "null"));
+}
+
 // SPEC §5; RFC 1035 §2.3.4: suffix label and total wire length bounds apply before use.
 test "configuration suffix name boundaries" {
     var harness: Harness = undefined;

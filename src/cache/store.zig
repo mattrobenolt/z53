@@ -1,8 +1,9 @@
 //! Fixed stdlib columns retain stable slots and intrusive LRU links (#1).
-//! Only insertion allocates packet bytes.
+//! Packet ownership belongs to the cache's bounded size-class storage.
 const std = @import("std");
 const wire = @import("../wire.zig");
 const resolver = @import("../resolver.zig");
+const packets = @import("packets.zig");
 
 pub const Key = struct {
     name: wire.Name,
@@ -46,6 +47,7 @@ pub const Entry = struct {
     key: Key = undefined,
     fingerprint: u64 = 0,
     bytes: ?[]u8 = null,
+    packet_class: u8 = 0,
     inserted_s: u64 = 0,
     lifetime_s: u32 = 0,
     category: enum { answer, failure } = .answer,
@@ -80,7 +82,6 @@ pub const Bank = struct {
     }
 
     pub fn deinit(self: *Bank, allocator: std.mem.Allocator) void {
-        for (self.entries.items(.bytes)) |packet| if (packet) |bytes| allocator.free(bytes);
         self.entries.deinit(allocator);
         self.* = undefined;
     }
@@ -105,10 +106,21 @@ pub const Bank = struct {
         self.prepend(index);
     }
 
-    pub fn remove(self: *Bank, allocator: std.mem.Allocator, index: u32) void {
+    pub fn remove(self: *Bank, storage: *packets.Storage, index: u32) void {
         self.unlink(index);
-        allocator.free(self.entries.items(.bytes)[index].?);
+        storage.destroy(
+            self.entries.items(.bytes)[index].?,
+            self.entries.items(.packet_class)[index],
+        );
         self.entries.set(index, .{});
+    }
+
+    /// Transfer a block only after all fallible response work succeeds.
+    pub fn take(self: *Bank, index: u32) []u8 {
+        const bytes = self.entries.items(.bytes)[index].?;
+        self.unlink(index);
+        self.entries.set(index, .{});
+        return bytes;
     }
 
     pub fn touch(self: *Bank, index: u32) void {

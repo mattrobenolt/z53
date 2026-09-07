@@ -13,6 +13,9 @@ pub const listeners_max = 16;
 pub const upstreams_max = 16;
 pub const cache_capacity_max = 100000;
 pub const cache_entries_max = 1000000;
+pub const cache_packet_bytes_min = 64 * 1024;
+pub const cache_packet_bytes_max = 256 * 1024 * 1024;
+pub const cache_packet_bytes_total_max = 512 * 1024 * 1024;
 pub const Error = error{InvalidConfig};
 pub const QueryType = union(enum(u16)) {
     number: u16 = 0,
@@ -64,6 +67,7 @@ pub const Cache = struct {
     min_ttl_s: u32 = 5,
     neg_max_ttl_s: u32 = 1800,
     capacity: u32 = 10000,
+    packet_bytes_max: u32 = 8 * 1024 * 1024,
 
     pub fn denialMaximum(self: *const Cache) u32 {
         return @min(self.max_ttl_s, self.neg_max_ttl_s);

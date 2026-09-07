@@ -447,20 +447,15 @@ A successful replacement removes the same key from the other bank.
 Lookup scans dense fingerprint columns through `std.mem.findScalarPos` and checks complete keys at matching slots.
 Eviction and recency updates use stable slot links.
 
-Each entry still owns one rewritten packet, at most 65535 bytes.
+Each entry owns one rewritten packet, at most 65535 bytes.
 Allocated metadata has a tested upper budget of 320 bytes per configured slot.
-Live storage is bounded by `2 * capacity * (320 + 65535)`, exclusive of allocator overhead.
-Transactional insertion briefly owns at most one additional packet of 65535 bytes.
+The packet pool amendment below replaces individual packet allocations with fixed backing storage.
 
-Insertion allocates before eviction.
+Insertion obtains storage before eviction or transfers a same-class victim after all fallible rewrites.
 Exhaustion returns the already-encoded answer with `insertion=exhausted`.
-Startup failure rolls back its earlier allocation.
+Startup failure rolls back all earlier allocations.
 The event thread supplies a fixed packet/rewrite workspace and disjoint output storage.
-These operations make no heap allocations:
-
-- Fresh lookup
-- Miss
-- Stale delivery
+Cache operations make no general-purpose allocations after initialization.
 
 The key retains these fields:
 
@@ -1259,3 +1254,37 @@ At default capacity, median random-index latency falls 97.48%. The pipeline guar
 First-slot index latency rises from 23.64 to 50.58 nanoseconds. Default metadata allocation rises from 6240000 to 6300000 bytes.
 The [benchmark notes](benchmarks/README.md#stdlib-soa-comparison-1) record boundaries, variation, and remaining limits.
 The earlier baseline capture remains unchanged. Packet slab storage remains a separate slice.
+
+## Bounded cache packet pools (#1)
+
+Approval: [#1](https://github.com/mattrobenolt/z53/issues/1#issuecomment-5564692321).
+This slice follows the reviewed lookup-only commit `d1eb1d9`. It does not change lookup algorithms.
+
+One startup allocation backs a `FixedBufferAllocator` for eleven stdlib `MemoryPool` instances.
+The classes cover powers of two from 64 through 65536 bytes. DNS messages retain the 65535-byte limit.
+Pool arena allocations use only the fixed allocator. Free-list nodes occupy released blocks.
+The implementation needs no custom allocator, class partition policy, or general-purpose fallback.
+
+The default backing budget is 8 MiB per enabled zone, shared across positive and denial banks.
+Validation permits 64 KiB through 256 MiB per zone and at most 512 MiB across enabled zones.
+These are product budgets, not performance conclusions. Disabled caches allocate neither banks nor packet backing.
+Each enabled cache makes three startup allocations. Failure releases every earlier allocation.
+
+The backing budget includes stdlib arena headers, alignment, free blocks, and unused arena capacity.
+Pool control occupies at most 512 additional bytes per zone and remains counted in the fixed runtime zone metadata.
+Entry columns retain their separate 320-byte-per-slot cap, including explicit packet class ownership.
+General allocator bookkeeping for the three startup allocations remains outside these byte totals.
+
+Classes retain their blocks until cache teardown. Free space in another class cannot satisfy an exhausted class.
+Rounding can almost double live packet bytes. Arena growth can fail with unused backing space.
+The 64 KiB minimum cannot hold a 65536-byte class block plus arena headers.
+A sufficiently large configured budget supports full-size DNS packets. No capacity promises follow from entry counts alone.
+
+All response rewrites finish before packet ownership changes.
+Same-class refresh and eviction reuse the destination block. A matching other-bank entry can also transfer its block.
+A size-class change first obtains new storage. Failure preserves old bytes, LRU state, and stale eligibility.
+Byte pressure never triggers an eviction loop or unrelated other-bank eviction.
+The valid upstream answer survives unsuccessful insertion.
+
+Cache insertions, refreshes, evictions, removals, and lookups never call the general allocator after initialization.
+This is not a whole-process allocation claim. Existing libcrypto setup and key-update exceptions remain unchanged.

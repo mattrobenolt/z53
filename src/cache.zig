@@ -7,6 +7,7 @@ const wire = @import("wire.zig");
 const config = @import("config.zig");
 const store = @import("cache/store.zig");
 const policy = @import("cache/policy.zig");
+pub const packets = @import("cache/packets.zig");
 pub const Entry = store.Entry;
 pub const Insertion = enum { stored, skipped, exhausted };
 pub const Result = struct { answer: resolver.Answer, insertion: Insertion };
@@ -23,6 +24,7 @@ pub const Cache = struct {
     grace_s: u32,
     positive: store.Bank = .{},
     denial: store.Bank = .{},
+    packet_storage: packets.Storage = .{},
 
     /// The validated zone supplies bounds. Failure invalidates self and releases owned storage.
     pub fn init(
@@ -34,16 +36,21 @@ pub const Cache = struct {
         const settings = self.settings orelse return;
         std.debug.assert(settings.capacity > 0);
         std.debug.assert(settings.capacity <= config.cache_capacity_max);
+        std.debug.assert(settings.packet_bytes_max >= config.cache_packet_bytes_min);
+        std.debug.assert(settings.packet_bytes_max <= config.cache_packet_bytes_max);
         std.debug.assert(settings.min_ttl_s <= settings.max_ttl_s);
         std.debug.assert(settings.denialMaximum() >= 5);
         try self.positive.init(allocator, settings.capacity);
         errdefer self.positive.deinit(allocator);
         try self.denial.init(allocator, settings.capacity);
+        errdefer self.denial.deinit(allocator);
+        try self.packet_storage.init(allocator, settings.packet_bytes_max);
     }
 
     pub fn deinit(self: *Cache) void {
         self.positive.deinit(self.allocator);
         self.denial.deinit(self.allocator);
+        self.packet_storage.deinit(self.allocator);
         self.* = undefined;
     }
 
@@ -204,21 +211,43 @@ pub const Cache = struct {
         selected: *const policy.Policy,
     ) error{OutOfMemory}!Insertion {
         std.debug.assert(bytes.len <= wire.message_bytes_max);
-        // Allocate first: failure cannot evict useful data or a stale candidate.
-        const owned = try self.allocator.dupe(u8, bytes);
         const bank = if (selected.bank == .positive) &self.positive else &self.denial;
         const other = if (selected.bank == .positive) &self.denial else &self.positive;
         const index = bank.slot(key);
-        if (bank.entries.items(.bytes)[index] != null) bank.remove(self.allocator, index);
-        if (other.find(key)) |old| other.remove(self.allocator, old);
+        const old = other.find(key);
+        const packet_class = packets.class(bytes.len);
+        // Reuse only the destination victim or this key in the other bank.
+        // Rewrites already succeeded. Nothing can fail after a block transfer.
+        const owned = self.reuse(bank, index, bytes.len) orelse
+            (if (old) |value| self.reuse(other, value, bytes.len) else null) orelse
+            try self.packet_storage.create(bytes.len);
+        @memcpy(owned, bytes);
+        if (bank.entries.items(.bytes)[index] != null) {
+            bank.remove(&self.packet_storage, index);
+        }
+        if (old) |value| {
+            if (other.entries.items(.bytes)[value] != null) {
+                other.remove(&self.packet_storage, value);
+            }
+        }
         bank.put(index, &.{
             .key = key.*,
             .bytes = owned,
+            .packet_class = packet_class,
             .inserted_s = now_s,
             .lifetime_s = selected.lifetime_s,
             .category = if (selected.category == .answer) .answer else .failure,
         });
         return .stored;
+    }
+
+    fn reuse(self: *Cache, bank: *store.Bank, index: u32, length: usize) ?[]u8 {
+        _ = bank.entries.items(.bytes)[index] orelse return null;
+        if (bank.entries.items(.packet_class)[index] != packets.class(length)) return null;
+        const owned = bank.take(index);
+        self.packet_storage.live_bytes -= @intCast(owned.len);
+        self.packet_storage.live_bytes += @intCast(length);
+        return owned.ptr[0..length];
     }
 };
 
