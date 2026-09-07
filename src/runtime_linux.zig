@@ -6,6 +6,7 @@ pub const udp = @import("runtime/udp.zig");
 pub const pipeline = @import("runtime/pipeline.zig");
 pub const address = @import("runtime/address.zig");
 pub const forwarding = @import("runtime/forward.zig");
+const log = @import("runtime/log.zig");
 const upstream = @import("runtime/forward_linux.zig");
 const linux = proctor.linux;
 const config = pipeline.resolver.config;
@@ -46,6 +47,7 @@ pub const Runtime = struct {
     listeners: [config.listeners_max]Listener,
     clients: [tcp.clients_max]tcp.Client,
     responses: [proctor.buffers_max]udp.Response,
+    peers: [tcp.clients_max]struct { address: address.Address, state: enum { lookup, ready } },
     listener_count: u16,
     state: enum { running, stopping } = .running,
     interval: linux.kernel_timespec = .{ .sec = 1, .nsec = 0 },
@@ -231,6 +233,11 @@ pub const Runtime = struct {
             response.listener = listener;
             response.prepare(&datagram_value, 0);
             response.state = .reserved;
+            response.observation = .{
+                .client = log.peer(@ptrCast(&response.address), response.message.namelen),
+                .protocol = .udp,
+                .started_ns = nowNs() catch 0,
+            };
             const admission = self.pipeline.begin(
                 datagram_value.payload,
                 &response.output,
@@ -242,7 +249,12 @@ pub const Runtime = struct {
             };
             switch (admission) {
                 .drop => response.state = .free,
-                .answer => |answer| try self.sendResponse(@intCast(index), answer.bytes.len),
+                .answer => |answer| try self.sendResponse(
+                    @intCast(index),
+                    datagram_value.payload,
+                    &answer,
+                    null,
+                ),
                 .forward => |zone| {
                     const destination: forwarding.Destination = .{
                         .index = @intCast(index),
@@ -257,7 +269,12 @@ pub const Runtime = struct {
                             response.state = .free;
                             return;
                         };
-                        try self.sendResponse(@intCast(index), answer.bytes.len);
+                        try self.sendResponse(
+                            @intCast(index),
+                            datagram_value.payload,
+                            &answer,
+                            null,
+                        );
                     }
                 },
             }
@@ -266,10 +283,16 @@ pub const Runtime = struct {
         // Bounded overload policy: drop the datagram, never allocate an overflow queue.
     }
 
-    fn sendResponse(self: *Runtime, index: u16, length: usize) Error!void {
+    fn sendResponse(
+        self: *Runtime,
+        index: u16,
+        input: []const u8,
+        answer: *const pipeline.resolver.Answer,
+        selected: ?*const log.Upstream,
+    ) Error!void {
         const response = &self.responses[index];
         std.debug.assert(response.state == .reserved);
-        response.vector.len = length;
+        response.vector.len = answer.bytes.len;
         response.state = .sending;
         const token = try self.proctor.arm(response_start + @as(u32, index));
         const entry = self.proctor.ring.sendmsg(
@@ -279,6 +302,7 @@ pub const Runtime = struct {
             linux.MSG.NOSIGNAL,
         ) catch return error.SubmissionFailed;
         entry.flags |= linux.IOSQE_FIXED_FILE;
+        self.logAnswer(&response.observation, input, answer, selected);
     }
 
     pub fn deliverForwards(self: *Runtime) Error!void {
@@ -314,12 +338,18 @@ pub const Runtime = struct {
                 try now(),
                 &completion,
             ) catch return error.TransportFailed;
+            const selected: ?log.Upstream = if (transaction.completion == .response)
+                self.forward.selectedUpstream(transaction.completion.response)
+            else
+                null;
+            const upstream_value = if (selected) |*value| value else null;
+            const input = transaction.input[0..transaction.length];
             switch (destination.transport) {
                 .tcp => {
-                    self.clients[destination.index].respond(answer.bytes.len);
+                    self.publishClient(destination.index, input, &answer, upstream_value);
                     try self.armClient(destination.index);
                 },
-                .udp => try self.sendResponse(destination.index, answer.bytes.len),
+                .udp => try self.sendResponse(destination.index, input, &answer, upstream_value),
             }
             if (transaction.completion == .response)
                 self.forward.sessions[transaction.completion.response].transaction = null;
@@ -356,12 +386,33 @@ pub const Runtime = struct {
                 if (client_value.generation == std.math.maxInt(u31))
                     return error.GenerationExhausted;
                 client_value.reset();
-                try self.armClient(index);
+                try self.lookupPeer(index);
             },
             // The kernel can publish the new accept before userspace consumes CLOSE's CQE.
             .closing => client_value.state = .replacing,
             else => return error.InvalidCompletion,
         }
+    }
+
+    fn lookupPeer(self: *Runtime, index: u16) Error!void {
+        const peer_address = &self.peers[index];
+        peer_address.state = .lookup;
+        peer_address.address.length = @sizeOf(linux.sockaddr.storage);
+        const token = try self.proctor.arm(client_start + @as(u32, index));
+        const entry = self.proctor.ring.get_sqe() catch return error.SubmissionFailed;
+        // Linux SOCKET_URING_OP_GETSOCKNAME=5, optlen=1 selects the peer.
+        // liburing io_uring_prep_cmd_getsockname defines these SQE aliases.
+        entry.prep_rw(
+            .URING_CMD,
+            32 + @as(i32, index),
+            @intFromPtr(&peer_address.address.storage),
+            0,
+            5,
+        );
+        entry.addr3 = @intFromPtr(&peer_address.address.length);
+        entry.splice_fd_in = 1;
+        entry.flags = linux.IOSQE_FIXED_FILE;
+        entry.user_data = token;
     }
 
     fn armClient(self: *Runtime, index: u16) Error!void {
@@ -402,7 +453,7 @@ pub const Runtime = struct {
                     if (client_value.generation == std.math.maxInt(u31))
                         return error.GenerationExhausted;
                     client_value.reset();
-                    try self.armClient(index);
+                    try self.lookupPeer(index);
                 } else client_value.state = .vacant;
                 for (0..self.listener_count) |listener| {
                     if (self.proctor.ownership[16 + listener].state != .idle) continue;
@@ -412,6 +463,17 @@ pub const Runtime = struct {
             },
             .connected => {},
             .vacant => return error.InvalidCompletion,
+        }
+        if (self.peers[index].state == .lookup) {
+            if (count < 0) return self.closeClient(index);
+            const peer_address = &self.peers[index].address;
+            client_value.observation.client = log.peer(
+                @ptrCast(&peer_address.storage),
+                peer_address.length,
+            ) orelse
+                return self.closeClient(index);
+            self.peers[index].state = .ready;
+            return self.armClient(index);
         }
         switch (client_value.phase) {
             .waiting => return error.InvalidCompletion,
@@ -428,13 +490,15 @@ pub const Runtime = struct {
 
     fn queryClient(self: *Runtime, index: u16, bytes: []const u8) Error!void {
         const client = &self.clients[index];
+        client.observation.protocol = .tcp;
+        client.observation.started_ns = nowNs() catch 0;
         const admission = self.pipeline.begin(bytes, client.output[2..], .tcp, try now()) catch {
             client.state = .closing;
             return;
         };
         switch (admission) {
             .drop => client.state = .closing,
-            .answer => |answer| client.respond(answer.bytes.len),
+            .answer => |answer| self.publishClient(index, bytes, &answer, null),
             .forward => |zone| {
                 const destination: forwarding.Destination = .{
                     .index = index,
@@ -448,10 +512,41 @@ pub const Runtime = struct {
                         client.state = .closing;
                         return;
                     };
-                    client.respond(answer.bytes.len);
+                    self.publishClient(index, bytes, &answer, null);
                 }
             },
         }
+    }
+
+    fn publishClient(
+        self: *Runtime,
+        index: u16,
+        input: []const u8,
+        answer: *const pipeline.resolver.Answer,
+        selected: ?*const log.Upstream,
+    ) void {
+        const client = &self.clients[index];
+        client.respond(answer.bytes.len);
+        self.logAnswer(&client.observation, input, answer, selected);
+    }
+
+    fn logAnswer(
+        self: *Runtime,
+        observation: *const log.Query,
+        input: []const u8,
+        answer: *const pipeline.resolver.Answer,
+        selected: ?*const log.Upstream,
+    ) void {
+        log.completed(
+            &self.forward.logger,
+            self.io,
+            &self.pipeline.response_packet,
+            observation,
+            input,
+            answer,
+            selected,
+            nowNs() catch observation.started_ns,
+        );
     }
 
     fn closeClient(self: *Runtime, index: u16) Error!void {

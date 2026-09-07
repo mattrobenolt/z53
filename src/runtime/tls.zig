@@ -33,11 +33,13 @@ pub const Connection = struct {
     query_length: u32 = 0,
     phase: enum { request, response } = .request,
     plaintext: []const u8 = &.{},
+    failure_reason: ?[]const u8 = null,
 
     pub const Action = union(enum) { read, write, data: []const u8, request_sent };
 
     pub fn init(self: *Connection, io: std.Io, name: []const u8, trust: *const Trust) Error!void {
         std.debug.assert(self.handshake == null);
+        self.failure_reason = null;
         var entropy: [96]u8 = undefined;
         defer std.crypto.secureZero(u8, &entropy);
         io.randomSecure(&entropy) catch return error.LocalFailure;
@@ -70,9 +72,11 @@ pub const Connection = struct {
         std.crypto.secureZero(u8, &self.output);
         self.* = undefined;
         self.handshake = null;
+        self.failure_reason = null;
     }
 
     pub fn begin(self: *Connection, length: u32) void {
+        self.failure_reason = null;
         self.query_offset = 0;
         self.query_length = length;
         self.phase = .request;
@@ -107,6 +111,12 @@ pub const Connection = struct {
         if (self.write_offset == self.write_length) self.handshake.?.completeWrite();
     }
 
+    fn failed(self: *Connection, err: engine.errors.HandshakeError) Error {
+        // Error names are static diagnostics, never certificate bytes or session secrets.
+        self.failure_reason = @errorName(err);
+        return classify(err);
+    }
+
     pub fn next(self: *Connection, query: []const u8) Error!Action {
         for (0..4096) |_| {
             // Finished can install application keys before its bytes reach the socket.
@@ -121,7 +131,7 @@ pub const Connection = struct {
                     self.queue(self.handshake.?.sendApplicationData(
                         query[self.query_offset..end],
                         &self.output,
-                    ) catch |err| return classify(err));
+                    ) catch |err| return self.failed(err));
                     self.query_offset = end;
                     return .write;
                 }
@@ -131,7 +141,7 @@ pub const Connection = struct {
             const event = self.handshake.?.handleRecord(
                 record orelse return .read,
                 &self.output,
-            ) catch |err| return classify(err);
+            ) catch |err| return self.failed(err);
             switch (event) {
                 .write => |bytes| self.queue(bytes),
                 .key_update => |update| if (update.response) |bytes| self.queue(bytes),

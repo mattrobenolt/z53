@@ -1,10 +1,12 @@
 //! Read exactly one frame before each response. Coalesced queries remain in the socket.
 const std = @import("std");
+const log = @import("log.zig");
 const wire = @import("../wire.zig");
 pub const clients_max = 128;
 pub const Client = struct {
     state: enum { vacant, connected, closing, replacing } = .vacant,
     phase: enum { prefix, body, waiting, response } = .prefix,
+    observation: log.Query,
     generation: u31 = 0,
     offset: u32 = 0,
     length: u32 = 2,

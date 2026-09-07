@@ -1,4 +1,5 @@
 const std = @import("std");
+const log = @import("log.zig");
 const system = std.c;
 const wire = @import("../wire.zig");
 const udp = @import("udp.zig");
@@ -6,6 +7,7 @@ const udp = @import("udp.zig");
 pub const Response = struct {
     listener: ?u16 = null,
     state: enum { reserved, ready } = .ready,
+    observation: log.Query,
     generation: u31 = 0,
     address: system.sockaddr.storage,
     address_length: system.socklen_t,

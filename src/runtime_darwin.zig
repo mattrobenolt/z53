@@ -6,6 +6,7 @@ pub const proctor = @import("runtime/kqueue.zig");
 pub const address = @import("runtime/address_darwin.zig");
 const datagram = @import("runtime/udp_darwin.zig");
 pub const forwarding = @import("runtime/forward.zig");
+const log = @import("runtime/log.zig");
 const upstream = @import("runtime/forward_darwin.zig");
 const tcp = @import("runtime/tcp.zig");
 const pipeline = @import("runtime/pipeline.zig");
@@ -194,6 +195,11 @@ pub const Runtime = struct {
             response.address_length = message.namelen;
             response.listener = listener;
             response.state = .reserved;
+            response.observation = .{
+                .client = log.peer(&source, message.namelen),
+                .protocol = .udp,
+                .started_ns = nowNs() catch 0,
+            };
             const input = self.input[0..@intCast(count)];
             const admission = self.pipeline.begin(
                 input,
@@ -206,7 +212,7 @@ pub const Runtime = struct {
             };
             switch (admission) {
                 .drop => response.listener = null,
-                .answer => |answer| try self.publishResponse(@intCast(index), answer.bytes.len),
+                .answer => |answer| try self.publishResponse(@intCast(index), input, &answer, null),
                 .forward => |zone| {
                     const destination: forwarding.Destination = .{
                         .index = @intCast(index),
@@ -218,7 +224,7 @@ pub const Runtime = struct {
                             response.listener = null;
                             return;
                         };
-                        try self.publishResponse(@intCast(index), answer.bytes.len);
+                        try self.publishResponse(@intCast(index), input, &answer, null);
                     }
                 },
             }
@@ -227,13 +233,20 @@ pub const Runtime = struct {
         // Pool exhaustion drops only this datagram, with no overflow storage.
     }
 
-    fn publishResponse(self: *Runtime, index: u16, length: usize) Error!void {
+    fn publishResponse(
+        self: *Runtime,
+        index: u16,
+        input: []const u8,
+        answer: *const pipeline.resolver.Answer,
+        selected: ?*const log.Upstream,
+    ) Error!void {
         const response = &self.responses[index];
         const listener = response.listener.?;
-        response.length = @intCast(length);
+        response.length = @intCast(answer.bytes.len);
         response.state = .ready;
         self.sendResponse(response);
         if (response.listener != null) try self.armSend(listener);
+        self.logAnswer(&response.observation, input, answer, selected);
     }
 
     fn sendResponse(self: *Runtime, response: *datagram.Response) void {
@@ -319,12 +332,18 @@ pub const Runtime = struct {
                 try now(),
                 &completion,
             ) catch return error.TransportFailed;
+            const selected: ?log.Upstream = if (transaction.completion == .response)
+                self.forward.selectedUpstream(transaction.completion.response)
+            else
+                null;
+            const upstream_value = if (selected) |*value| value else null;
+            const input = transaction.input[0..transaction.length];
             switch (destination.transport) {
                 .tcp => {
-                    self.clients[destination.index].respond(answer.bytes.len);
+                    self.publishClient(destination.index, input, &answer, upstream_value);
                     try self.armClient(destination.index);
                 },
-                .udp => try self.publishResponse(destination.index, answer.bytes.len),
+                .udp => try self.publishResponse(destination.index, input, &answer, upstream_value),
             }
             if (transaction.completion == .response)
                 self.forward.sessions[transaction.completion.response].transaction = null;
@@ -349,7 +368,13 @@ pub const Runtime = struct {
 
     fn accepted(self: *Runtime, listener: u16) Error!void {
         const index = self.freeClient() orelse return;
-        const descriptor = system.accept(self.listeners[listener].tcp.?, null, null);
+        var source: system.sockaddr.storage = undefined;
+        var length: system.socklen_t = @sizeOf(system.sockaddr.storage);
+        const descriptor = system.accept(
+            self.listeners[listener].tcp.?,
+            @ptrCast(&source),
+            &length,
+        );
         if (descriptor < 0) {
             switch (std.posix.errno(descriptor)) {
                 .AGAIN, .INTR, .CONNABORTED => try self.accept(listener),
@@ -364,6 +389,7 @@ pub const Runtime = struct {
         if (self.clients[index].generation == std.math.maxInt(u31))
             return error.GenerationExhausted;
         self.clients[index].reset();
+        self.clients[index].observation.client = log.peer(&source, length);
         try self.armClient(index);
         if (self.freeClient() != null) try self.accept(listener);
     }
@@ -422,11 +448,13 @@ pub const Runtime = struct {
 
     fn queryClient(self: *Runtime, index: u16, bytes: []const u8) Error!void {
         const client = &self.clients[index];
+        client.observation.protocol = .tcp;
+        client.observation.started_ns = nowNs() catch 0;
         const admission = self.pipeline.begin(bytes, client.output[2..], .tcp, try now()) catch
             return self.closeClient(index);
         switch (admission) {
             .drop => return self.closeClient(index),
-            .answer => |answer| client.respond(answer.bytes.len),
+            .answer => |answer| self.publishClient(index, bytes, &answer, null),
             .forward => |zone| {
                 const destination: forwarding.Destination = .{
                     .index = index,
@@ -438,10 +466,41 @@ pub const Runtime = struct {
                 } else {
                     const answer = self.pipeline.localFailure(bytes, client.output[2..]) catch
                         return self.closeClient(index);
-                    client.respond(answer.bytes.len);
+                    self.publishClient(index, bytes, &answer, null);
                 }
             },
         }
+    }
+
+    fn publishClient(
+        self: *Runtime,
+        index: u16,
+        input: []const u8,
+        answer: *const pipeline.resolver.Answer,
+        selected: ?*const log.Upstream,
+    ) void {
+        const client = &self.clients[index];
+        client.respond(answer.bytes.len);
+        self.logAnswer(&client.observation, input, answer, selected);
+    }
+
+    fn logAnswer(
+        self: *Runtime,
+        observation: *const log.Query,
+        input: []const u8,
+        answer: *const pipeline.resolver.Answer,
+        selected: ?*const log.Upstream,
+    ) void {
+        log.completed(
+            &self.forward.logger,
+            self.io,
+            &self.pipeline.response_packet,
+            observation,
+            input,
+            answer,
+            selected,
+            nowNs() catch observation.started_ns,
+        );
     }
 
     fn closeClient(self: *Runtime, index: u16) Error!void {

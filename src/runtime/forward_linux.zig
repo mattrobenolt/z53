@@ -86,6 +86,7 @@ pub const Driver = struct {
 
     fn localFailure(self: *Driver, service: *runtime.Runtime, index: u16) void {
         _ = self;
+        service.forward.failed(index, "local_resource");
         const session = &service.forward.sessions[index];
         const transaction = &service.forward.transactions[session.transaction.?];
         transaction.completion = .local_failure;
@@ -188,10 +189,14 @@ pub const Driver = struct {
         if (timeout_result >= 0) return error.InvalidCompletion;
         switch (completionError(timeout_result)) {
             .CANCELED, .ALREADY, .NOENT => {},
-            .TIME => return self.close(service, index, .retry),
+            .TIME => {
+                service.forward.sessions[index].failure_reason = "timeout";
+                return self.close(service, index, .retry);
+            },
             else => return error.InvalidCompletion,
         }
         if (count < 0) {
+            service.forward.sessions[index].failure_reason = @tagName(completionError(count));
             switch (completionError(count)) {
                 .MFILE, .NFILE, .NOBUFS, .NOMEM => return self.abortLocal(service, index),
                 else => return self.close(service, index, .retry),
@@ -201,6 +206,7 @@ pub const Driver = struct {
     }
 
     fn abortLocal(self: *Driver, service: *runtime.Runtime, index: u16) runtime.Error!void {
+        service.forward.failed(index, service.forward.sessions[index].failure_reason);
         const session = &service.forward.sessions[index];
         const transaction = &service.forward.transactions[session.transaction.?];
         transaction.completion = .local_failure;
@@ -269,6 +275,8 @@ pub const Driver = struct {
         index: u16,
         err: forward.tls.Error,
     ) runtime.Error!void {
+        const session = &service.forward.sessions[index];
+        session.failure_reason = session.tls.failure_reason orelse @errorName(err);
         switch (err) {
             error.LocalFailure => try self.abortLocal(service, index),
             error.TransportFailure => try self.close(service, index, .retry),
@@ -281,6 +289,15 @@ pub const Driver = struct {
         index: u16,
         disposition: @FieldType(forward.Session, "disposition"),
     ) runtime.Error!void {
+        if (disposition == .retry) {
+            const session = &service.forward.sessions[index];
+            const now_ns = runtime.nowNs() catch 0;
+            var reason = session.failure_reason;
+            if (std.mem.eql(u8, reason, "transport_failure")) {
+                if (now_ns >= session.deadline_ns) reason = "timeout";
+            }
+            service.forward.failed(index, reason);
+        }
         const slot = operation_start + @as(u32, index) * 2;
         std.debug.assert(retired(
             &service.proctor.ownership[slot],

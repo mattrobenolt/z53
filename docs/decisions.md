@@ -1175,3 +1175,48 @@ Cloudflare returned NOERROR and two A records for `example.com` over a UDP clien
 A repeat query also succeeded. The owned resolver process exited afterward; the existing port 5353 listener remained untouched.
 The macOS runtime and test roots pass semantic compilation on Linux. Native macOS execution remains pending.
 Health checks, bootstrap, query logs, and historical Linux restart diagnosis remain outside this slice.
+
+
+## Query completion logs (#1)
+
+Both runtimes log at their existing UDP and TCP publication points.
+The resolver supplies the source tag. The final client packet supplies the full response code.
+The formatter reparses the original query and final response through the existing event-thread workspace.
+Malformed questions use placeholders. No borrowed packet view survives the synchronous log call.
+
+Each client or reserved UDP response owns its peer address and monotonic start time.
+Forward transactions retain the original query through publication, as before.
+The selected session supplies the actual endpoint, transport, and TLS name before session release.
+Cache and local answers omit all upstream fields, even when an idle TLS session exists.
+
+Linux retains multishot direct accept and its fixed-file allocation range.
+Each accepted connection submits one socket `URING_CMD` on its existing client operation slot before its first receive.
+`SOCKET_URING_OP_GETSOCKNAME=5` with `optlen=1` requests the peer address.
+The SQE follows liburing's `io_uring_prep_cmd_getsockname` layout.
+Each client owns its sockaddr and length until completion. Coalesced accepts cannot overwrite another client's identity.
+The existing ownership generation and teardown barriers retain this storage.
+Darwin obtains the peer directly from `accept`.
+
+The formatter has a 3072-byte stack buffer and no allocator.
+The default sink submits one bounded stderr write through the existing `Io`.
+Zig's process `Io` handles SIGPIPE. A failed or short write loses log bytes without a DNS error.
+The sink has no background queue. Synchronous stderr backpressure can delay the entire event thread.
+This tradeoff is intentional. No throughput or latency improvement is claimed.
+
+Attempt diagnostics describe transport failures, not health transitions.
+TLS retains static causal error names, including certificate rejection, without certificate bytes or connection secrets.
+Retry, stale, cache, and health semantics remain unchanged.
+Health counters, probes, and transition logs remain future work.
+
+Native capture tests cover both client protocols, distinct concurrent TCP peers, and actual DoT selection.
+They also cover cache omission, failure-driven fallback, fragmented frames, coalesced frames, and sink failure.
+The peer-lookup mutation changes `optlen` from one to zero, so the kernel returns the listener address instead.
+The concurrent-peer test fails at its client-address assertion while DNS replies still succeed.
+The restored peer lookup passes the same test.
+The synthetic driver fixture bypasses normal admission with Unix socket pairs and needed explicit log metadata initialization.
+A new capture assertion failed before that fixture correction. All six driver-pair tests pass afterward.
+A live Cloudflare check on port 8853 produced three completion lines for three successful queries.
+The first UDP query reported `src=forward upstream=1.1.1.1:853 upstream_proto=dot` and the verified TLS name.
+Its repeat reported `src=cache` with no upstream fields. An uncached TCP query reported DoT and its actual client port.
+The owned resolver exited afterward. The existing port 5353 listener remained untouched.
+Native macOS execution remains separate from semantic compilation on Linux.

@@ -12,7 +12,7 @@ These features remain incomplete:
 
 - Upstream health exclusion and probes
 - Listener and upstream hostname bootstrap
-- Query and upstream transition logs
+- Upstream health transition logs
 
 This document is the contract for the first implementation.
 
@@ -77,6 +77,8 @@ The Linux event thread owns these fixed resources:
 - 192 registered files: 32 listener slots, 128 direct-accept slots, and 32 upstream slots.
 
 Direct accept retains files 32 through 159. Upstreams use files 160 through 191.
+Each direct-accepted TCP connection retrieves its peer through socket `URING_CMD GETSOCKNAME` before its first receive.
+Per-client sockaddr storage survives lookup completion under the existing operation ownership barriers.
 Upstream I/O and linked timeout pairs use operation slots 225 through 288.
 Slot 289 supplies the idle timer. Both linked completions retire before a session can rearm.
 Explicit cancellation also retains each slot until its target completion and cancellation acknowledgement arrive.
@@ -442,19 +444,56 @@ Connections:
 
 All output goes to stderr. The service manager captures it.
 
-One line per query. Required fields: timestamp, proto, client address, qtype,
-qname, rcode, duration, source tag, upstream address when forwarded. Source
-tags: `rfc6761`, `nodata`, `hosts`, `cache`, `stale`, `forward`, `servfail`.
+Each answered query emits one `event=query` completion line.
+Dropped queries emit no completion line.
+The line includes these fields:
 
+- UTC timestamp with milliseconds
+- `proto=udp|tcp` for the client transport
+- Actual client IP address and port
+- Numeric `qtype`, including unknown type numbers
+- Quoted, escaped `qname`
+- Full numeric `rcode`, including the upper EDNS bits
+- Monotonic `duration_ms` with three fractional digits
+- `src=rfc6761|nodata|hosts|cache|stale|forward|servfail`
+
+Forwarded answers also include the selected upstream address and `upstream_proto=udp|tcp|dot`.
+DoT answers include `tls_name` from that selected member.
+These fields describe the actual exchange, not the first configured member or the client transport.
+A reused DoT connection still has `upstream_proto=dot`. This field does not imply a new handshake.
+Cache, stale, and local answers omit upstream fields. They never imply a new TLS exchange.
+
+```text
+2026-09-05T01:12:33.512Z event=query proto=udp client=127.0.0.1:44123 qtype=1 qname="example.com." rcode=0 duration_ms=0.600 src=forward upstream=1.1.1.1:853 upstream_proto=dot tls_name="one.one.one.one"
+2026-09-05T01:12:34.100Z event=query proto=tcp client=127.0.0.1:44124 qtype=1 qname="example.com." rcode=0 duration_ms=0.050 src=cache
 ```
-2026-09-05T01:12:33.512Z udp 127.0.0.1:44123 A api.fireworks.ai. NOERROR 0.6ms src=cache
-```
 
-The exact layout belongs to the implementer. The fields do not.
+Duration starts when the runtime admits a complete query to the resolver.
+It ends at final response publication. TCP publication precedes socket writes. UDP publication queues or attempts the send.
+The interval excludes completion-log formatting, its stderr write, and kernel delivery.
+Fragmented reads and partial writes do not produce extra completion lines.
 
-Upstream state transitions print one line each: address, new state, failure
-count. Config errors print the file, the position, and the reason, then exit
-with status 1.
+DNS label bytes outside ASCII letters, digits, hyphens, and underscores use `\xHH` escapes.
+Literal label dots also use escapes. Only real label separators appear as dots.
+Control bytes, quotes, backslashes, and non-ASCII bytes cannot forge lines or terminal commands.
+Malformed questions use `qtype=unknown qname=unknown`. An unparsable response uses `rcode=unknown`.
+The source tag identifies the pipeline path, not the numeric response code.
+A malformed query can therefore produce `src=servfail rcode=1`.
+
+Failed upstream attempts emit bounded `event=upstream_failure` lines with the endpoint, upstream transport, and reason.
+DoT failures include the TLS name and the causal certificate error when the TLS engine supplies it.
+The completion line identifies the successful fallback, if one answers.
+These diagnostics do not alter retry or cache policy.
+Health counters, probes, and down/restored transition logs remain incomplete.
+The remaining health implementation must log each state transition once, with the upstream address, new state, and failure count.
+Attempt failures never claim a health state or a failure count.
+
+The formatter uses a fixed 3072-byte buffer and the existing parser workspace.
+No query log requires heap allocation or a background queue.
+The sink writes synchronously on the event thread. A slow stderr consumer can delay every query and upstream timeout dispatch.
+A failed or short write loses all or part of the line, without a DNS error or retry queue.
+
+Config errors print the file, position, and reason, then exit with status 1.
 
 Nothing else. No HTTP, no metrics, no health port.
 
@@ -748,8 +787,8 @@ in-process queries:
 - hosts hit: A answer, TTL 30, AA set.
 - NODATA: AAAA query returns empty NOERROR, AA set, COOKIE echoed.
 - Zone routing: the `ts.net.`-style zone hits its own upstream.
-- Failover: stop the first upstream. The second answers. The log shows the
-  down transition and the restore.
+- Failover: stop the first upstream. The second answers. The log shows the failed attempt and the selected fallback.
+  Health acceptance also requires down and restore logs.
 - DoT: run an in-process DoT upstream with the ztls server role and a
   self-signed CA. z53 must resolve through it. A wrong CA must fail the
   handshake and count toward `max_fails`.

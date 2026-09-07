@@ -1,4 +1,5 @@
 const std = @import("std");
+const log = @import("log.zig");
 const linux = std.os.linux;
 const wire = @import("../wire.zig");
 pub const Family = enum { ipv4, ipv6 };
@@ -14,6 +15,7 @@ pub fn limit(client_bytes: u16, family: Family) u16 {
 }
 pub const Response = struct {
     state: enum { free, reserved, sending } = .free,
+    observation: log.Query,
     generation: u31 = 0,
     listener: u16,
     address: linux.sockaddr.storage,

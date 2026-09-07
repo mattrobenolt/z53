@@ -7,7 +7,8 @@ configuration in ZON. A small, personal replacement for CoreDNS under developmen
 Literal upstreams support UDP, TCP, verified TLS 1.3, sequential transport failover, and caching.
 TLS connections use the system trust bundle and retain sessions across queries.
 Hosts, synthetic answers, NODATA rules, and answer rotation also work.
-Health checks, hostname bootstrap, and query logs remain incomplete.
+Query logs show the actual selected upstream transport, including DoT.
+Health checks and hostname bootstrap remain incomplete.
 Earlier Linux restart bind failures remain unexplained. Native macOS forwarding feedback remains pending.
 
 ## Targets
@@ -38,6 +39,26 @@ dig @127.0.0.1 -p 5354 example.net A +tcp
 `examples/dot.zon` uses Cloudflare DoT and listens on `127.0.0.1:8853`.
 Both UDP and TCP client queries use authenticated TLS upstream.
 The trust scan has a 1.5 MiB bound. Trust load failures abort startup before listener creation.
+
+## Query logs
+
+Every answered query emits one completion line on stderr.
+`proto` describes the client. `upstream_proto=dot` identifies authenticated TLS to the selected upstream.
+`tls_name` identifies its certificate hostname. Reused TLS connections retain these fields.
+Cache hits show `src=cache` without upstream fields or a new TLS exchange.
+Failed attempts report their endpoint and reason, including certificate errors.
+Health state transitions remain incomplete.
+
+```sh
+dig @127.0.0.1 -p 8853 example.com A
+dig @127.0.0.1 -p 8853 example.net A +tcp
+```
+
+The log uses numeric DNS types and full response codes.
+`duration_ms` covers resolver admission through response publication, not kernel delivery.
+Hostile name bytes use hexadecimal escapes. Malformed questions use explicit placeholders.
+The bounded stderr sink is synchronous. A slow consumer can delay the event thread.
+Sink failures lose logs without a DNS failure. [SPEC §4](SPEC.md#4-observability) defines the fields and timing.
 
 ## Development
 

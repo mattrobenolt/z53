@@ -17,3 +17,5 @@ pub const udp = @import("runtime/udp.zig");
 pub const pipeline = @import("runtime/pipeline.zig");
 pub const forward = @import("runtime/forward.zig");
 pub const nowNs = platform.nowNs;
+
+pub const log = @import("runtime/log.zig");

@@ -2,6 +2,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const runtime = @import("runtime");
 const testing = std.testing;
+const logging = @import("runtime_log.zig");
 const system = std.c;
 const wire = runtime.pipeline.wire;
 const config = runtime.pipeline.resolver.config;
@@ -292,12 +293,14 @@ fn answer(output: []u8, request: []const u8, rcode: u4, count: u16) ![]const u8 
     return output[0 .. bytes.len + 2];
 }
 
-// SPEC §§3.2, 3.6, 3.9: real Runtime sockets restore both client envelopes and reuse one stream.
-test "forward native both clients reuse queued frames and allocation guard" {
+// SPEC §§3.2, 3.6, 3.9, 4: native client envelopes and logs retain stream reuse.
+test "forward native both clients reuse queued frames and allocation guard logging" {
     var harness: Harness = undefined;
     try harness.init();
     defer harness.deinit();
     try harness.start();
+    var logs: logging.Capture = .{};
+    harness.service.forward.logger = logs.sink();
     const allocations = harness.allocator.alloc_index;
     harness.allocator.fail_index = allocations;
     const datagram = try harness.client(system.SOCK.DGRAM);
@@ -339,6 +342,12 @@ test "forward native both clients reuse queued frames and allocation guard" {
     }
     try testing.expectEqual(allocations, harness.allocator.alloc_index);
     try testing.expect(!harness.allocator.has_induced_failure);
+    try testing.expectEqual(3, logs.count("event=query"));
+    try testing.expectEqual(1, logs.count("proto=udp client="));
+    try testing.expectEqual(2, logs.count("proto=tcp client="));
+    try testing.expectEqual(3, logs.count("upstream_proto=tcp"));
+    try logs.client(datagram, .udp);
+    try logs.client(stream, .tcp);
     try harness.stop();
 }
 
@@ -1691,6 +1700,12 @@ const LinuxPair = struct {
             for (&service.responses) |*reservation| reservation.state = .free;
             service.clients[0].reset();
             service.clients[0].phase = .waiting;
+            // This Unix-socket fixture bypasses IP peer lookup and normal query admission.
+            service.clients[0].observation = .{
+                .client = null,
+                .protocol = .tcp,
+                .started_ns = try runtime.nowNs(),
+            };
             @memset(&service.clients[0].output, 0xa5);
             try self.admit();
             const upstream_pair = try socketPair();
@@ -1869,6 +1884,9 @@ const LinuxPair = struct {
 
         fn delivered(self: *Fixture, rcode: u4) !void {
             const service = self.service;
+            var logs: logging.Capture = .{};
+            service.forward.logger = logs.sink();
+            defer service.forward.logger = .{};
             try service.deliverForwards();
             try testing.expectEqual(.free, service.forward.transactions[0].state);
             try testing.expectEqual(.response, service.clients[0].phase);
@@ -1887,6 +1905,7 @@ const LinuxPair = struct {
             try testing.expectEqual(tail, service.proctor.ring.sq.sqe_tail);
             try testing.expectEqual(positive, cache.positive.entries[0].bytes);
             try testing.expectEqual(denial, cache.denial.entries[0].bytes);
+            try testing.expectEqual(1, logs.count("event=query proto=tcp client=unknown "));
         }
     };
 
@@ -2605,8 +2624,8 @@ const DatagramPeer = struct {
     }
 };
 
-// SPEC §§3.6, 3.7: a UDP answer precedes unused TLS fallback. Subsequent queries hit the cache.
-test "forward UDP native answer with unused TLS fallback and cache hit" {
+// SPEC §§3.6, 3.7, 4: a UDP answer and cache hit never imply an unused TLS exchange.
+test "forward UDP native answer with unused TLS fallback and cache hit logging" {
     var harness: Harness = undefined;
     try harness.init();
     defer harness.deinit();
@@ -2618,6 +2637,8 @@ test "forward UDP native answer with unused TLS fallback and cache hit" {
     harness.zones[0].upstreams = &harness.upstreams;
     harness.zones[0].cache = .{ .capacity = 1 };
     try harness.start();
+    var logs: logging.Capture = .{};
+    harness.service.forward.logger = logs.sink();
     try testing.expectEqual(.supported, harness.service.forward.support[0]);
     const client = try harness.client(system.SOCK.DGRAM);
     defer _ = system.close(client);
@@ -2644,6 +2665,12 @@ test "forward UDP native answer with unused TLS fallback and cache hit" {
         upstream.len,
         0,
     )));
+    try testing.expectEqual(2, logs.count("event=query"));
+    try testing.expectEqual(1, logs.count("src=cache"));
+    try testing.expectEqual(1, logs.count("upstream="));
+    try testing.expectEqual(0, logs.count("tls_name="));
+    try testing.expectEqual(0, logs.count("upstream_proto=dot"));
+    try logs.client(client, .udp);
     try harness.stop();
 }
 
@@ -2731,18 +2758,26 @@ test "forward UDP native truncation and client TCP retry" {
     try harness.stop();
 }
 
-// SPEC §3.6: a silent UDP primary times out before the next configured TCP member answers.
-test "forward UDP native timeout advances to TCP fallback" {
+// SPEC §3.6, §4: a silent UDP primary times out before the next configured TCP member answers.
+test "forward UDP native timeout advances to TCP fallback logging" {
     var harness: Harness = undefined;
     try harness.init();
     defer harness.deinit();
     var peer: DatagramPeer = undefined;
     try peer.init(&harness);
     defer _ = system.close(peer.descriptor);
+    var fallback_address: runtime.address.Address = undefined;
+    var fallback_text: [64]u8 = undefined;
+    const fallback = try endpoint(&fallback_address, &fallback_text);
+    _ = system.close(harness.listener.?);
+    harness.listener = fallback;
+    harness.upstreams[1].address = std.mem.sliceTo(&fallback_text, 0);
     harness.upstreams[0].force_tcp = false;
     harness.zones[0].upstreams = &harness.upstreams;
     harness.zones[0].read_timeout_s = 0.05;
     try harness.start();
+    var logs: logging.Capture = .{};
+    harness.service.forward.logger = logs.sink();
     const client = try harness.client(system.SOCK.DGRAM);
     defer _ = system.close(client);
     var input: [512]u8 = undefined;
@@ -2758,6 +2793,16 @@ test "forward UDP native timeout advances to TCP fallback" {
     try send(harness.peer.?, try answer(&response, retry.bytes, 0, 1));
     const length = try harness.receive(client, &output);
     try testing.expectEqual(1, (try wire.Header.decode(output[0..length])).counts[1]);
+    try testing.expectEqual(1, logs.count("event=query"));
+    try testing.expectEqual(1, logs.count("event=upstream_failure"));
+    try logs.contains("upstream_proto=udp reason=\"timeout\"");
+    try logs.contains("upstream_proto=tcp");
+    var selected: [128]u8 = undefined;
+    try logs.contains(try std.fmt.bufPrint(
+        &selected,
+        "src=forward upstream={s} upstream_proto=tcp",
+        .{harness.upstreams[1].address},
+    ));
     try harness.stop();
 }
 
@@ -2955,13 +3000,16 @@ fn dotReceive(harness: *Harness, peer: *DotPeer, client: system.fd_t, output: []
     return error.ResponseNotReceived;
 }
 
-// SPEC §§3.6, 3.9: TLS retains authentication across transports and fragmented records.
-test "forward TLS native encrypted exchange reuse and key update" {
+// SPEC §§3.6, 3.9, §4: TLS retains authentication across transports and fragmented records.
+test "forward TLS native encrypted exchange reuse and key update logging" {
     var harness: Harness = undefined;
     try harness.init();
     defer harness.deinit();
     harness.upstreams[0].tls = .{ .server_name = "dns.example" };
+    harness.zones[0].cache = .{ .capacity = 2 };
     try harness.start();
+    var logs: logging.Capture = .{};
+    harness.service.forward.logger = logs.sink();
     try dotTrust(&harness);
     var peer: DotPeer = undefined;
     try peer.init();
@@ -2972,13 +3020,17 @@ test "forward TLS native encrypted exchange reuse and key update" {
     for ([_]u32{ system.SOCK.DGRAM, system.SOCK.STREAM }) |kind| {
         const client = try harness.client(kind);
         defer _ = system.close(client);
-        const request = try query(input[2..], 61, "encrypted.example.");
+        const request = try query(input[2..], 61, if (kind == system.SOCK.DGRAM)
+            "encrypted.example."
+        else
+            "stream.example.");
         try wire.framePrefix(&input, request.len);
         try send(client, if (kind == system.SOCK.DGRAM) request else input[0 .. request.len + 2]);
         const length = try dotReceive(&harness, &peer, client, &output);
         const bytes = if (kind == system.SOCK.DGRAM) output[0..length] else output[2..length];
         try testing.expectEqual(1, (try wire.Header.decode(bytes)).counts[1]);
         try testing.expectEqual(61, (try wire.Header.decode(bytes)).id);
+        try logs.client(client, if (kind == system.SOCK.DGRAM) .udp else .tcp);
         for (&harness.service.forward.sessions) |*session| {
             if (session.state != .idle) continue;
             try testing.expectEqual(.tls, session.transport);
@@ -2986,8 +3038,20 @@ test "forward TLS native encrypted exchange reuse and key update" {
             generation = session.generation;
         }
     }
+    const cached_client = try harness.client(system.SOCK.DGRAM);
+    defer _ = system.close(cached_client);
+    try send(cached_client, try query(&input, 65, "encrypted.example."));
+    const cached_length = try harness.receive(cached_client, &output);
+    try testing.expectEqual(65, (try wire.Header.decode(output[0..cached_length])).id);
+    try logs.client(cached_client, .udp);
+    try testing.expectEqual(1, logs.count("src=cache"));
     try testing.expectEqual(2, peer.requests);
     try testing.expectEqual(1, peer.connections);
+    try testing.expectEqual(3, logs.count("event=query"));
+    try testing.expectEqual(2, logs.count("upstream_proto=dot"));
+    try testing.expectEqual(2, logs.count("proto=udp client=127.0.0.1:"));
+    try testing.expectEqual(1, logs.count("proto=tcp client=127.0.0.1:"));
+    try logs.contains("tls_name=\"dns.example\"");
     try harness.stop();
 }
 
@@ -3022,8 +3086,8 @@ test "forward TLS native rejects wrong hostname and untrusted CA" {
     }
 }
 
-// SPEC §3.6: a failed TLS handshake advances the sequence to another verified TLS member.
-test "forward TLS native authentication failure advances configured sequence" {
+// SPEC §3.6, §4: a failed TLS handshake advances the sequence to another verified TLS member.
+test "forward TLS native authentication failure advances configured sequence logging" {
     var harness: Harness = undefined;
     try harness.init();
     defer harness.deinit();
@@ -3031,6 +3095,8 @@ test "forward TLS native authentication failure advances configured sequence" {
     harness.upstreams[1].tls = .{ .server_name = "dns.example" };
     harness.zones[0].upstreams = &harness.upstreams;
     try harness.start();
+    var logs: logging.Capture = .{};
+    harness.service.forward.logger = logs.sink();
     try dotTrust(&harness);
     var peer: DotPeer = undefined;
     try peer.init();
@@ -3044,6 +3110,13 @@ test "forward TLS native authentication failure advances configured sequence" {
     try testing.expectEqual(1, (try wire.Header.decode(output[0..length])).counts[1]);
     try testing.expectEqual(1, peer.requests);
     try testing.expectEqual(2, peer.connections);
+    try testing.expectEqual(1, logs.count("event=query"));
+    try testing.expectEqual(1, logs.count("event=upstream_failure"));
+    try logs.contains("tls_name=\"wrong.example\" reason=\"CertificateHostMismatch\"");
+    try logs.contains("src=forward");
+    try logs.contains("tls_name=\"dns.example\"");
+    try testing.expect(std.mem.indexOf(u8, logs.bytes(), "event=upstream_failure").? <
+        std.mem.indexOf(u8, logs.bytes(), "event=query").?);
     try harness.stop();
 }
 
@@ -3094,4 +3167,74 @@ test "forward TLS partial write retains engine acknowledgement and rejects overr
     try testing.expectEqual(.read, try connection.next(&.{}));
     try testing.expectError(error.TransportFailure, connection.received(0));
     try testing.expectError(error.TransportFailure, connection.received(33291));
+}
+
+// SPEC §§3.9, 4: fragmented and coalesced local TCP frames publish once per response.
+test "logging native local fragmented and coalesced TCP and sink failure" {
+    var harness: Harness = undefined;
+    try harness.init();
+    defer harness.deinit();
+    try harness.start();
+    var logs: logging.Capture = .{};
+    harness.service.forward.logger = logs.sink();
+    const client = try harness.client(system.SOCK.STREAM);
+    defer _ = system.close(client);
+    var input: [512]u8 = undefined;
+    var output: [512]u8 = undefined;
+    const bytes = try query(input[2..], 70, "localhost.");
+    try wire.framePrefix(&input, bytes.len);
+    try send(client, input[0..1]);
+    // Consume actual partial-prefix progress before the remainder reaches the socket.
+    for (0..16) |_| {
+        if (harness.service.clients[0].offset == 1) break;
+        try testing.expect(try harness.service.step());
+    }
+    try testing.expectEqual(1, harness.service.clients[0].offset);
+    try testing.expectEqual(0, logs.count("event=query"));
+    try send(client, input[1 .. bytes.len + 2]);
+    _ = try harness.frame(client, &output);
+    var coalesced: [1024]u8 = undefined;
+    const frame_length = bytes.len + 2;
+    @memcpy(coalesced[0..frame_length], input[0..frame_length]);
+    @memcpy(coalesced[frame_length..][0..frame_length], input[0..frame_length]);
+    try send(client, coalesced[0 .. frame_length * 2]);
+    _ = try harness.frame(client, &output);
+    _ = try harness.frame(client, &output);
+    try testing.expectEqual(3, logs.count("event=query"));
+    try testing.expectEqual(3, logs.count("src=rfc6761"));
+    try testing.expectEqual(0, logs.count("upstream="));
+    try logs.client(client, .tcp);
+    logs.mode = .fail;
+    try send(client, input[0..frame_length]);
+    const received = try harness.frame(client, &output);
+    try testing.expectEqual(1, (try wire.Header.decode(received)).counts[1]);
+    try testing.expectEqual(4, logs.attempts);
+    try harness.stop();
+}
+
+// SPEC §§1.1, 1.2, 4: coalesced accepts retain distinct peers without a shared sockaddr.
+test "logging native concurrent TCP accepts retain distinct peers" {
+    var harness: Harness = undefined;
+    try harness.init();
+    defer harness.deinit();
+    try harness.start();
+    var logs: logging.Capture = .{};
+    harness.service.forward.logger = logs.sink();
+    const first = try harness.client(system.SOCK.STREAM);
+    defer _ = system.close(first);
+    const other = try harness.client(system.SOCK.STREAM);
+    defer _ = system.close(other);
+    var input: [512]u8 = undefined;
+    var output: [512]u8 = undefined;
+    const bytes = try query(input[2..], 71, "localhost.");
+    try wire.framePrefix(&input, bytes.len);
+    try send(first, input[0 .. bytes.len + 2]);
+    try send(other, input[0 .. bytes.len + 2]);
+    _ = try harness.frame(first, &output);
+    _ = try harness.frame(other, &output);
+    try logs.client(first, .tcp);
+    try logs.client(other, .tcp);
+    try testing.expectEqual(2, logs.count("event=query"));
+    try testing.expectEqual(0, logs.count("client=unknown"));
+    try harness.stop();
 }

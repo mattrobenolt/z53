@@ -5,6 +5,7 @@ const config = pipeline.resolver.config;
 const wire = pipeline.wire;
 const udp = @import("udp.zig");
 const ownership = @import("ownership.zig");
+pub const log = @import("log.zig");
 pub const tls = @import("tls.zig");
 pub const transactions_max = 32;
 pub const sessions_max = 32;
@@ -47,6 +48,7 @@ pub const Session = struct {
     offset: u32,
     length: u32,
     identifier: u16,
+    failure_reason: []const u8,
     disposition: enum { retry, replace, retire } = .retire,
     input: [wire.message_bytes_max + 2]u8,
     output: [wire.message_bytes_max + 2]u8,
@@ -99,6 +101,7 @@ pub const Forward = struct {
     random: std.Random.DefaultCsprng,
     trust: tls.Trust,
     io: std.Io,
+    logger: log.Sink,
 
     pub fn init(
         self: *Forward,
@@ -107,6 +110,7 @@ pub const Forward = struct {
     ) (std.Io.RandomSecureError || tls.TrustError)!void {
         self.config = settings;
         self.io = io;
+        self.logger = .{};
         self.trust.bundle = .empty;
         self.support = @splat(.unsupported);
         self.protocols = @splat(null);
@@ -198,6 +202,7 @@ pub const Forward = struct {
         session.transaction = index;
         session.endpoint = endpoint;
         session.transport = transport;
+        session.failure_reason = "transport_failure";
         session.deadline_ns = now_ns +
             duration(self.config.zones[transaction.zone].read_timeout_s);
         return selected;
@@ -371,6 +376,29 @@ pub const Forward = struct {
         session.state = .idle;
         session.deadline_ns = now_ns + duration(self.config.zones[transaction.zone].conn_expire_s);
         // Delivery consumes the response before the next admission can reuse this session.
+    }
+
+    pub fn selectedUpstream(self: *const Forward, index: u16) log.Upstream {
+        const session = &self.sessions[index];
+        const zone = session.endpoint / config.upstreams_max;
+        const cursor = session.endpoint % config.upstreams_max;
+        return .{
+            .address = self.endpoints[session.endpoint],
+            .protocol = switch (session.transport) {
+                .udp => .udp,
+                .tcp => .tcp,
+                .tls => .dot,
+            },
+            .tls_name = if (session.transport == .tls)
+                self.config.zones[zone].upstreams[cursor].tls.?.server_name
+            else
+                null,
+        };
+    }
+
+    pub fn failed(self: *const Forward, index: u16, reason: []const u8) void {
+        const selected = self.selectedUpstream(index);
+        log.failure(&self.logger, self.io, &selected, reason);
     }
 
     pub fn responseBytes(self: *const Forward, index: u16) []const u8 {
