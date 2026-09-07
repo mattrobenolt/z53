@@ -2883,6 +2883,7 @@ test "health forward UDP native timeout advances to TCP fallback logging" {
     harness.zones[0].health_check_interval_s = 60;
     try harness.start();
     var logs: logging.Capture = .{};
+    errdefer std.debug.print("Health fixture log:\n{s}", .{logs.bytes()});
     harness.service.forward.logger = logs.sink();
     const client = try harness.client(system.SOCK.DGRAM);
     defer _ = system.close(client);
@@ -3479,6 +3480,7 @@ test "health native UDP exclusion recovery error rcode and no probe completion l
     try harness.start();
     var logs: logging.Capture = .{};
     harness.service.forward.logger = logs.sink();
+    errdefer std.debug.print("Health fixture log:\n{s}", .{logs.bytes()});
     const allocations = harness.allocator.alloc_index;
     harness.allocator.fail_index = allocations;
     const client = try harness.client(system.SOCK.DGRAM);
@@ -3628,6 +3630,7 @@ test "health native pending UDP probe stop retains buffers and counters" {
     harness.zones[0].health_check_interval_s = 0.01;
     try harness.start();
     var logs: logging.Capture = .{};
+    errdefer std.debug.print("Health fixture log:\n{s}", .{logs.bytes()});
     harness.service.forward.logger = logs.sink();
     const client = try harness.client(system.SOCK.DGRAM);
     defer _ = system.close(client);
@@ -3636,10 +3639,18 @@ test "health native pending UDP probe stop retains buffers and counters" {
     var output: [512]u8 = undefined;
     try send(client, try query(&input, 85, "stop-health.example."));
     _ = try peer.request(&harness, &upstream);
+    const failures_request = harness.service.forward.health[0].failures;
     _ = try harness.receive(client, &output);
+    const failures_response = harness.service.forward.health[0].failures;
     const probe = try peer.request(&harness, &upstream);
+    const failures_probe = harness.service.forward.health[0].failures;
     try healthQuestion(probe);
     const index = try harness.phase(.read_datagram);
+    const failures_read = harness.service.forward.health[0].failures;
+    errdefer std.debug.print(
+        "Health fixture failures: request={d} response={d} probe={d} read={d}\n",
+        .{ failures_request, failures_response, failures_probe, failures_read },
+    );
     const session = &harness.service.forward.sessions[index];
     const transaction = session.transaction.?;
     const generation = session.generation;
