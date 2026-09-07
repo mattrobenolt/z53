@@ -3,7 +3,7 @@ const std = @import("std");
 const wire = @import("wire.zig");
 
 pub const source_bytes_max = 1024 * 1024;
-pub const entries_max = 4096;
+pub const entries_max = 16384;
 pub const Error = error{ SourceTooLarge, TableFull };
 pub const Reload = enum { unchanged, replaced };
 const Address = union(enum) { ipv4: [4]u8, ipv6: [16]u8 };

@@ -184,6 +184,37 @@ test "hosts maximum bounds and oversized synthetic answer" {
     try testing.expectError(error.RewriteTooLarge, fixture.after(&zone, store.table()));
 }
 
+// SPEC §3.5: deployment-sized files retain every alias beyond the old 4096-entry limit.
+test "hosts large deployment file retains fourteen thousand names and aliases" {
+    const first = try testing.allocator.alloc(hosts.Entry, hosts.entries_max);
+    defer testing.allocator.free(first);
+    const second = try testing.allocator.alloc(hosts.Entry, hosts.entries_max);
+    defer testing.allocator.free(second);
+    const source = try testing.allocator.alloc(u8, hosts.source_bytes_max);
+    defer testing.allocator.free(source);
+    @memset(source, '\n');
+    var writer: std.Io.Writer = .fixed(source);
+    for (0..7000) |index|
+        try writer.print("192.0.2.1 host{d}.example host{d}\n", .{ index, index });
+    try writer.writeAll("192.0.2.1 host6999.example host6999\n");
+    var store: hosts.Store = undefined;
+    store.init(first, second);
+    try store.replace(source, 1);
+    try testing.expectEqual(14000, store.table().count);
+    var fixture: f.Fixture = undefined;
+    for ([_][]const u8{ "host0.example.", "host6999.example.", "host6999." }) |name| {
+        try fixture.init(name, 1, 1);
+        const answer = (try fixture.after(&f.zone, store.table())).?;
+        try fixture.check(&answer, 1);
+        const record = fixture.response.records[0];
+        try testing.expectEqualSlices(
+            u8,
+            &.{ 192, 0, 2, 1 },
+            answer.bytes[record.data_start..record.data_end],
+        );
+    }
+}
+
 // SPEC §3.5, §3.9; RFC 7873 §4: hosts responses echo COOKIE, not just NODATA.
 test "hosts and RFC6761 echo EDNS COOKIE" {
     var snapshot: Snapshot = undefined;

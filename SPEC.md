@@ -304,7 +304,7 @@ The legacy `localhost.<domain>` prefix form is out. RFC 6761 names only.
   atomically. Skip unparsable lines.
 - Answers set AA and clear RA. Answers are not cached. Deviation, see 7.2.
 - Load only regular files, at most 1 MiB per source.
-  Each table holds at most 4096 unique address/name pairs. Aliases count toward this bound.
+  Each table holds at most 16384 unique address/name pairs. Aliases count toward this bound.
   The caller pre-sizes two disjoint table buffers for replacement.
   Duplicate pairs collapse. One name at multiple addresses retains every address.
 - Skip an entire line if an address or hostname is invalid.

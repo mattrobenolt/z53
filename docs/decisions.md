@@ -364,7 +364,9 @@ These seams do not implement the cache or forward stage.
 The runtime must obey the documented order and end a hit immediately.
 
 Hosts storage uses two caller-owned disjoint entry arrays.
-Each array holds at most 4096 address/name pairs.
+Each array holds at most 16384 address/name pairs.
+The Mac deployment file exceeded the original 4096-pair bound (#1).
+The two arrays reserve four times the previous storage.
 The source buffer holds at most 1 MiB plus one overflow byte.
 No query operation allocates.
 
