@@ -70,7 +70,8 @@
                 actionlint
                 llvmPackages.bintools
               ]
-              ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [ pkgs.perf ];
+              ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [ pkgs.perf ]
+              ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isDarwin [ pkgs.logrotate ];
           };
         };
     };
