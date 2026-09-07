@@ -605,7 +605,7 @@ test "forward native unsupported first upstream stays uncached" {
     var harness: Harness = undefined;
     try harness.init();
     defer harness.deinit();
-    harness.upstreams[0].tls = .{ .server_name = "dns.example" };
+    harness.upstreams[0].address = "dns.example:853";
     harness.zones[0].upstreams = &harness.upstreams;
     harness.zones[0].cache = .{ .capacity = 1 };
     harness.zones[0].serve_stale_s = 300;
@@ -1107,7 +1107,7 @@ test "forward peer association and unsupported membership" {
     defer pipeline.deinit();
     try forward.init(testing.io, &settings);
     try testing.expectEqual(.supported, forward.support[0]);
-    try testing.expectEqual(.unsupported, forward.support[1]);
+    try testing.expectEqual(.supported, forward.support[1]);
     try testing.expectEqual(.unsupported, forward.support[2]);
     var input: [512]u8 = undefined;
     const bytes = try query(&input, 29, "peer.example.");
@@ -1137,12 +1137,12 @@ test "forward peer association and unsupported membership" {
     }, pipeline));
 }
 
-// SPEC §3.1: the longest suffix selects its upstream. The unsupported root remains unresolved.
+// SPEC §3.1: the longest suffix selects its upstream. The hostname root remains unresolved.
 test "forward native longest zone selects configured endpoint" {
     var harness: Harness = undefined;
     try harness.init();
     defer harness.deinit();
-    harness.upstreams[0].tls = .{ .server_name = "dns.example" };
+    harness.upstreams[0].address = "dns.example:853";
     harness.settings.zones = &harness.zones;
     try harness.start();
     const client = try harness.client(system.SOCK.DGRAM);
@@ -2761,9 +2761,9 @@ test "forward UDP native timeout advances to TCP fallback" {
     try harness.stop();
 }
 
-// SPEC §§3.6, 3.7, 5.1: unsupported TLS is local failure, not supported transport exhaustion.
-test "forward UDP native timeout distinguishes exhaustion from unsupported TLS" {
-    for ([_]enum { exhausted, tls }{ .exhausted, .tls }) |ending| {
+// SPEC §§3.6, 3.7, 5.1: unresolved hostnames cause local failure, not transport exhaustion.
+test "forward UDP native timeout distinguishes exhaustion from unsupported hostname" {
+    for ([_]enum { exhausted, hostname }{ .exhausted, .hostname }) |ending| {
         var harness: Harness = undefined;
         try harness.init();
         defer harness.deinit();
@@ -2771,8 +2771,8 @@ test "forward UDP native timeout distinguishes exhaustion from unsupported TLS" 
         try peer.init(&harness);
         defer _ = system.close(peer.descriptor);
         harness.upstreams[0].force_tcp = false;
-        if (ending == .tls) {
-            harness.upstreams[1].tls = .{ .server_name = "dns.example" };
+        if (ending == .hostname) {
+            harness.upstreams[1].address = "dns.example:853";
             harness.zones[0].upstreams = &harness.upstreams;
         }
         harness.zones[0].read_timeout_s = 0.01;
@@ -2793,7 +2793,7 @@ test "forward UDP native timeout distinguishes exhaustion from unsupported TLS" 
                 try testing.expect(denial.bytes != null);
                 try testing.expectEqual(5, denial.lifetime_s);
             },
-            .tls => try testing.expectEqual(null, denial.bytes),
+            .hostname => try testing.expectEqual(null, denial.bytes),
         }
         try harness.stop();
     }
@@ -2818,4 +2818,280 @@ test "forward UDP datagram boundaries and partial send rejection" {
     session.length = 14;
     try testing.expectEqual(.failed, forward.sent(0, 1, 0));
     try testing.expectEqual(2, session.offset);
+}
+
+const tls = runtime.forward.tls.engine;
+const DotPeer = struct {
+    descriptor: ?system.fd_t = null,
+    handshake: tls.ServerHandshake,
+    signer: tls.signature.PrivateKey,
+    chain: [1][]const u8 = .{@embedFile("fixtures/dot-ca.der")},
+    records: tls.RecordBuffer,
+    storage: [33290]u8,
+    output: [16645]u8,
+    flight: tls.ServerHandshake.FlightBuffer,
+    request: [65537]u8,
+    request_length: u32 = 0,
+    requests: u32 = 0,
+    connections: u32 = 0,
+
+    fn init(self: *DotPeer) !void {
+        self.descriptor = null;
+        self.requests = 0;
+        self.connections = 0;
+        self.chain = .{@embedFile("fixtures/dot-ca.der")};
+        self.signer = try .fromPem(.ecdsa_secp256r1_sha256, @embedFile("fixtures/dot-key.pem"));
+        self.reset();
+    }
+
+    fn reset(self: *DotPeer) void {
+        self.handshake = .init(.{
+            .keypairs = .initWithP256(.generate(), .generate()),
+            .random = .zero,
+        });
+        self.handshake.setCredentials(&self.chain, self.signer.signer());
+        self.records = .init(&self.storage);
+        self.request_length = 0;
+        self.flight = .empty;
+    }
+
+    fn deinit(self: *DotPeer) void {
+        if (self.descriptor) |descriptor| _ = system.close(descriptor);
+        self.handshake.deinit();
+        self.signer.deinit();
+        self.* = undefined;
+    }
+
+    fn step(self: *DotPeer, listener: system.fd_t) !void {
+        if (self.descriptor == null) {
+            const descriptor = system.accept(listener, null, null);
+            if (descriptor < 0) {
+                if (std.posix.errno(descriptor) == .AGAIN) return;
+                return error.AcceptFailed;
+            }
+            self.descriptor = descriptor;
+            self.connections += 1;
+            try nonblocking(descriptor);
+        }
+        const buffer = self.records.writable();
+        const count = system.recv(self.descriptor.?, buffer.ptr, buffer.len, 0);
+        if (count < 0) {
+            if (std.posix.errno(count) == .AGAIN) return;
+            return error.ReceiveFailed;
+        }
+        if (count == 0) {
+            _ = system.close(self.descriptor.?);
+            self.descriptor = null;
+            self.handshake.deinit();
+            self.reset();
+            return;
+        }
+        self.records.advance(@intCast(count));
+        for (0..4096) |_| {
+            const record = try self.records.next() orelse return;
+            switch (try self.handshake.handleRecord(record, &self.output)) {
+                .write => |bytes| {
+                    try self.write(bytes);
+                    if (try self.handshake.sendServerFlightBuffered(&self.flight)) |flight|
+                        try self.write(flight);
+                },
+                .application_data => |bytes| try self.respond(bytes),
+                .key_update => |update| if (update.response) |bytes| try self.write(bytes),
+                .none => {},
+                else => return error.UnexpectedTlsEvent,
+            }
+        }
+        return error.TooManyRecords;
+    }
+
+    fn write(self: *DotPeer, bytes: []const u8) !void {
+        // Separate socket writes also split the TLS header, without a timing dependency.
+        const first = @min(3, bytes.len);
+        try send(self.descriptor.?, bytes[0..first]);
+        try send(self.descriptor.?, bytes[first..]);
+        self.handshake.completeWrite();
+    }
+
+    fn respond(self: *DotPeer, bytes: []const u8) !void {
+        if (bytes.len > self.request.len - self.request_length) return error.ShortBuffer;
+        @memcpy(self.request[self.request_length..][0..bytes.len], bytes);
+        self.request_length += @intCast(bytes.len);
+        if (self.request_length < 2) return;
+        const length = 2 + @as(u32, wire.integer(u16, self.request[0..2]));
+        if (self.request_length < length) return;
+        try testing.expectEqual(length, self.request_length);
+        var response: [512]u8 = undefined;
+        const framed = try answer(&response, self.request[2..length], 0, 1);
+        // KeyUpdate requires a response before the next request can use the new keys.
+        try self.write(try self.handshake.sendKeyUpdate(&self.output, .update_requested));
+        try self.write(try self.handshake.sendApplicationData(framed[0..1], &self.output));
+        try self.write(try self.handshake.sendApplicationData(framed[1..7], &self.output));
+        try self.write(try self.handshake.sendApplicationData(framed[7..], &self.output));
+        self.requests += 1;
+        self.request_length = 0;
+    }
+};
+
+fn dotTrust(harness: *Harness) !void {
+    const trust = &harness.service.forward.trust;
+    var allocator: std.heap.FixedBufferAllocator = .init(&trust.storage);
+    trust.bundle = .empty;
+    try trust.bundle.bytes.appendSlice(allocator.allocator(), @embedFile("fixtures/dot-ca.der"));
+    try trust.bundle.parseCert(
+        allocator.allocator(),
+        0,
+        std.Io.Timestamp.now(testing.io, .real).toSeconds(),
+    );
+}
+
+fn dotReceive(harness: *Harness, peer: *DotPeer, client: system.fd_t, output: []u8) !usize {
+    for (0..1024) |_| {
+        try peer.step(harness.listener.?);
+        const count = system.recv(client, output.ptr, output.len, 0);
+        if (count >= 0) return @intCast(count);
+        if (std.posix.errno(count) != .AGAIN) return error.ReceiveFailed;
+        try testing.expect(try harness.service.step());
+    }
+    return error.ResponseNotReceived;
+}
+
+// SPEC §§3.6, 3.9: TLS retains authentication across transports and fragmented records.
+test "forward TLS native encrypted exchange reuse and key update" {
+    var harness: Harness = undefined;
+    try harness.init();
+    defer harness.deinit();
+    harness.upstreams[0].tls = .{ .server_name = "dns.example" };
+    try harness.start();
+    try dotTrust(&harness);
+    var peer: DotPeer = undefined;
+    try peer.init();
+    defer peer.deinit();
+    var input: [512]u8 = undefined;
+    var output: [512]u8 = undefined;
+    var generation: u31 = 0;
+    for ([_]u32{ system.SOCK.DGRAM, system.SOCK.STREAM }) |kind| {
+        const client = try harness.client(kind);
+        defer _ = system.close(client);
+        const request = try query(input[2..], 61, "encrypted.example.");
+        try wire.framePrefix(&input, request.len);
+        try send(client, if (kind == system.SOCK.DGRAM) request else input[0 .. request.len + 2]);
+        const length = try dotReceive(&harness, &peer, client, &output);
+        const bytes = if (kind == system.SOCK.DGRAM) output[0..length] else output[2..length];
+        try testing.expectEqual(1, (try wire.Header.decode(bytes)).counts[1]);
+        try testing.expectEqual(61, (try wire.Header.decode(bytes)).id);
+        for (&harness.service.forward.sessions) |*session| {
+            if (session.state != .idle) continue;
+            try testing.expectEqual(.tls, session.transport);
+            if (generation != 0) try testing.expectEqual(generation, session.generation);
+            generation = session.generation;
+        }
+    }
+    try testing.expectEqual(2, peer.requests);
+    try testing.expectEqual(1, peer.connections);
+    try harness.stop();
+}
+
+// SPEC §3.6: CA and hostname failures are transport failures, never plaintext on the TLS member.
+test "forward TLS native rejects wrong hostname and untrusted CA" {
+    for ([_]enum { hostname, authority }{ .hostname, .authority }) |failure| {
+        var harness: Harness = undefined;
+        try harness.init();
+        defer harness.deinit();
+        harness.upstreams[0].tls = .{ .server_name = if (failure == .hostname)
+            "wrong.example"
+        else
+            "dns.example" };
+        harness.zones[0].cache = .{ .capacity = 1 };
+        try harness.start();
+        if (failure == .hostname) try dotTrust(&harness);
+        var peer: DotPeer = undefined;
+        try peer.init();
+        defer peer.deinit();
+        const client = try harness.client(system.SOCK.DGRAM);
+        defer _ = system.close(client);
+        var input: [512]u8 = undefined;
+        var output: [512]u8 = undefined;
+        try send(client, try query(&input, 62, "untrusted.example."));
+        const length = try dotReceive(&harness, &peer, client, &output);
+        try testing.expectEqual(2, (try wire.Header.decode(output[0..length])).bits & 15);
+        try testing.expectEqual(0, peer.requests);
+        try testing.expectEqual(1, peer.connections);
+        const denial = &harness.service.pipeline.zones[0].cache.denial.entries[0];
+        try testing.expectEqual(5, denial.lifetime_s);
+        try harness.stop();
+    }
+}
+
+// SPEC §3.6: a failed TLS handshake advances the sequence to another verified TLS member.
+test "forward TLS native authentication failure advances configured sequence" {
+    var harness: Harness = undefined;
+    try harness.init();
+    defer harness.deinit();
+    harness.upstreams[0].tls = .{ .server_name = "wrong.example" };
+    harness.upstreams[1].tls = .{ .server_name = "dns.example" };
+    harness.zones[0].upstreams = &harness.upstreams;
+    try harness.start();
+    try dotTrust(&harness);
+    var peer: DotPeer = undefined;
+    try peer.init();
+    defer peer.deinit();
+    const client = try harness.client(system.SOCK.DGRAM);
+    defer _ = system.close(client);
+    var input: [512]u8 = undefined;
+    var output: [512]u8 = undefined;
+    try send(client, try query(&input, 63, "fallback.example."));
+    const length = try dotReceive(&harness, &peer, client, &output);
+    try testing.expectEqual(1, (try wire.Header.decode(output[0..length])).counts[1]);
+    try testing.expectEqual(1, peer.requests);
+    try testing.expectEqual(2, peer.connections);
+    try harness.stop();
+}
+
+// SPEC §3.6: TLS takes precedence over both client transport and force_tcp.
+test "forward TLS selection cannot downgrade TCP clients" {
+    const forward = try testing.allocator.create(runtime.forward.Forward);
+    defer testing.allocator.destroy(forward);
+    var zones = [_]config.Zone{.{ .suffix = ".", .cache = null, .upstreams = &.{.{
+        .address = "127.0.0.1:853",
+        .force_tcp = true,
+        .tls = .{ .server_name = "dns.example" },
+    }} }};
+    const settings: config.Config = .{ .zones = &zones };
+    try forward.init(testing.io, &settings);
+    defer forward.deinit();
+    var input: [512]u8 = undefined;
+    const bytes = try query(&input, 64, "selection.example.");
+    for ([_]runtime.pipeline.Transport{ .{ .udp = .ipv4 }, .tcp }) |transport| {
+        const transaction = forward.admit(bytes, 0, &.{
+            .index = 0,
+            .generation = 1,
+            .transport = transport,
+        }).?;
+        const selection = forward.select(transaction, 0).?;
+        try testing.expectEqual(.tls, forward.sessions[selection.session].transport);
+    }
+}
+
+// RFC 8446 §4.4: partial socket writes cannot acknowledge pending handshake output.
+test "forward TLS partial write retains engine acknowledgement and rejects overrun" {
+    const connection = try testing.allocator.create(runtime.forward.tls.Connection);
+    defer testing.allocator.destroy(connection);
+    connection.handshake = null;
+    const trust = try testing.allocator.create(runtime.forward.tls.Trust);
+    defer testing.allocator.destroy(trust);
+    trust.bundle = .empty;
+    try connection.init(testing.io, "dns.example", trust);
+    defer connection.deinit();
+    connection.begin(12);
+    try testing.expectEqual(.write, try connection.next(&.{}));
+    const original = connection.pending().len;
+    try connection.sent(1);
+    try testing.expectEqual(original - 1, connection.pending().len);
+    var output: [16645]u8 = undefined;
+    try testing.expectError(error.PendingWrite, connection.handshake.?.handleRecord(&.{}, &output));
+    try testing.expectError(error.TransportFailure, connection.sent(@intCast(original)));
+    try connection.sent(@intCast(original - 1));
+    try testing.expectEqual(.read, try connection.next(&.{}));
+    try testing.expectError(error.TransportFailure, connection.received(0));
+    try testing.expectError(error.TransportFailure, connection.received(33291));
 }

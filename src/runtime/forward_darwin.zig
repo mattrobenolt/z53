@@ -55,7 +55,9 @@ pub const Driver = struct {
                     .connect => try self.connect(service, selected.session),
                     .reuse => {
                         session.state = .writing;
-                        try self.arm(service, selected.session);
+                        if (session.transport == .tls) {
+                            try self.pumpTls(service, selected.session);
+                        } else try self.arm(service, selected.session);
                     },
                     .replace => {
                         try self.close(service, selected.session, .replace);
@@ -125,8 +127,8 @@ pub const Driver = struct {
         const session = &service.forward.sessions[index];
         if (try runtime.nowNs() >= session.deadline_ns) return self.close(service, index, .retry);
         const filter: i16 = switch (session.state) {
-            .connecting, .writing => system.EVFILT.WRITE,
-            .read_prefix, .read_body, .read_datagram => system.EVFILT.READ,
+            .connecting, .writing, .tls_write => system.EVFILT.WRITE,
+            .read_prefix, .read_body, .read_datagram, .tls_read => system.EVFILT.READ,
             else => unreachable,
         };
         try service.proctor.arm(
@@ -146,11 +148,14 @@ pub const Driver = struct {
                 .transport_failure => return self.close(service, index, .retry),
                 .local_resource => return self.abortLocal(service, index),
                 .success => {
-                    session.state = .writing;
+                    service.forward.connected(index) catch |err|
+                        return self.tlsFailed(service, index, err);
+                    if (session.transport == .tls) return self.pumpTls(service, index);
                     return self.arm(service, index);
                 },
             }
         }
+        if (session.transport == .tls) return self.readyTls(service, index);
         const count = switch (session.state) {
             .writing => system.send(
                 descriptor,
@@ -192,6 +197,49 @@ pub const Driver = struct {
             },
         }
         try self.arm(service, index);
+    }
+
+    fn readyTls(self: *Driver, service: *runtime.Runtime, index: u16) runtime.Error!void {
+        const session = &service.forward.sessions[index];
+        const descriptor = self.operations[index].descriptor.?;
+        const count = if (session.state == .tls_write) send: {
+            const bytes = session.tls.pending();
+            break :send system.send(descriptor, bytes.ptr, bytes.len, 0);
+        } else receive: {
+            const bytes = session.tls.writable();
+            break :receive system.recv(descriptor, bytes.ptr, bytes.len, 0);
+        };
+        if (count < 0) {
+            switch (std.posix.errno(count)) {
+                .AGAIN, .INTR => return self.arm(service, index),
+                .MFILE, .NFILE, .NOBUFS, .NOMEM => return self.abortLocal(service, index),
+                else => return self.close(service, index, .retry),
+            }
+        }
+        const result = if (session.state == .tls_write)
+            session.tls.sent(@intCast(count))
+        else
+            session.tls.received(@intCast(count));
+        result catch |err| return self.tlsFailed(service, index, err);
+        try self.pumpTls(service, index);
+    }
+
+    fn pumpTls(self: *Driver, service: *runtime.Runtime, index: u16) runtime.Error!void {
+        service.forward.pumpTls(index, try runtime.nowNs(), &service.pipeline) catch |err|
+            return self.tlsFailed(service, index, err);
+        if (service.forward.sessions[index].state != .idle) try self.arm(service, index);
+    }
+
+    fn tlsFailed(
+        self: *Driver,
+        service: *runtime.Runtime,
+        index: u16,
+        err: forward.tls.Error,
+    ) runtime.Error!void {
+        switch (err) {
+            error.LocalFailure => try self.abortLocal(service, index),
+            error.TransportFailure => try self.close(service, index, .retry),
+        }
     }
 
     fn abortLocal(self: *Driver, service: *runtime.Runtime, index: u16) runtime.Error!void {

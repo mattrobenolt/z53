@@ -1,16 +1,15 @@
 # z53 — Feature Specification
 
-**Stage: UDP and TCP forwarding POC (#1).**
+**Stage: UDP, TCP, and DNS-over-TLS forwarding POC (#1).**
 Linux and macOS select io_uring and kqueue respectively for UDP and TCP clients.
-Plain literal upstreams support UDP and TCP, including forced TCP.
-A later unsupported TLS or hostname member does not disable an earlier supported upstream.
+Literal upstreams support UDP, TCP, and authenticated TLS 1.3, including session reuse.
+A later unsupported hostname member does not disable an earlier supported upstream.
 Selection of that unsupported member returns uncached local SERVFAIL without a silent skip.
 Native Linux tests and manual queries exercise UDP replies, TCP replies, and caching.
 Native macOS forwarding feedback and Linux IPv6 execution remain pending.
 The earlier Linux restart bind failures remain unexplained. Full SPEC acceptance remains incomplete.
 These features remain incomplete:
 
-- DoT upstream transport
 - Upstream health exclusion and probes
 - Listener and upstream hostname bootstrap
 - Query and upstream transition logs
@@ -152,15 +151,18 @@ Full upstream transport and deployment acceptance remain incomplete.
 
 Both backends retain these fixed limits:
 
-- 32 foreground transactions and 32 reusable UDP/TCP sessions
+- 32 foreground transactions and 32 reusable UDP/TCP/TLS sessions
 - No overflow queue
 - 1024 endpoint entries, at most 64 bytes each
 - One original query of at most 65535 bytes per transaction
 - Two framed buffers of 65537 bytes per session
-- 8 MiB for forwarding storage, including backend metadata
+- Separate TLS storage per session: 65536 reassembly bytes, 33290 record bytes, and 16645 output bytes
+- 1.5 MiB for the system trust scan, including its retained bundle and allocator workspace
+- 12 MiB for forwarding storage, including TLS engines, trust storage, and backend metadata
 - 40 MiB for combined fixed runtime storage, excluding the cache, hosts tables, and configuration
 
-The packet arrays occupy 6291488 bytes. Compile-time assertions enforce the complete storage caps.
+The DNS packet arrays occupy 6291488 bytes. The separate TLS byte arrays occupy 3695072 bytes.
+Compile-time assertions enforce the complete storage caps.
 The combined cap includes zone metadata and a separate 256 KiB allowance for Linux ring mappings.
 The mapping allowance includes page rounding for the submission, completion, and provided-buffer mappings.
 Configuration retains its separate section 5.1 bounds. Kernel socket memory is outside these userspace storage caps.
@@ -184,7 +186,7 @@ Supported transport exhaustion invokes the existing stale or five-second SERVFAI
 An admitted DNS response, including SERVFAIL, ends the configured sequence.
 An unsupported selected member returns uncached local SERVFAIL, without stale fallback or transport exhaustion policy.
 
-Connect and request transmission share one absolute configured timeout.
+Connect, TLS handshake, and request transmission share one absolute configured timeout.
 Complete transmission starts a separate response deadline across prefix, body, and rejected frames.
 Partial I/O and rejected frames never renew that response deadline.
 Linux links each operation to its absolute monotonic deadline with `IORING_TIMEOUT_ABS`.
@@ -356,6 +358,15 @@ Connections:
   verification against the system trust store. Trust follows Zig's system
   bundle scan. Custom Apple trust overrides are unsupported.
   A handshake failure is a transport failure.
+  TLS always takes precedence over client transport and `force_tcp`.
+  Certificate rejection never permits plaintext fallback to the same member.
+  A TLS configuration triggers one system trust scan before listeners start.
+  An empty or unreadable bundle aborts startup with `TrustStoreLoadFailed`.
+  Scan allocation exhaustion aborts startup with `TrustStoreTooLarge`.
+  TLS retains partial records and partial writes across socket operations.
+  Only complete socket transmission acknowledges pending TLS output, including Finished and KeyUpdate responses.
+  Post-handshake tickets are discarded. KeyUpdate responses use the established TLS engine.
+  Distinguishable local crypto and buffer failures return uncached local SERVFAIL.
 - Upstream queries use a fresh random query ID.
 - Upstream queries carry EDNS0 with payload size 1232. Copy the client DO
   bit and all unknown EDNS options.
@@ -546,9 +557,9 @@ Only the first error is reported, with a bounded 512-byte reason.
 Process reload remains unsupported.
 The runtime serves local responses on literal listener addresses.
 Listener hostnames remain valid configuration, but startup returns `UnresolvedListener` until bootstrap exists.
-The POC supports plain literal upstreams over UDP or TCP.
+The POC supports literal upstreams over UDP, TCP, or authenticated TLS 1.3.
 It tries configured members in order. A later unsupported member does not prevent an earlier supported member from a successful exchange.
-Selection of an unsupported TLS or hostname member returns uncached SERVFAIL, without stale fallback, health effects, or further attempts.
+Selection of an unsupported hostname member returns uncached SERVFAIL, without stale fallback, health effects, or further attempts.
 Health exclusion and probes remain incomplete, even for supported upstreams.
 The POC does not change the final transport, health, or logging requirements.
 

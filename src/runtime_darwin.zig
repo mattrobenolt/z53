@@ -28,6 +28,8 @@ pub const Error = error{
     EntropyUnavailable,
     Canceled,
     ClockFailed,
+    TrustStoreTooLarge,
+    TrustStoreLoadFailed,
     TransportFailed,
 };
 const Listener = struct { udp: ?system.fd_t = null, tcp: ?system.fd_t = null };
@@ -75,6 +77,7 @@ pub const Runtime = struct {
             response.generation = 0;
         }
         try self.forward.init(io, settings);
+        errdefer self.forward.deinit();
         self.upstreams.init();
         try self.pipeline.init(allocator, io, settings);
         errdefer self.pipeline.deinit();
@@ -98,6 +101,7 @@ pub const Runtime = struct {
         self.proctor.deinit();
         self.closeDescriptors();
         self.pipeline.deinit();
+        self.forward.deinit();
         self.* = undefined;
     }
 

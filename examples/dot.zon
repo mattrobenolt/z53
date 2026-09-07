@@ -1,0 +1,10 @@
+.{
+    .listen = .{"127.0.0.1:8853"},
+    .zones = .{.{
+        .suffix = ".",
+        .upstreams = .{
+            .{ .address = "1.1.1.1:853", .tls = .{ .server_name = "one.one.one.one" } },
+            .{ .address = "1.0.0.1:853", .tls = .{ .server_name = "one.one.one.one" } },
+        },
+    }},
+}

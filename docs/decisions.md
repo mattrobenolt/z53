@@ -1129,3 +1129,49 @@ The Linux loopback tests cover replies, cache hits, rejected datagrams, TCP retr
 Manual queries through `examples/poc.zon` returned public DNS answers over UDP and TCP.
 The macOS test roots compile. Native macOS feedback remains separate.
 No change here explains the historical Linux restart bind failures.
+
+## DNS-over-TLS POC (#1)
+
+The forwarding cap increases from 8 MiB to 12 MiB under the
+[#1 budget decision](https://github.com/mattrobenolt/z53/issues/1#issuecomment-5563391075).
+The combined fixed Runtime cap remains 40 MiB.
+Each session owns separate TLS reassembly, encrypted input, and encrypted output arrays.
+The DNS buffers retain their existing layout. No buffer overlap or dependency change accompanies this slice.
+
+The system trust scan uses a fixed 1.5 MiB allocator before listener creation.
+The initial 1 MiB bound failed on the 472033-byte NixOS certificate file because Zig reserves decode space and grows capacity.
+The 1.5 MiB bound passes that scan and includes all scan allocations and retained certificate storage.
+Empty bundles and scan failures abort startup. Custom Apple trust overrides remain unsupported.
+
+On aarch64 Linux, `Forward` occupies 11708688 bytes and its backend occupies 5920 bytes.
+`Runtime` occupies 38526960 bytes. Zone metadata and ring allowances bring the combined fixed total to 38803440 bytes.
+The TLS byte arrays occupy 3695072 bytes across 32 sessions, apart from handshake engine metadata.
+Bounded libcrypto setup and key-update allocations retain their SPEC section 1 exception outside the fixed storage total.
+These values describe storage, not performance.
+
+The TLS adapter uses ztls TLS 1.3 with secure ephemeral seeds and actual wall-clock certificate time.
+`server_name` supplies both SNI and hostname verification. No verification bypass exists in the runtime.
+TLS takes precedence over client transport and `force_tcp`.
+Certificate failures advance the configured sequence as transport failures, without plaintext fallback to that member.
+Distinguishable local crypto, entropy, and buffer failures remain uncached local failures.
+
+Connect, handshake, and request transmission share the original absolute deadline.
+Complete request transmission starts the response deadline. Partial records and control events do not renew it.
+The adapter acknowledges Finished and other pending output only after complete socket transmission.
+It discards tickets and processes KeyUpdate events through ztls.
+Linux retains all TLS storage through both linked completions and existing teardown barriers.
+Darwin removes socket interests before session destruction.
+
+Native Linux tests exercise encrypted DNS, session reuse across both client transports, fragmented DNS records, and KeyUpdate responses.
+Wrong-hostname and untrusted-CA tests reject application traffic and enter terminal transport failure policy.
+A wrong-hostname member also fails over to a second authenticated TLS member.
+Focused tests cover partial write acknowledgement, completion overruns, and TLS transport precedence.
+The precedence mutation restored the old selection expression and failed with `expected .tls, found .tcp`.
+The restored test passes. The older unsupported-member tests now use unresolved hostnames rather than supported TLS.
+
+The fixture key and self-signed certificate serve tests only. They never enter the production trust bundle.
+A real query check used the new binary with `examples/dot.zon` on port 8853 and the system trust bundle.
+Cloudflare returned NOERROR and two A records for `example.com` over a UDP client and `example.net` over a TCP client.
+A repeat query also succeeded. The owned resolver process exited afterward; the existing port 5353 listener remained untouched.
+The macOS runtime and test roots pass semantic compilation on Linux. Native macOS execution remains pending.
+Health checks, bootstrap, query logs, and historical Linux restart diagnosis remain outside this slice.

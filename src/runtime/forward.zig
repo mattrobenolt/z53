@@ -5,11 +5,12 @@ const config = pipeline.resolver.config;
 const wire = pipeline.wire;
 const udp = @import("udp.zig");
 const ownership = @import("ownership.zig");
+pub const tls = @import("tls.zig");
 pub const transactions_max = 32;
 pub const sessions_max = 32;
 pub const endpoints_max = config.zones_max * config.upstreams_max;
-pub const storage_bytes_max = 8 * 1024 * 1024;
-pub const Transport = enum { udp, tcp };
+pub const storage_bytes_max = 12 * 1024 * 1024;
+pub const Transport = enum { udp, tcp, tls };
 pub const Destination = struct {
     index: u16,
     generation: u31,
@@ -32,9 +33,12 @@ pub const Session = struct {
         read_prefix,
         read_body,
         read_datagram,
+        tls_read,
+        tls_write,
         idle,
         cancelling,
     } = .vacant,
+    tls: tls.Connection,
     transport: Transport = .tcp,
     transaction: ?u16 = null,
     endpoint: u16,
@@ -54,7 +58,7 @@ pub const Session = struct {
     }
 
     pub fn startRead(self: *Session) void {
-        if (self.transport == .tcp) return self.prefix();
+        if (self.transport != .udp) return self.prefix();
         self.state = .read_datagram;
         self.offset = 2;
         self.length = self.input.len;
@@ -93,13 +97,17 @@ pub const Forward = struct {
     transactions: [transactions_max]Transaction,
     sessions: [sessions_max]Session,
     random: std.Random.DefaultCsprng,
+    trust: tls.Trust,
+    io: std.Io,
 
     pub fn init(
         self: *Forward,
         io: std.Io,
         settings: *const config.Config,
-    ) std.Io.RandomSecureError!void {
+    ) (std.Io.RandomSecureError || tls.TrustError)!void {
         self.config = settings;
+        self.io = io;
+        self.trust.bundle = .empty;
         self.support = @splat(.unsupported);
         self.protocols = @splat(null);
         for (&self.transactions) |*transaction| transaction.state = .free;
@@ -108,23 +116,35 @@ pub const Forward = struct {
             session.transport = .tcp;
             session.transaction = null;
             session.generation = 0;
+            session.tls.handshake = null;
         }
         var seed: [std.Random.DefaultCsprng.secret_seed_length]u8 = undefined;
         defer std.crypto.secureZero(u8, &seed);
         try io.randomSecure(&seed);
         self.random = .init(seed);
+        var trust_needed = false;
         for (settings.zones, 0..) |*zone, index| {
             for (zone.upstreams, 0..) |*upstream, cursor| {
-                if (upstream.tls != null) continue;
+                if (upstream.tls != null) trust_needed = true;
                 var endpoint: config.Endpoint = undefined;
                 upstream.endpoint(&endpoint);
                 const position = index * config.upstreams_max + cursor;
                 self.endpoints[position] =
                     std.Io.net.IpAddress.parse(endpoint.host, endpoint.port) catch continue;
-                self.protocols[position] = if (upstream.force_tcp) .tcp else .udp;
+                self.protocols[position] = if (upstream.tls != null)
+                    .tls
+                else if (upstream.force_tcp) .tcp else .udp;
                 if (cursor == 0) self.support[index] = .supported;
             }
         }
+        if (trust_needed) try self.trust.init(io);
+    }
+
+    pub fn deinit(self: *Forward) void {
+        for (&self.sessions) |*session| {
+            if (session.tls.handshake != null) session.tls.deinit();
+        }
+        self.* = undefined;
     }
 
     /// The caller reserves its destination before it transfers the original query.
@@ -164,8 +184,9 @@ pub const Forward = struct {
             transaction.state = .deliver;
             return null;
         };
-        const transport: Transport =
-            if (transaction.destination.transport == .tcp) .tcp else configured;
+        const transport: Transport = if (configured == .tls)
+            .tls
+        else if (transaction.destination.transport == .tcp) .tcp else configured;
         const selected = self.selectSession(endpoint, transport, now_ns) orelse {
             transaction.completion = .local_failure;
             transaction.state = .deliver;
@@ -232,6 +253,7 @@ pub const Forward = struct {
         // Datagram payloads share the response layout but never send the TCP length prefix.
         session.offset = if (session.transport == .udp) 2 else 0;
         session.length = @intCast(bytes.len + 2);
+        if (session.transport == .tls) session.tls.begin(session.length);
     }
 
     /// Connected peer identity includes its configured endpoint and connection generation.
@@ -280,6 +302,67 @@ pub const Forward = struct {
         return .progress;
     }
 
+    pub fn connected(self: *Forward, index: u16) tls.Error!void {
+        const session = &self.sessions[index];
+        if (session.transport != .tls) {
+            session.state = .writing;
+            return;
+        }
+        const zone = session.endpoint / config.upstreams_max;
+        const cursor = session.endpoint % config.upstreams_max;
+        const name = self.config.zones[zone].upstreams[cursor].tls.?.server_name;
+        try session.tls.init(self.io, name, &self.trust);
+        session.tls.begin(session.length);
+    }
+
+    pub fn pumpTls(
+        self: *Forward,
+        index: u16,
+        now_ns: u64,
+        workspace: *pipeline.Pipeline,
+    ) tls.Error!void {
+        const session = &self.sessions[index];
+        for (0..8192) |_| {
+            switch (try session.tls.next(&session.output)) {
+                .write => {
+                    session.state = .tls_write;
+                    return;
+                },
+                .read => {
+                    session.state = .tls_read;
+                    return;
+                },
+                .request_sent => {
+                    const transaction = &self.transactions[session.transaction.?];
+                    session.deadline_ns = now_ns +
+                        duration(self.config.zones[transaction.zone].read_timeout_s);
+                    session.prefix();
+                },
+                .data => |bytes| {
+                    session.state = if (session.offset < 2) .read_prefix else .read_body;
+                    const count = @min(bytes.len, session.length - session.offset);
+                    @memcpy(session.input[session.offset..][0..count], bytes[0..count]);
+                    session.tls.plaintext = bytes[count..];
+                    switch (session.received(@intCast(count))) {
+                        .failed => return error.TransportFailure,
+                        .progress => {},
+                        .frame => {
+                            if (self.admitted(index, .{
+                                .endpoint = session.endpoint,
+                                .generation = session.generation,
+                            }, workspace)) {
+                                self.accepted(index, now_ns);
+                                return;
+                            }
+                            session.prefix();
+                        },
+                    }
+                },
+            }
+        }
+        return error.TransportFailure;
+    }
+
     pub fn accepted(self: *Forward, index: u16, now_ns: u64) void {
         const session = &self.sessions[index];
         const transaction = &self.transactions[session.transaction.?];
@@ -300,6 +383,7 @@ pub const Forward = struct {
     pub fn closed(self: *Forward, index: u16) void {
         const session = &self.sessions[index];
         std.debug.assert(session.state == .cancelling);
+        if (session.tls.handshake != null) session.tls.deinit();
         session.state = .vacant;
         if (session.transaction) |transaction| {
             if (session.disposition == .retry) self.transactions[transaction].state = .ready;

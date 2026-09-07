@@ -11,6 +11,11 @@ pub fn add(
         .root_source_file = b.path("src/runtime.zig"),
         .target = executable.root_module.resolved_target.?,
         .optimize = executable.root_module.optimize,
+        .imports = &.{.{
+            .name = "ztls",
+            .module = executable.root_module.import_table.get("ztls").?,
+        }},
+        .link_libc = true,
     });
     const filter = b.option([]const u8, "runtime-filter", "Select a runtime regression");
     const options: std.Build.TestOptions = .{

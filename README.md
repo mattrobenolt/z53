@@ -3,11 +3,11 @@
 A DNS caching forwarder in Zig. io_uring on Linux, kqueue on macOS,
 configuration in ZON. A small, personal replacement for CoreDNS under development.
 
-**Status: UDP and TCP forwarding POC (#1).** The contract is [`SPEC.md`](SPEC.md).
-Plain literal upstreams support UDP, TCP, sequential transport failover, and caching.
+**Status: UDP, TCP, and DNS-over-TLS forwarding POC (#1).** The contract is [`SPEC.md`](SPEC.md).
+Literal upstreams support UDP, TCP, verified TLS 1.3, sequential transport failover, and caching.
+TLS connections use the system trust bundle and retain sessions across queries.
 Hosts, synthetic answers, NODATA rules, and answer rotation also work.
-DoT, health checks, hostname bootstrap, and query logs remain incomplete.
-An unused DoT fallback does not disable a plain primary. If selection reaches DoT, the POC returns uncached SERVFAIL.
+Health checks, hostname bootstrap, and query logs remain incomplete.
 Earlier Linux restart bind failures remain unexplained. Native macOS forwarding feedback remains pending.
 
 ## Targets
@@ -34,6 +34,10 @@ In another terminal, query the resolver:
 dig @127.0.0.1 -p 5354 example.com A
 dig @127.0.0.1 -p 5354 example.net A +tcp
 ```
+
+`examples/dot.zon` uses Cloudflare DoT and listens on `127.0.0.1:8853`.
+Both UDP and TCP client queries use authenticated TLS upstream.
+The trust scan has a 1.5 MiB bound. Trust load failures abort startup before listener creation.
 
 ## Development
 

@@ -43,7 +43,9 @@ pub const Driver = struct {
                 .connect => try self.connect(service, selected.session),
                 .reuse => {
                     session.state = .writing;
-                    try self.arm(service, selected.session);
+                    if (session.transport == .tls) {
+                        try self.pumpTls(service, selected.session);
+                    } else try self.arm(service, selected.session);
                 },
                 .replace => try self.close(service, selected.session, .replace),
             }
@@ -115,6 +117,18 @@ pub const Driver = struct {
                 descriptor,
                 session.output[session.offset..session.length],
                 linux.MSG.NOSIGNAL,
+            ),
+            .tls_write => service.proctor.ring.send(
+                token,
+                descriptor,
+                session.tls.pending(),
+                linux.MSG.NOSIGNAL,
+            ),
+            .tls_read => service.proctor.ring.recv(
+                token,
+                descriptor,
+                .{ .buffer = session.tls.writable() },
+                0,
             ),
             .read_prefix, .read_body, .read_datagram => service.proctor.ring.recv(
                 token,
@@ -205,7 +219,19 @@ pub const Driver = struct {
         const now_ns = try runtime.nowNs();
         if (now_ns >= session.deadline_ns) return self.close(service, index, .retry);
         switch (session.state) {
-            .connecting => session.state = .writing,
+            .connecting => {
+                service.forward.connected(index) catch |err|
+                    return self.tlsFailed(service, index, err);
+                if (session.transport == .tls) return self.pumpTls(service, index);
+            },
+            .tls_read, .tls_write => {
+                const result = if (session.state == .tls_read)
+                    session.tls.received(count)
+                else
+                    session.tls.sent(count);
+                result catch |err| return self.tlsFailed(service, index, err);
+                return self.pumpTls(service, index);
+            },
             .writing => {
                 if (service.forward.sent(index, count, now_ns) == .failed)
                     return self.close(service, index, .retry);
@@ -229,6 +255,24 @@ pub const Driver = struct {
             else => return error.InvalidCompletion,
         }
         try self.arm(service, index);
+    }
+
+    fn pumpTls(self: *Driver, service: *runtime.Runtime, index: u16) runtime.Error!void {
+        service.forward.pumpTls(index, try runtime.nowNs(), &service.pipeline) catch |err|
+            return self.tlsFailed(service, index, err);
+        if (service.forward.sessions[index].state != .idle) try self.arm(service, index);
+    }
+
+    fn tlsFailed(
+        self: *Driver,
+        service: *runtime.Runtime,
+        index: u16,
+        err: forward.tls.Error,
+    ) runtime.Error!void {
+        switch (err) {
+            error.LocalFailure => try self.abortLocal(service, index),
+            error.TransportFailure => try self.close(service, index, .retry),
+        }
     }
 
     fn close(
