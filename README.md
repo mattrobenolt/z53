@@ -12,7 +12,7 @@ Health exclusion and bounded probes restore failed endpoints without client traf
 Listener hostname bootstrap remains incomplete.
 Upstreams use literal IPs. Hostname syntax remains accepted but unsupported at runtime.
 TLS `server_name` supplies certificate verification and SNI, not DNS bootstrap.
-Earlier Linux restart bind failures remain unexplained. Native macOS forwarding feedback remains pending.
+Earlier Linux restart bind failures remain unexplained. Native macOS forwarding tests pass. Live deployment checks remain pending.
 
 ## Targets
 
@@ -74,7 +74,7 @@ A zero `max_fails` disables exclusion and probes. An all-down sequence uses the 
 Root NS probes set RD and use the configured UDP, forced TCP, or verified DoT transport.
 They bypass the client cache and query-completion logs. Clients receive priority within the shared fixed pools.
 At most two concurrent probes rotate across due endpoints. Resource pressure defers probes, without simultaneous service guarantees for every endpoint.
-Native Linux fixtures cover health recovery. macOS and x86 Linux semantic checks do not establish native execution.
+Native Linux and macOS fixtures cover health recovery. x86 Linux semantic checks do not establish native execution.
 
 ## Nix package and modules (#1)
 

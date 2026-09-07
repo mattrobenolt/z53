@@ -88,10 +88,19 @@ const Harness = struct {
     fn request(self: *Harness, output: []u8) !struct { bytes: []const u8, session: u16 } {
         if (self.peer == null) {
             _ = try self.phase(.writing);
-            const descriptor = system.accept(self.listener.?, null, null);
-            if (descriptor < 0) return error.AcceptFailed;
-            self.peer = descriptor;
-            try nonblocking(descriptor);
+            const deadline_ns = try runtime.nowNs() + 5 * std.time.ns_per_s;
+            for (0..256) |_| {
+                const descriptor = system.accept(self.listener.?, null, null);
+                if (descriptor >= 0) {
+                    self.peer = descriptor;
+                    try nonblocking(descriptor);
+                    break;
+                }
+                if (std.posix.errno(descriptor) == .INTR) continue;
+                if (std.posix.errno(descriptor) != .AGAIN) return error.AcceptFailed;
+                try self.receiveProgress(self.listener.?, deadline_ns);
+            }
+            if (self.peer == null) return error.AcceptFailed;
         }
         const index = try self.phase(.read_prefix);
         var reader: PeerReader = .{ .descriptor = self.peer.? };
@@ -143,13 +152,43 @@ const Harness = struct {
     }
 
     fn receive(self: *Harness, descriptor: system.fd_t, output: []u8) !usize {
+        const deadline_ns = try runtime.nowNs() + 5 * std.time.ns_per_s;
         for (0..512) |_| {
             const count = system.recv(descriptor, output.ptr, output.len, 0);
             if (count >= 0) return @intCast(count);
             if (std.posix.errno(count) != .AGAIN) return error.ReceiveFailed;
-            try testing.expect(try self.service.step());
+            try self.receiveProgress(descriptor, deadline_ns);
         }
         return error.ResponseNotReceived;
+    }
+
+    fn receiveProgress(self: *Harness, descriptor: system.fd_t, deadline_ns: u64) !void {
+        if (builtin.os.tag == .macos) {
+            // A peer datagram can arrive after send returns, without another runtime event.
+            // Wait on both descriptors, and consume peer bytes before more runtime work.
+            const now_ns = try runtime.nowNs();
+            if (now_ns >= deadline_ns) return error.PeerReadDeadline;
+            var descriptors: [2]system.pollfd = .{
+                .{ .fd = descriptor, .events = system.POLL.IN, .revents = 0 },
+                .{ .fd = self.service.proctor.descriptor, .events = system.POLL.IN, .revents = 0 },
+            };
+            const timeout_ms: c_int = @intCast(std.math.divCeil(
+                u64,
+                deadline_ns - now_ns,
+                std.time.ns_per_ms,
+            ) catch unreachable);
+            const count = system.poll(&descriptors, descriptors.len, timeout_ms);
+            if (count < 0) {
+                if (std.posix.errno(count) == .INTR) return;
+                return error.PeerPollFailed;
+            }
+            if (count == 0) return error.PeerReadDeadline;
+            if (descriptors[0].revents & system.POLL.NVAL != 0) return error.PeerPollFailed;
+            if (descriptors[0].revents & (system.POLL.IN | system.POLL.HUP | system.POLL.ERR) != 0)
+                return;
+            if (descriptors[1].revents != system.POLL.IN) return error.PeerPollFailed;
+        }
+        try testing.expect(try self.service.step());
     }
 
     fn frame(self: *Harness, descriptor: system.fd_t, output: []u8) ![]const u8 {
@@ -778,7 +817,8 @@ test "forward native configured idle expiry closes reused socket" {
         try testing.expect(try harness.service.step());
     }
     try testing.expectEqual(.vacant, harness.service.forward.sessions[request.session].state);
-    try testing.expectEqual(0, system.recv(harness.peer.?, &upstream, upstream.len, 0));
+    // The peer observes FIN separately from the runtime's close.
+    try testing.expectEqual(0, try harness.receive(harness.peer.?, &upstream));
     _ = system.close(harness.peer.?);
     harness.peer = null;
     try send(client, bytes);
@@ -878,7 +918,11 @@ test "forward native socket resource exhaustion stays uncached" {
     const bytes = try query(&input, 26, "quota.example.");
     var previous: system.rlimit = undefined;
     try testing.expectEqual(0, system.getrlimit(.NOFILE, &previous));
-    const limited: system.rlimit = .{ .cur = 0, .max = previous.max };
+    // Darwin poll rejects a descriptor count above the soft limit, even for existing sockets.
+    // Standard input and output occupy both allocatable descriptors, so socket still fails.
+    try testing.expect(system.fcntl(0, system.F.GETFD) >= 0);
+    try testing.expect(system.fcntl(1, system.F.GETFD) >= 0);
+    const limited: system.rlimit = .{ .cur = 2, .max = previous.max };
     try testing.expectEqual(0, system.setrlimit(.NOFILE, &limited));
     defer testing.expectEqual(0, system.setrlimit(.NOFILE, &previous)) catch
         @panic("failed to restore descriptor quota");
@@ -1245,6 +1289,43 @@ test {
 
 // #1: this Linux host disables IPv6. Native Linux IPv6 exchange coverage remains unproved.
 const Darwin = struct {
+    // SPEC §§1.2, 3.6: fixture peer traffic cannot wait for an unrelated runtime timer.
+    test "health forward Darwin fixture peer readiness precedes runtime progress" {
+        for ([_]enum { peer, both }{ .peer, .both }) |ready| {
+            var harness: Harness = undefined;
+            try harness.init();
+            defer harness.deinit();
+            try harness.start();
+            var descriptors: [2]system.fd_t = undefined;
+            try testing.expectEqual(
+                0,
+                system.socketpair(system.AF.UNIX, system.SOCK.STREAM, 0, &descriptors),
+            );
+            defer for (descriptors) |descriptor| {
+                _ = system.close(descriptor);
+            };
+            try nonblocking(descriptors[1]);
+            try send(descriptors[0], &.{42});
+            if (ready == .both) {
+                // Slot 32 is the hosts/admission timer, independent of upstream health.
+                try harness.service.proctor.deadline(32, 1);
+                var queue: system.pollfd = .{
+                    .fd = harness.service.proctor.descriptor,
+                    .events = system.POLL.IN,
+                    .revents = 0,
+                };
+                try testing.expectEqual(1, system.poll(@ptrCast(&queue), 1, 1000));
+            }
+            const generation = harness.service.proctor.ownership[32].generation;
+            try harness.receiveProgress(descriptors[1], try runtime.nowNs() + std.time.ns_per_s);
+            try testing.expectEqual(generation, harness.service.proctor.ownership[32].generation);
+            var output: [1]u8 = undefined;
+            try testing.expectEqual(1, system.recv(descriptors[1], &output, output.len, 0));
+            try testing.expectEqual(42, output[0]);
+            try harness.stop();
+        }
+    }
+
     // SPEC §§1.3, 3.6: injected SO_ERROR resource failures use real kqueue dispatch.
     // These failures never advance the upstream sequence.
     test "forward Darwin injected connect resources preserve stale cache without retry" {
@@ -2696,6 +2777,7 @@ const DatagramPeer = struct {
     }
 
     fn request(self: *DatagramPeer, harness: *Harness, output: []u8) ![]const u8 {
+        const deadline_ns = try runtime.nowNs() + 5 * std.time.ns_per_s;
         for (0..256) |_| {
             self.source.length = @sizeOf(@TypeOf(self.source.storage));
             const count = system.recvfrom(
@@ -2708,7 +2790,7 @@ const DatagramPeer = struct {
             );
             if (count >= 0) return output[0..@intCast(count)];
             if (std.posix.errno(count) != .AGAIN) return error.ReceiveFailed;
-            try testing.expect(try harness.service.step());
+            try harness.receiveProgress(self.descriptor, deadline_ns);
         }
         return error.RequestNotReceived;
     }

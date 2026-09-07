@@ -5,8 +5,9 @@ Linux and macOS select io_uring and kqueue respectively for UDP and TCP clients.
 Literal upstreams support UDP, TCP, and authenticated TLS 1.3, including session reuse.
 A later unsupported hostname member does not disable an earlier supported upstream.
 Selection of that unsupported member returns uncached local SERVFAIL without a silent skip.
-Native Linux tests and manual queries exercise UDP replies, TCP replies, and caching.
-Native macOS forwarding feedback and Linux IPv6 execution remain pending.
+Native Linux and macOS tests exercise UDP, TCP, verified TLS, health recovery, and caching.
+Manual Linux queries also exercise the packaged binary.
+Linux IPv6 execution and live macOS deployment checks remain pending.
 The earlier Linux restart bind failures remain unexplained. Full SPEC acceptance remains incomplete.
 These features remain incomplete:
 
