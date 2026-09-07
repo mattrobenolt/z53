@@ -20,7 +20,7 @@ pub fn main(init: std.process.Init) !void {
         return error.InvalidMode;
     if (arguments.next() != null) return error.UnexpectedArgument;
     if (mode == .profile) return scaling.profile(&init);
-    if (mode == .layout) return scaling.layout();
+    if (mode == .layout) return scaling.layout(init.gpa);
     const selected: []const benchmark.Spec = switch (mode) {
         .smoke, .baseline => &cases,
         .wire => cases[0..1],

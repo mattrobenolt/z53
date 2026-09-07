@@ -317,7 +317,7 @@ pub fn profile(init: *const std.process.Init) !void {
     })) return error.BenchmarkFailed;
 }
 
-pub fn layout() void {
+pub fn layout(allocator: std.mem.Allocator) !void {
     const Entry = resolver.cache.Entry;
     std.debug.print("Entry={d} bytes, Key={d} bytes, alignment={d} bytes\n", .{
         @sizeOf(Entry), @sizeOf(Key), @alignOf(Entry),
@@ -342,7 +342,31 @@ pub fn layout() void {
         });
     }
     std.debug.print(
-        "Sizes exclude packets, allocator overhead, runtime storage, and kernel memory.\n",
+        "Metadata sizes exclude packet backing, allocator overhead, runtime, and kernel memory.\n",
         .{},
     );
+    try packetCapacity(allocator);
+}
+
+fn packetCapacity(allocator: std.mem.Allocator) !void {
+    const packets = resolver.cache.packets;
+    const budget = (config.Cache{}).packet_bytes_max;
+    for (packets.sizes) |size| {
+        var storage: packets.Storage = undefined;
+        try storage.init(allocator, budget);
+        defer storage.deinit(allocator);
+        var count: u32 = 0;
+        // Each class gets an independent empty default-budget backing allocation.
+        for (0..budget / size + 1) |_| {
+            _ = storage.create(@min(size, wire.message_bytes_max)) catch break;
+            count += 1;
+        } else return error.UnboundedPacketStorage;
+        std.debug.print(
+            "default backing={d} class={d} blocks={d} live={d} rounded={d} consumed={d}\n",
+            .{
+                budget,             size,                     count,
+                storage.live_bytes, storage.live_class_bytes, storage.fixed.end_index,
+            },
+        );
+    }
 }
