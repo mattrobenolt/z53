@@ -76,7 +76,7 @@ const Fixture = struct {
         self.zones = .{.{
             .suffix = ".",
             .upstreams = &.{.{ .address = "127.0.0.1:9" }},
-            .cache = .{ .capacity = capacity, .packet_bytes_max = 32 * 1024 * 1024 },
+            .cache = .{ .capacity = capacity, .packet_bytes_max = 64 * 1024 * 1024 },
         }};
         self.settings = .{ .zones = &self.zones };
         self.service = try timer.allocator.create(pipeline.Pipeline);
@@ -332,7 +332,7 @@ pub fn layout() void {
             @offsetOf(Entry, "next"),
         },
     );
-    std.debug.print("Packet pool control={d} bytes per zone, benchmark backing=33554432 bytes\n", .{
+    std.debug.print("Packet pool control={d} bytes per zone, benchmark backing=67108864 bytes\n", .{
         @sizeOf(resolver.cache.packets.Storage),
     });
     const columns = std.MultiArrayList(Entry);
