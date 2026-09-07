@@ -776,6 +776,8 @@ The numbers below come from the CoreDNS 1.14.6 source tree, not from memory.
 - `checks` include the package, portable tests, module assertions, and source formatting/lints on each target.
   Portable tests cover TLS APIs, configuration, resolver policy, wire behavior, and the benchmark smoke.
   The sandbox selects the three TLS foundation tests with `-Dunit-filter=TLS` because the system-root test requires host trust files.
+  It requires the runner to report all three tests; an empty or changed selection fails the check.
+  Check and devshell inputs provide the platform's `ps` for fuzz-gate process checks.
   Default `test-unit` and `test` remain unfiltered. Host checks must separately run the system-root test.
   The full native runtime/restart suite remains a separate acceptance gate. No check suppresses its failures.
 - The pinned Nix-only nix-darwin input supplies module evaluation and follows the root nixpkgs input.
@@ -808,7 +810,8 @@ mattrobenolt/nix-darwin:
   The daemon still reads `/etc/z53/z53.zon`. It does not consume this environment variable.
 - An hourly one-shot logrotate job retains seven compressed archives, with daily rotation and a 10 MiB size threshold.
   Its config resides at `/etc/z53/logrotate.conf`. Its state resides at `/var/log/z53-logrotate.status`.
-  `copytruncate` preserves launchd's inherited file descriptors, so logs continue after rotation without a resolver restart.
+  `copytruncate` preserves launchd's inherited file descriptors without a resolver restart.
+  Correct post-truncation logging requires append-mode descriptors. Native Mac acceptance must verify continued output without a sparse-file gap across rotation.
   Writes between the copy and truncation can disappear. Retention is best-effort, not lossless or a hard byte cap between checks.
 
 ### 8.4 Integration

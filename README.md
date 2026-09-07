@@ -120,6 +120,7 @@ Darwin uses a root launchd daemon and `/var/log/z53.log` for both output streams
 
 Darwin runs a one-shot logrotate job hourly, with daily rotation, a 10 MiB threshold, and seven compressed archives.
 Copytruncate preserves launchd's open descriptors without a resolver restart.
+It requires append-mode descriptors; the pending native Mac check must verify continued logging without a sparse-file gap after rotation.
 Writes between the copy and truncation can disappear. The active file can exceed the threshold between checks.
 No persistent log daemon or global retention override accompanies either module.
 
@@ -138,7 +139,8 @@ zig build -j2 test-unit
 ```
 
 Sandbox checks cover three TLS APIs, both reference configs, resolver policy, wire behavior, and benchmark smoke.
-The sandbox foundation filter excludes only the host-root scan. Default Zig test commands retain that test.
+The sandbox requires all three selected TLS tests to run; an empty or changed selection fails the check.
+The host-root scan remains in the default, unfiltered Zig test commands.
 Module checks cover service flags, config changes, package overrides, disablement, and retention.
 The full runtime/restart suite remains separate. These checks do not establish deployment readiness or foreign native execution.
 

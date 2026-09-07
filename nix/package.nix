@@ -108,8 +108,8 @@ in
       pkgs.zig_0_16.hook
       pkgs.pkg-config
       pkgs.python3
-    ]
-    ++ lib.optionals pkgs.stdenv.hostPlatform.isLinux [ pkgs.procps ];
+      pkgs.unixtools.ps
+    ];
     doCheck = true;
     postPatch = ''
       substituteInPlace tests/fuzz-gate.sh \
@@ -120,7 +120,11 @@ in
     checkPhase = ''
       runHook preCheck
       command -v ps
-      zig build -j2 -Doptimize=ReleaseSafe -Dcpu=baseline --system zig-pkg -Dunit-filter=TLS test-unit test-config test-resolver test-wire bench-smoke
+      set -o pipefail
+      zig build -j2 -Doptimize=ReleaseSafe -Dcpu=baseline --system zig-pkg -Dunit-filter=TLS test-unit 2>&1 | tee foundation.log
+      # ztest succeeds on an empty selection, so pin the promised TLS coverage.
+      grep -Fx 'ztest: Running 3 tests...' foundation.log
+      zig build -j2 -Doptimize=ReleaseSafe -Dcpu=baseline --system zig-pkg test-config test-resolver test-wire bench-smoke
       runHook postCheck
     '';
   };

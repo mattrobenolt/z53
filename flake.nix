@@ -66,6 +66,7 @@
                 nixfmt
                 # #1: the native CI watchdog and its local checks use pinned tools.
                 python3
+                unixtools.ps
                 actionlint
                 llvmPackages.bintools
               ]
