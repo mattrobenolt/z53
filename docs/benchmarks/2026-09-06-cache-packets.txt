@@ -1,0 +1,529 @@
+Cache packet pools (#1): paired ReleaseSafe capture
+Sun Sep  6 09:15:54 PM PDT 2026
+
+Lookup-only source: d1eb1d9 (production lookup change 8c8204b)
+Candidate committed before measurement: 58dff94dc369f755244f123e1a07836acb2b1c30
+0.16.0
+Linux launchpad 7.2.3 #1-NixOS SMP PREEMPT Wed Sep  2 12:33:21 UTC 2026 aarch64 GNU/Linux
+
+Binary hashes
+bfb83970ddeba3f9b5079a9bb4bfa05e5c65cb90d93a75c31e9cde2ee3a832a1  .tmp/cache-slab-lookup-baseline
+d36f7c21708210a0db9edf0bd00fe5c4f03fcf52b4f1e7414a05acc45ef18b43  zig-out/bin/dns-benchmark
+
+Candidate startup layout
+Entry=320 bytes, Key=262 bytes, alignment=8 bytes
+Entry offsets: key=52, bytes=8, inserted_s=24, previous=36, next=44
+Packet pool control=296 bytes per zone, benchmark backing=33554432 bytes
+capacity=128: two metadata column allocations=80896 bytes
+capacity=1024: two metadata column allocations=647168 bytes
+capacity=10000: two metadata column allocations=6320000 bytes
+capacity=100000: two metadata column allocations=63200000 bytes
+Sizes exclude packets, allocator overhead, runtime storage, and kernel memory.
+
+Baseline: preserved lookup-only binary, unchanged timer boundaries
+Command: .tmp/cache-slab-lookup-baseline baseline
+zig_os: linux
+zig_arch: aarch64
+zig_abi: gnu
+zig_cpu: neoverse_v3
+zig_mode: ReleaseSafe
+WireDecodeAResponse	  100000	      1643 ns/op	       0 B/op	       0 allocs/op
+WireDecodeAResponse	  100000	      1642 ns/op	       0 B/op	       0 allocs/op
+WireDecodeAResponse	  100000	      1642 ns/op	       0 B/op	       0 allocs/op
+LongestSuffix64	  100000	      1481 ns/op	       0 B/op	       0 allocs/op
+LongestSuffix64	  100000	      1480 ns/op	       0 B/op	       0 allocs/op
+LongestSuffix64	  100000	      1483 ns/op	       0 B/op	       0 allocs/op
+CacheHitPipeline1	  100000	     19366 ns/op	       0 B/op	       0 allocs/op
+CacheHitPipeline1	  100000	     19365 ns/op	       0 B/op	       0 allocs/op
+CacheHitPipeline1	  100000	     19364 ns/op	       0 B/op	       0 allocs/op
+index_empty_miss/capacity=128	   78125	        43.86 ns/op	       0 B/op	       0 allocs/op
+index_empty_miss/capacity=128	   78125	        43.73 ns/op	       0 B/op	       0 allocs/op
+index_empty_miss/capacity=128	   78125	        43.82 ns/op	       0 B/op	       0 allocs/op
+index_sparse_miss/capacity=128	   78125	        43.79 ns/op	       0 B/op	       0 allocs/op
+index_sparse_miss/capacity=128	   78125	        43.95 ns/op	       0 B/op	       0 allocs/op
+index_sparse_miss/capacity=128	   78125	        44.15 ns/op	       0 B/op	       0 allocs/op
+index_full_miss/capacity=128	   78125	        43.74 ns/op	       0 B/op	       0 allocs/op
+index_full_miss/capacity=128	   78125	        43.90 ns/op	       0 B/op	       0 allocs/op
+index_full_miss/capacity=128	   78125	        43.80 ns/op	       0 B/op	       0 allocs/op
+index_full_first/capacity=128	  100000	        50.66 ns/op	       0 B/op	       0 allocs/op
+index_full_first/capacity=128	  100000	        50.49 ns/op	       0 B/op	       0 allocs/op
+index_full_first/capacity=128	  100000	        50.65 ns/op	       0 B/op	       0 allocs/op
+index_full_last/capacity=128	   78125	        60.85 ns/op	       0 B/op	       0 allocs/op
+index_full_last/capacity=128	   78125	        60.60 ns/op	       0 B/op	       0 allocs/op
+index_full_last/capacity=128	   78125	        60.90 ns/op	       0 B/op	       0 allocs/op
+index_full_random/capacity=128	   78125	        58.44 ns/op	       0 B/op	       0 allocs/op
+index_full_random/capacity=128	   78125	        58.16 ns/op	       0 B/op	       0 allocs/op
+index_full_random/capacity=128	   78125	        57.82 ns/op	       0 B/op	       0 allocs/op
+index_empty_miss/capacity=1024	    9765	       180.5 ns/op	       0 B/op	       0 allocs/op
+index_empty_miss/capacity=1024	    9765	       177.9 ns/op	       0 B/op	       0 allocs/op
+index_empty_miss/capacity=1024	    9765	       178.4 ns/op	       0 B/op	       0 allocs/op
+index_sparse_miss/capacity=1024	    9765	       180.5 ns/op	       0 B/op	       0 allocs/op
+index_sparse_miss/capacity=1024	    9765	       179.9 ns/op	       0 B/op	       0 allocs/op
+index_sparse_miss/capacity=1024	    9765	       177.9 ns/op	       0 B/op	       0 allocs/op
+index_full_miss/capacity=1024	    9765	       178.7 ns/op	       0 B/op	       0 allocs/op
+index_full_miss/capacity=1024	    9765	       177.9 ns/op	       0 B/op	       0 allocs/op
+index_full_miss/capacity=1024	    9765	       178.0 ns/op	       0 B/op	       0 allocs/op
+index_full_first/capacity=1024	  100000	        50.57 ns/op	       0 B/op	       0 allocs/op
+index_full_first/capacity=1024	  100000	        50.48 ns/op	       0 B/op	       0 allocs/op
+index_full_first/capacity=1024	  100000	        50.65 ns/op	       0 B/op	       0 allocs/op
+index_full_last/capacity=1024	    9765	       196.6 ns/op	       0 B/op	       0 allocs/op
+index_full_last/capacity=1024	    9765	       196.4 ns/op	       0 B/op	       0 allocs/op
+index_full_last/capacity=1024	    9765	       195.9 ns/op	       0 B/op	       0 allocs/op
+index_full_random/capacity=1024	    9765	       132.7 ns/op	       0 B/op	       0 allocs/op
+index_full_random/capacity=1024	    9765	       129.9 ns/op	       0 B/op	       0 allocs/op
+index_full_random/capacity=1024	    9765	       129.5 ns/op	       0 B/op	       0 allocs/op
+index_empty_miss/capacity=10000	    1000	      1549 ns/op	       0 B/op	       0 allocs/op
+index_empty_miss/capacity=10000	    1000	      1626 ns/op	       0 B/op	       0 allocs/op
+index_empty_miss/capacity=10000	    1000	      1548 ns/op	       0 B/op	       0 allocs/op
+index_sparse_miss/capacity=10000	    1000	      1561 ns/op	       0 B/op	       0 allocs/op
+index_sparse_miss/capacity=10000	    1000	      1599 ns/op	       0 B/op	       0 allocs/op
+index_sparse_miss/capacity=10000	    1000	      1548 ns/op	       0 B/op	       0 allocs/op
+index_full_miss/capacity=10000	    1000	      1620 ns/op	       0 B/op	       0 allocs/op
+index_full_miss/capacity=10000	    1000	      1549 ns/op	       0 B/op	       0 allocs/op
+index_full_miss/capacity=10000	    1000	      1551 ns/op	       0 B/op	       0 allocs/op
+index_full_first/capacity=10000	  100000	        50.57 ns/op	       0 B/op	       0 allocs/op
+index_full_first/capacity=10000	  100000	        50.63 ns/op	       0 B/op	       0 allocs/op
+index_full_first/capacity=10000	  100000	        50.58 ns/op	       0 B/op	       0 allocs/op
+index_full_last/capacity=10000	    1000	      1653 ns/op	       0 B/op	       0 allocs/op
+index_full_last/capacity=10000	    1000	      1565 ns/op	       0 B/op	       0 allocs/op
+index_full_last/capacity=10000	    1000	      1571 ns/op	       0 B/op	       0 allocs/op
+index_full_random/capacity=10000	    1000	       882.5 ns/op	       0 B/op	       0 allocs/op
+index_full_random/capacity=10000	    1000	       886.0 ns/op	       0 B/op	       0 allocs/op
+index_full_random/capacity=10000	    1000	       884.3 ns/op	       0 B/op	       0 allocs/op
+index_empty_miss/capacity=100000	     128	     15443 ns/op	       0 B/op	       0 allocs/op
+index_empty_miss/capacity=100000	     128	     15668 ns/op	       0 B/op	       0 allocs/op
+index_empty_miss/capacity=100000	     128	     15725 ns/op	       0 B/op	       0 allocs/op
+index_sparse_miss/capacity=100000	     128	     16533 ns/op	       0 B/op	       0 allocs/op
+index_sparse_miss/capacity=100000	     128	     17003 ns/op	       0 B/op	       0 allocs/op
+index_sparse_miss/capacity=100000	     128	     16258 ns/op	       0 B/op	       0 allocs/op
+index_full_miss/capacity=100000	     128	     15912 ns/op	       0 B/op	       0 allocs/op
+index_full_miss/capacity=100000	     128	     16850 ns/op	       0 B/op	       0 allocs/op
+index_full_miss/capacity=100000	     128	     17373 ns/op	       0 B/op	       0 allocs/op
+index_full_first/capacity=100000	  100000	        50.55 ns/op	       0 B/op	       0 allocs/op
+index_full_first/capacity=100000	  100000	        50.71 ns/op	       0 B/op	       0 allocs/op
+index_full_first/capacity=100000	  100000	        50.63 ns/op	       0 B/op	       0 allocs/op
+index_full_last/capacity=100000	     128	     16141 ns/op	       0 B/op	       0 allocs/op
+index_full_last/capacity=100000	     128	     18190 ns/op	       0 B/op	       0 allocs/op
+index_full_last/capacity=100000	     128	     16445 ns/op	       0 B/op	       0 allocs/op
+index_full_random/capacity=100000	     128	     11103 ns/op	       0 B/op	       0 allocs/op
+index_full_random/capacity=100000	     128	     11020 ns/op	       0 B/op	       0 allocs/op
+index_full_random/capacity=100000	     128	     10828 ns/op	       0 B/op	       0 allocs/op
+lookup_positive_last/capacity=128	   78125	      8685 ns/op	       0 B/op	       0 allocs/op
+lookup_positive_last/capacity=128	   78125	      8681 ns/op	       0 B/op	       0 allocs/op
+lookup_positive_last/capacity=128	   78125	      8684 ns/op	       0 B/op	       0 allocs/op
+lookup_denial_last/capacity=128	   78125	      9334 ns/op	       0 B/op	       0 allocs/op
+lookup_denial_last/capacity=128	   78125	      9332 ns/op	       0 B/op	       0 allocs/op
+lookup_denial_last/capacity=128	   78125	      9329 ns/op	       0 B/op	       0 allocs/op
+lookup_sparse_miss/capacity=128	   78125	        86.62 ns/op	       0 B/op	       0 allocs/op
+lookup_sparse_miss/capacity=128	   78125	        86.47 ns/op	       0 B/op	       0 allocs/op
+lookup_sparse_miss/capacity=128	   78125	        86.42 ns/op	       0 B/op	       0 allocs/op
+pipeline_positive_last/capacity=128	   78125	     19435 ns/op	       0 B/op	       0 allocs/op
+pipeline_positive_last/capacity=128	   78125	     19415 ns/op	       0 B/op	       0 allocs/op
+pipeline_positive_last/capacity=128	   78125	     19407 ns/op	       0 B/op	       0 allocs/op
+lookup_positive_last/capacity=1024	    9765	      8815 ns/op	       0 B/op	       0 allocs/op
+lookup_positive_last/capacity=1024	    9765	      8803 ns/op	       0 B/op	       0 allocs/op
+lookup_positive_last/capacity=1024	    9765	      8811 ns/op	       0 B/op	       0 allocs/op
+lookup_denial_last/capacity=1024	    9765	      9611 ns/op	       0 B/op	       0 allocs/op
+lookup_denial_last/capacity=1024	    9765	      9616 ns/op	       0 B/op	       0 allocs/op
+lookup_denial_last/capacity=1024	    9765	      9602 ns/op	       0 B/op	       0 allocs/op
+lookup_sparse_miss/capacity=1024	    9765	       358.3 ns/op	       0 B/op	       0 allocs/op
+lookup_sparse_miss/capacity=1024	    9765	       357.1 ns/op	       0 B/op	       0 allocs/op
+lookup_sparse_miss/capacity=1024	    9765	       357.9 ns/op	       0 B/op	       0 allocs/op
+pipeline_positive_last/capacity=1024	    9765	     19546 ns/op	       0 B/op	       0 allocs/op
+pipeline_positive_last/capacity=1024	    9765	     19541 ns/op	       0 B/op	       0 allocs/op
+pipeline_positive_last/capacity=1024	    9765	     19553 ns/op	       0 B/op	       0 allocs/op
+lookup_positive_last/capacity=10000	    1000	     10363 ns/op	       0 B/op	       0 allocs/op
+lookup_positive_last/capacity=10000	    1000	     10361 ns/op	       0 B/op	       0 allocs/op
+lookup_positive_last/capacity=10000	    1000	     10385 ns/op	       0 B/op	       0 allocs/op
+lookup_denial_last/capacity=10000	    1000	     12848 ns/op	       0 B/op	       0 allocs/op
+lookup_denial_last/capacity=10000	    1000	     12811 ns/op	       0 B/op	       0 allocs/op
+lookup_denial_last/capacity=10000	    1000	     12806 ns/op	       0 B/op	       0 allocs/op
+lookup_sparse_miss/capacity=10000	    1000	      3112 ns/op	       0 B/op	       0 allocs/op
+lookup_sparse_miss/capacity=10000	    1000	      3115 ns/op	       0 B/op	       0 allocs/op
+lookup_sparse_miss/capacity=10000	    1000	      3114 ns/op	       0 B/op	       0 allocs/op
+pipeline_positive_last/capacity=10000	    1000	     21205 ns/op	       0 B/op	       0 allocs/op
+pipeline_positive_last/capacity=10000	    1000	     21227 ns/op	       0 B/op	       0 allocs/op
+pipeline_positive_last/capacity=10000	    1000	     21197 ns/op	       0 B/op	       0 allocs/op
+lookup_positive_last/capacity=100000	     128	     27592 ns/op	       0 B/op	       0 allocs/op
+lookup_positive_last/capacity=100000	     128	     27941 ns/op	       0 B/op	       0 allocs/op
+lookup_positive_last/capacity=100000	     128	     24867 ns/op	       0 B/op	       0 allocs/op
+lookup_denial_last/capacity=100000	     128	     43310 ns/op	       0 B/op	       0 allocs/op
+lookup_denial_last/capacity=100000	     128	     43106 ns/op	       0 B/op	       0 allocs/op
+lookup_denial_last/capacity=100000	     128	     43180 ns/op	       0 B/op	       0 allocs/op
+lookup_sparse_miss/capacity=100000	     128	     32699 ns/op	       0 B/op	       0 allocs/op
+lookup_sparse_miss/capacity=100000	     128	     32553 ns/op	       0 B/op	       0 allocs/op
+lookup_sparse_miss/capacity=100000	     128	     32610 ns/op	       0 B/op	       0 allocs/op
+pipeline_positive_last/capacity=100000	     128	     36492 ns/op	       0 B/op	       0 allocs/op
+pipeline_positive_last/capacity=100000	     128	     38967 ns/op	       0 B/op	       0 allocs/op
+pipeline_positive_last/capacity=100000	     128	     36591 ns/op	       0 B/op	       0 allocs/op
+insert_evict/capacity=128	   78125	     15760 ns/op	      58 B/op	       1 allocs/op
+insert_evict/capacity=128	   78125	     15766 ns/op	      58 B/op	       1 allocs/op
+insert_evict/capacity=128	   78125	     15760 ns/op	      58 B/op	       1 allocs/op
+insert_evict/capacity=1024	    9765	     16195 ns/op	      58 B/op	       1 allocs/op
+insert_evict/capacity=1024	    9765	     16185 ns/op	      58 B/op	       1 allocs/op
+insert_evict/capacity=1024	    9765	     16188 ns/op	      58 B/op	       1 allocs/op
+insert_evict/capacity=10000	    1000	     20894 ns/op	      58 B/op	       1 allocs/op
+insert_evict/capacity=10000	    1000	     20888 ns/op	      58 B/op	       1 allocs/op
+insert_evict/capacity=10000	    1000	     20890 ns/op	      58 B/op	       1 allocs/op
+insert_evict/capacity=100000	     128	     65058 ns/op	      58 B/op	       1 allocs/op
+insert_evict/capacity=100000	     128	     65307 ns/op	      58 B/op	       1 allocs/op
+insert_evict/capacity=100000	     128	     65617 ns/op	      58 B/op	       1 allocs/op
+Baseline exit=0
+
+Candidate: explicit 33554432-byte packet budget, identical capacities/occupancy/timers
+Command: ./zig-out/bin/dns-benchmark baseline
+zig_os: linux
+zig_arch: aarch64
+zig_abi: gnu
+zig_cpu: neoverse_v3
+zig_mode: ReleaseSafe
+WireDecodeAResponse	  100000	      1635 ns/op	       0 B/op	       0 allocs/op
+WireDecodeAResponse	  100000	      1632 ns/op	       0 B/op	       0 allocs/op
+WireDecodeAResponse	  100000	      1633 ns/op	       0 B/op	       0 allocs/op
+LongestSuffix64	  100000	      1398 ns/op	       0 B/op	       0 allocs/op
+LongestSuffix64	  100000	      1397 ns/op	       0 B/op	       0 allocs/op
+LongestSuffix64	  100000	      1396 ns/op	       0 B/op	       0 allocs/op
+CacheHitPipeline1	  100000	     19360 ns/op	       0 B/op	       0 allocs/op
+CacheHitPipeline1	  100000	     19368 ns/op	       0 B/op	       0 allocs/op
+CacheHitPipeline1	  100000	     19373 ns/op	       0 B/op	       0 allocs/op
+index_empty_miss/capacity=128	   78125	        43.19 ns/op	  33554432 packet-reserved-B	         0 pool-consumed-B	         0 packet-live-B	         0 class-live-B	       0 B/op	       0 allocs/op
+index_empty_miss/capacity=128	   78125	        43.48 ns/op	  33554432 packet-reserved-B	         0 pool-consumed-B	         0 packet-live-B	         0 class-live-B	       0 B/op	       0 allocs/op
+index_empty_miss/capacity=128	   78125	        43.54 ns/op	  33554432 packet-reserved-B	         0 pool-consumed-B	         0 packet-live-B	         0 class-live-B	       0 B/op	       0 allocs/op
+index_sparse_miss/capacity=128	   78125	        43.51 ns/op	  33554432 packet-reserved-B	      1944 pool-consumed-B	       928.0 packet-live-B	      1024 class-live-B	       0 B/op	       0 allocs/op
+index_sparse_miss/capacity=128	   78125	        43.45 ns/op	  33554432 packet-reserved-B	      1944 pool-consumed-B	       928.0 packet-live-B	      1024 class-live-B	       0 B/op	       0 allocs/op
+index_sparse_miss/capacity=128	   78125	        43.36 ns/op	  33554432 packet-reserved-B	      1944 pool-consumed-B	       928.0 packet-live-B	      1024 class-live-B	       0 B/op	       0 allocs/op
+index_full_miss/capacity=128	   78125	        43.38 ns/op	  33554432 packet-reserved-B	     16280 pool-consumed-B	      7424 packet-live-B	      8192 class-live-B	       0 B/op	       0 allocs/op
+index_full_miss/capacity=128	   78125	        43.33 ns/op	  33554432 packet-reserved-B	     16280 pool-consumed-B	      7424 packet-live-B	      8192 class-live-B	       0 B/op	       0 allocs/op
+index_full_miss/capacity=128	   78125	        43.47 ns/op	  33554432 packet-reserved-B	     16280 pool-consumed-B	      7424 packet-live-B	      8192 class-live-B	       0 B/op	       0 allocs/op
+index_full_first/capacity=128	  100000	        50.62 ns/op	  33554432 packet-reserved-B	     16280 pool-consumed-B	      7424 packet-live-B	      8192 class-live-B	       0 B/op	       0 allocs/op
+index_full_first/capacity=128	  100000	        50.85 ns/op	  33554432 packet-reserved-B	     16280 pool-consumed-B	      7424 packet-live-B	      8192 class-live-B	       0 B/op	       0 allocs/op
+index_full_first/capacity=128	  100000	        50.64 ns/op	  33554432 packet-reserved-B	     16280 pool-consumed-B	      7424 packet-live-B	      8192 class-live-B	       0 B/op	       0 allocs/op
+index_full_last/capacity=128	   78125	        60.79 ns/op	  33554432 packet-reserved-B	     16280 pool-consumed-B	      7424 packet-live-B	      8192 class-live-B	       0 B/op	       0 allocs/op
+index_full_last/capacity=128	   78125	        60.98 ns/op	  33554432 packet-reserved-B	     16280 pool-consumed-B	      7424 packet-live-B	      8192 class-live-B	       0 B/op	       0 allocs/op
+index_full_last/capacity=128	   78125	        60.94 ns/op	  33554432 packet-reserved-B	     16280 pool-consumed-B	      7424 packet-live-B	      8192 class-live-B	       0 B/op	       0 allocs/op
+index_full_random/capacity=128	   78125	        58.46 ns/op	  33554432 packet-reserved-B	     16280 pool-consumed-B	      7424 packet-live-B	      8192 class-live-B	       0 B/op	       0 allocs/op
+index_full_random/capacity=128	   78125	        58.10 ns/op	  33554432 packet-reserved-B	     16280 pool-consumed-B	      7424 packet-live-B	      8192 class-live-B	       0 B/op	       0 allocs/op
+index_full_random/capacity=128	   78125	        58.14 ns/op	  33554432 packet-reserved-B	     16280 pool-consumed-B	      7424 packet-live-B	      8192 class-live-B	       0 B/op	       0 allocs/op
+index_empty_miss/capacity=1024	    9765	       181.0 ns/op	  33554432 packet-reserved-B	         0 pool-consumed-B	         0 packet-live-B	         0 class-live-B	       0 B/op	       0 allocs/op
+index_empty_miss/capacity=1024	    9765	       177.8 ns/op	  33554432 packet-reserved-B	         0 pool-consumed-B	         0 packet-live-B	         0 class-live-B	       0 B/op	       0 allocs/op
+index_empty_miss/capacity=1024	    9765	       179.3 ns/op	  33554432 packet-reserved-B	         0 pool-consumed-B	         0 packet-live-B	         0 class-live-B	       0 B/op	       0 allocs/op
+index_sparse_miss/capacity=1024	    9765	       177.7 ns/op	  33554432 packet-reserved-B	     16280 pool-consumed-B	      7424 packet-live-B	      8192 class-live-B	       0 B/op	       0 allocs/op
+index_sparse_miss/capacity=1024	    9765	       179.0 ns/op	  33554432 packet-reserved-B	     16280 pool-consumed-B	      7424 packet-live-B	      8192 class-live-B	       0 B/op	       0 allocs/op
+index_sparse_miss/capacity=1024	    9765	       180.2 ns/op	  33554432 packet-reserved-B	     16280 pool-consumed-B	      7424 packet-live-B	      8192 class-live-B	       0 B/op	       0 allocs/op
+index_full_miss/capacity=1024	    9765	       178.2 ns/op	  33554432 packet-reserved-B	    130968 pool-consumed-B	     59392 packet-live-B	     65536 class-live-B	       0 B/op	       0 allocs/op
+index_full_miss/capacity=1024	    9765	       177.7 ns/op	  33554432 packet-reserved-B	    130968 pool-consumed-B	     59392 packet-live-B	     65536 class-live-B	       0 B/op	       0 allocs/op
+index_full_miss/capacity=1024	    9765	       179.4 ns/op	  33554432 packet-reserved-B	    130968 pool-consumed-B	     59392 packet-live-B	     65536 class-live-B	       0 B/op	       0 allocs/op
+index_full_first/capacity=1024	  100000	        50.73 ns/op	  33554432 packet-reserved-B	    130968 pool-consumed-B	     59392 packet-live-B	     65536 class-live-B	       0 B/op	       0 allocs/op
+index_full_first/capacity=1024	  100000	        50.77 ns/op	  33554432 packet-reserved-B	    130968 pool-consumed-B	     59392 packet-live-B	     65536 class-live-B	       0 B/op	       0 allocs/op
+index_full_first/capacity=1024	  100000	        50.55 ns/op	  33554432 packet-reserved-B	    130968 pool-consumed-B	     59392 packet-live-B	     65536 class-live-B	       0 B/op	       0 allocs/op
+index_full_last/capacity=1024	    9765	       196.6 ns/op	  33554432 packet-reserved-B	    130968 pool-consumed-B	     59392 packet-live-B	     65536 class-live-B	       0 B/op	       0 allocs/op
+index_full_last/capacity=1024	    9765	       196.0 ns/op	  33554432 packet-reserved-B	    130968 pool-consumed-B	     59392 packet-live-B	     65536 class-live-B	       0 B/op	       0 allocs/op
+index_full_last/capacity=1024	    9765	       198.2 ns/op	  33554432 packet-reserved-B	    130968 pool-consumed-B	     59392 packet-live-B	     65536 class-live-B	       0 B/op	       0 allocs/op
+index_full_random/capacity=1024	    9765	       132.0 ns/op	  33554432 packet-reserved-B	    130968 pool-consumed-B	     59392 packet-live-B	     65536 class-live-B	       0 B/op	       0 allocs/op
+index_full_random/capacity=1024	    9765	       131.4 ns/op	  33554432 packet-reserved-B	    130968 pool-consumed-B	     59392 packet-live-B	     65536 class-live-B	       0 B/op	       0 allocs/op
+index_full_random/capacity=1024	    9765	       132.0 ns/op	  33554432 packet-reserved-B	    130968 pool-consumed-B	     59392 packet-live-B	     65536 class-live-B	       0 B/op	       0 allocs/op
+index_empty_miss/capacity=10000	    1000	      1580 ns/op	  33554432 packet-reserved-B	         0 pool-consumed-B	         0 packet-live-B	         0 class-live-B	       0 B/op	       0 allocs/op
+index_empty_miss/capacity=10000	    1000	      1582 ns/op	  33554432 packet-reserved-B	         0 pool-consumed-B	         0 packet-live-B	         0 class-live-B	       0 B/op	       0 allocs/op
+index_empty_miss/capacity=10000	    1000	      1583 ns/op	  33554432 packet-reserved-B	         0 pool-consumed-B	         0 packet-live-B	         0 class-live-B	       0 B/op	       0 allocs/op
+index_sparse_miss/capacity=10000	    1000	      1604 ns/op	  33554432 packet-reserved-B	    159896 pool-consumed-B	     72500 packet-live-B	     80000 class-live-B	       0 B/op	       0 allocs/op
+index_sparse_miss/capacity=10000	    1000	      1620 ns/op	  33554432 packet-reserved-B	    159896 pool-consumed-B	     72500 packet-live-B	     80000 class-live-B	       0 B/op	       0 allocs/op
+index_sparse_miss/capacity=10000	    1000	      1635 ns/op	  33554432 packet-reserved-B	    159896 pool-consumed-B	     72500 packet-live-B	     80000 class-live-B	       0 B/op	       0 allocs/op
+index_full_miss/capacity=10000	    1000	      1551 ns/op	  33554432 packet-reserved-B	   1279896 pool-consumed-B	    580000 packet-live-B	    640000 class-live-B	       0 B/op	       0 allocs/op
+index_full_miss/capacity=10000	    1000	      1549 ns/op	  33554432 packet-reserved-B	   1279896 pool-consumed-B	    580000 packet-live-B	    640000 class-live-B	       0 B/op	       0 allocs/op
+index_full_miss/capacity=10000	    1000	      1549 ns/op	  33554432 packet-reserved-B	   1279896 pool-consumed-B	    580000 packet-live-B	    640000 class-live-B	       0 B/op	       0 allocs/op
+index_full_first/capacity=10000	  100000	        50.66 ns/op	  33554432 packet-reserved-B	   1279896 pool-consumed-B	    580000 packet-live-B	    640000 class-live-B	       0 B/op	       0 allocs/op
+index_full_first/capacity=10000	  100000	        50.60 ns/op	  33554432 packet-reserved-B	   1279896 pool-consumed-B	    580000 packet-live-B	    640000 class-live-B	       0 B/op	       0 allocs/op
+index_full_first/capacity=10000	  100000	        50.57 ns/op	  33554432 packet-reserved-B	   1279896 pool-consumed-B	    580000 packet-live-B	    640000 class-live-B	       0 B/op	       0 allocs/op
+index_full_last/capacity=10000	    1000	      1671 ns/op	  33554432 packet-reserved-B	   1279896 pool-consumed-B	    580000 packet-live-B	    640000 class-live-B	       0 B/op	       0 allocs/op
+index_full_last/capacity=10000	    1000	      1571 ns/op	  33554432 packet-reserved-B	   1279896 pool-consumed-B	    580000 packet-live-B	    640000 class-live-B	       0 B/op	       0 allocs/op
+index_full_last/capacity=10000	    1000	      1603 ns/op	  33554432 packet-reserved-B	   1279896 pool-consumed-B	    580000 packet-live-B	    640000 class-live-B	       0 B/op	       0 allocs/op
+index_full_random/capacity=10000	    1000	       888.6 ns/op	  33554432 packet-reserved-B	   1279896 pool-consumed-B	    580000 packet-live-B	    640000 class-live-B	       0 B/op	       0 allocs/op
+index_full_random/capacity=10000	    1000	       882.3 ns/op	  33554432 packet-reserved-B	   1279896 pool-consumed-B	    580000 packet-live-B	    640000 class-live-B	       0 B/op	       0 allocs/op
+index_full_random/capacity=10000	    1000	       882.3 ns/op	  33554432 packet-reserved-B	   1279896 pool-consumed-B	    580000 packet-live-B	    640000 class-live-B	       0 B/op	       0 allocs/op
+index_empty_miss/capacity=100000	     128	     15978 ns/op	  33554432 packet-reserved-B	         0 pool-consumed-B	         0 packet-live-B	         0 class-live-B	       0 B/op	       0 allocs/op
+index_empty_miss/capacity=100000	     128	     15676 ns/op	  33554432 packet-reserved-B	         0 pool-consumed-B	         0 packet-live-B	         0 class-live-B	       0 B/op	       0 allocs/op
+index_empty_miss/capacity=100000	     128	     15692 ns/op	  33554432 packet-reserved-B	         0 pool-consumed-B	         0 packet-live-B	         0 class-live-B	       0 B/op	       0 allocs/op
+index_sparse_miss/capacity=100000	     128	     15803 ns/op	  33554432 packet-reserved-B	   1599896 pool-consumed-B	    725000 packet-live-B	    800000 class-live-B	       0 B/op	       0 allocs/op
+index_sparse_miss/capacity=100000	     128	     15799 ns/op	  33554432 packet-reserved-B	   1599896 pool-consumed-B	    725000 packet-live-B	    800000 class-live-B	       0 B/op	       0 allocs/op
+index_sparse_miss/capacity=100000	     128	     15650 ns/op	  33554432 packet-reserved-B	   1599896 pool-consumed-B	    725000 packet-live-B	    800000 class-live-B	       0 B/op	       0 allocs/op
+index_full_miss/capacity=100000	     128	     15919 ns/op	  33554432 packet-reserved-B	  12799896 pool-consumed-B	   5800000 packet-live-B	   6400000 class-live-B	       0 B/op	       0 allocs/op
+index_full_miss/capacity=100000	     128	     16046 ns/op	  33554432 packet-reserved-B	  12799896 pool-consumed-B	   5800000 packet-live-B	   6400000 class-live-B	       0 B/op	       0 allocs/op
+index_full_miss/capacity=100000	     128	     15893 ns/op	  33554432 packet-reserved-B	  12799896 pool-consumed-B	   5800000 packet-live-B	   6400000 class-live-B	       0 B/op	       0 allocs/op
+index_full_first/capacity=100000	  100000	        50.69 ns/op	  33554432 packet-reserved-B	  12799896 pool-consumed-B	   5800000 packet-live-B	   6400000 class-live-B	       0 B/op	       0 allocs/op
+index_full_first/capacity=100000	  100000	        50.60 ns/op	  33554432 packet-reserved-B	  12799896 pool-consumed-B	   5800000 packet-live-B	   6400000 class-live-B	       0 B/op	       0 allocs/op
+index_full_first/capacity=100000	  100000	        50.76 ns/op	  33554432 packet-reserved-B	  12799896 pool-consumed-B	   5800000 packet-live-B	   6400000 class-live-B	       0 B/op	       0 allocs/op
+index_full_last/capacity=100000	     128	     15809 ns/op	  33554432 packet-reserved-B	  12799896 pool-consumed-B	   5800000 packet-live-B	   6400000 class-live-B	       0 B/op	       0 allocs/op
+index_full_last/capacity=100000	     128	     16006 ns/op	  33554432 packet-reserved-B	  12799896 pool-consumed-B	   5800000 packet-live-B	   6400000 class-live-B	       0 B/op	       0 allocs/op
+index_full_last/capacity=100000	     128	     15973 ns/op	  33554432 packet-reserved-B	  12799896 pool-consumed-B	   5800000 packet-live-B	   6400000 class-live-B	       0 B/op	       0 allocs/op
+index_full_random/capacity=100000	     128	      8661 ns/op	  33554432 packet-reserved-B	  12799896 pool-consumed-B	   5800000 packet-live-B	   6400000 class-live-B	       0 B/op	       0 allocs/op
+index_full_random/capacity=100000	     128	      8852 ns/op	  33554432 packet-reserved-B	  12799896 pool-consumed-B	   5800000 packet-live-B	   6400000 class-live-B	       0 B/op	       0 allocs/op
+index_full_random/capacity=100000	     128	      8766 ns/op	  33554432 packet-reserved-B	  12799896 pool-consumed-B	   5800000 packet-live-B	   6400000 class-live-B	       0 B/op	       0 allocs/op
+lookup_positive_last/capacity=128	   78125	      8683 ns/op	  33554432 packet-reserved-B	     16280 pool-consumed-B	      7424 packet-live-B	      8192 class-live-B	       0 B/op	       0 allocs/op
+lookup_positive_last/capacity=128	   78125	      8684 ns/op	  33554432 packet-reserved-B	     16280 pool-consumed-B	      7424 packet-live-B	      8192 class-live-B	       0 B/op	       0 allocs/op
+lookup_positive_last/capacity=128	   78125	      8687 ns/op	  33554432 packet-reserved-B	     16280 pool-consumed-B	      7424 packet-live-B	      8192 class-live-B	       0 B/op	       0 allocs/op
+lookup_denial_last/capacity=128	   78125	      9341 ns/op	  33554432 packet-reserved-B	     48944 pool-consumed-B	     17408 packet-live-B	     24576 class-live-B	       0 B/op	       0 allocs/op
+lookup_denial_last/capacity=128	   78125	      9343 ns/op	  33554432 packet-reserved-B	     48944 pool-consumed-B	     17408 packet-live-B	     24576 class-live-B	       0 B/op	       0 allocs/op
+lookup_denial_last/capacity=128	   78125	      9340 ns/op	  33554432 packet-reserved-B	     48944 pool-consumed-B	     17408 packet-live-B	     24576 class-live-B	       0 B/op	       0 allocs/op
+lookup_sparse_miss/capacity=128	   78125	        90.83 ns/op	  33554432 packet-reserved-B	      1944 pool-consumed-B	       928.0 packet-live-B	      1024 class-live-B	       0 B/op	       0 allocs/op
+lookup_sparse_miss/capacity=128	   78125	        91.02 ns/op	  33554432 packet-reserved-B	      1944 pool-consumed-B	       928.0 packet-live-B	      1024 class-live-B	       0 B/op	       0 allocs/op
+lookup_sparse_miss/capacity=128	   78125	        90.80 ns/op	  33554432 packet-reserved-B	      1944 pool-consumed-B	       928.0 packet-live-B	      1024 class-live-B	       0 B/op	       0 allocs/op
+pipeline_positive_last/capacity=128	   78125	     19395 ns/op	  33554432 packet-reserved-B	     16280 pool-consumed-B	      7424 packet-live-B	      8192 class-live-B	       0 B/op	       0 allocs/op
+pipeline_positive_last/capacity=128	   78125	     19392 ns/op	  33554432 packet-reserved-B	     16280 pool-consumed-B	      7424 packet-live-B	      8192 class-live-B	       0 B/op	       0 allocs/op
+pipeline_positive_last/capacity=128	   78125	     19393 ns/op	  33554432 packet-reserved-B	     16280 pool-consumed-B	      7424 packet-live-B	      8192 class-live-B	       0 B/op	       0 allocs/op
+lookup_positive_last/capacity=1024	    9765	      8832 ns/op	  33554432 packet-reserved-B	    130968 pool-consumed-B	     59392 packet-live-B	     65536 class-live-B	       0 B/op	       0 allocs/op
+lookup_positive_last/capacity=1024	    9765	      8824 ns/op	  33554432 packet-reserved-B	    130968 pool-consumed-B	     59392 packet-live-B	     65536 class-live-B	       0 B/op	       0 allocs/op
+lookup_positive_last/capacity=1024	    9765	      8821 ns/op	  33554432 packet-reserved-B	    130968 pool-consumed-B	     59392 packet-live-B	     65536 class-live-B	       0 B/op	       0 allocs/op
+lookup_denial_last/capacity=1024	    9765	      9633 ns/op	  33554432 packet-reserved-B	    393008 pool-consumed-B	    139264 packet-live-B	    196608 class-live-B	       0 B/op	       0 allocs/op
+lookup_denial_last/capacity=1024	    9765	      9638 ns/op	  33554432 packet-reserved-B	    393008 pool-consumed-B	    139264 packet-live-B	    196608 class-live-B	       0 B/op	       0 allocs/op
+lookup_denial_last/capacity=1024	    9765	      9638 ns/op	  33554432 packet-reserved-B	    393008 pool-consumed-B	    139264 packet-live-B	    196608 class-live-B	       0 B/op	       0 allocs/op
+lookup_sparse_miss/capacity=1024	    9765	       364.2 ns/op	  33554432 packet-reserved-B	     16280 pool-consumed-B	      7424 packet-live-B	      8192 class-live-B	       0 B/op	       0 allocs/op
+lookup_sparse_miss/capacity=1024	    9765	       366.2 ns/op	  33554432 packet-reserved-B	     16280 pool-consumed-B	      7424 packet-live-B	      8192 class-live-B	       0 B/op	       0 allocs/op
+lookup_sparse_miss/capacity=1024	    9765	       364.7 ns/op	  33554432 packet-reserved-B	     16280 pool-consumed-B	      7424 packet-live-B	      8192 class-live-B	       0 B/op	       0 allocs/op
+pipeline_positive_last/capacity=1024	    9765	     19538 ns/op	  33554432 packet-reserved-B	    130968 pool-consumed-B	     59392 packet-live-B	     65536 class-live-B	       0 B/op	       0 allocs/op
+pipeline_positive_last/capacity=1024	    9765	     19542 ns/op	  33554432 packet-reserved-B	    130968 pool-consumed-B	     59392 packet-live-B	     65536 class-live-B	       0 B/op	       0 allocs/op
+pipeline_positive_last/capacity=1024	    9765	     19548 ns/op	  33554432 packet-reserved-B	    130968 pool-consumed-B	     59392 packet-live-B	     65536 class-live-B	       0 B/op	       0 allocs/op
+lookup_positive_last/capacity=10000	    1000	     10282 ns/op	  33554432 packet-reserved-B	   1279896 pool-consumed-B	    580000 packet-live-B	    640000 class-live-B	       0 B/op	       0 allocs/op
+lookup_positive_last/capacity=10000	    1000	     10323 ns/op	  33554432 packet-reserved-B	   1279896 pool-consumed-B	    580000 packet-live-B	    640000 class-live-B	       0 B/op	       0 allocs/op
+lookup_positive_last/capacity=10000	    1000	     10290 ns/op	  33554432 packet-reserved-B	   1279896 pool-consumed-B	    580000 packet-live-B	    640000 class-live-B	       0 B/op	       0 allocs/op
+lookup_denial_last/capacity=10000	    1000	     12597 ns/op	  33554432 packet-reserved-B	   3839792 pool-consumed-B	   1360000 packet-live-B	   1920000 class-live-B	       0 B/op	       0 allocs/op
+lookup_denial_last/capacity=10000	    1000	     12614 ns/op	  33554432 packet-reserved-B	   3839792 pool-consumed-B	   1360000 packet-live-B	   1920000 class-live-B	       0 B/op	       0 allocs/op
+lookup_denial_last/capacity=10000	    1000	     12590 ns/op	  33554432 packet-reserved-B	   3839792 pool-consumed-B	   1360000 packet-live-B	   1920000 class-live-B	       0 B/op	       0 allocs/op
+lookup_sparse_miss/capacity=10000	    1000	      3162 ns/op	  33554432 packet-reserved-B	    159896 pool-consumed-B	     72500 packet-live-B	     80000 class-live-B	       0 B/op	       0 allocs/op
+lookup_sparse_miss/capacity=10000	    1000	      3128 ns/op	  33554432 packet-reserved-B	    159896 pool-consumed-B	     72500 packet-live-B	     80000 class-live-B	       0 B/op	       0 allocs/op
+lookup_sparse_miss/capacity=10000	    1000	      3132 ns/op	  33554432 packet-reserved-B	    159896 pool-consumed-B	     72500 packet-live-B	     80000 class-live-B	       0 B/op	       0 allocs/op
+pipeline_positive_last/capacity=10000	    1000	     21130 ns/op	  33554432 packet-reserved-B	   1279896 pool-consumed-B	    580000 packet-live-B	    640000 class-live-B	       0 B/op	       0 allocs/op
+pipeline_positive_last/capacity=10000	    1000	     21130 ns/op	  33554432 packet-reserved-B	   1279896 pool-consumed-B	    580000 packet-live-B	    640000 class-live-B	       0 B/op	       0 allocs/op
+pipeline_positive_last/capacity=10000	    1000	     21120 ns/op	  33554432 packet-reserved-B	   1279896 pool-consumed-B	    580000 packet-live-B	    640000 class-live-B	       0 B/op	       0 allocs/op
+lookup_positive_last/capacity=100000	     128	     25840 ns/op	  33554432 packet-reserved-B	  12799896 pool-consumed-B	   5800000 packet-live-B	   6400000 class-live-B	       0 B/op	       0 allocs/op
+lookup_positive_last/capacity=100000	     128	     25156 ns/op	  33554432 packet-reserved-B	  12799896 pool-consumed-B	   5800000 packet-live-B	   6400000 class-live-B	       0 B/op	       0 allocs/op
+lookup_positive_last/capacity=100000	     128	     26013 ns/op	  33554432 packet-reserved-B	  12799896 pool-consumed-B	   5800000 packet-live-B	   6400000 class-live-B	       0 B/op	       0 allocs/op
+error: OutOfMemory
+Candidate exit=1
+
+Corrected fixture: committed candidate 23b5580fe3253359145e3eb24b474d9eb2b7e229
+Sun Sep  6 09:19:05 PM PDT 2026
+Only the explicit benchmark backing budget changes: 67108864 bytes.
+c0ad3c5cdb325483ce3bc43003fef821e70a7390af0670a22e6d8be7c099a537  zig-out/bin/dns-benchmark
+
+Command: ./zig-out/bin/dns-benchmark layout
+Entry=320 bytes, Key=262 bytes, alignment=8 bytes
+Entry offsets: key=52, bytes=8, inserted_s=24, previous=36, next=44
+Packet pool control=296 bytes per zone, benchmark backing=67108864 bytes
+capacity=128: two metadata column allocations=80896 bytes
+capacity=1024: two metadata column allocations=647168 bytes
+capacity=10000: two metadata column allocations=6320000 bytes
+capacity=100000: two metadata column allocations=63200000 bytes
+Sizes exclude packets, allocator overhead, runtime storage, and kernel memory.
+
+Command: ./zig-out/bin/dns-benchmark baseline
+zig_os: linux
+zig_arch: aarch64
+zig_abi: gnu
+zig_cpu: neoverse_v3
+zig_mode: ReleaseSafe
+WireDecodeAResponse	  100000	      1638 ns/op	       0 B/op	       0 allocs/op
+WireDecodeAResponse	  100000	      1637 ns/op	       0 B/op	       0 allocs/op
+WireDecodeAResponse	  100000	      1637 ns/op	       0 B/op	       0 allocs/op
+LongestSuffix64	  100000	      1413 ns/op	       0 B/op	       0 allocs/op
+LongestSuffix64	  100000	      1411 ns/op	       0 B/op	       0 allocs/op
+LongestSuffix64	  100000	      1410 ns/op	       0 B/op	       0 allocs/op
+CacheHitPipeline1	  100000	     19380 ns/op	       0 B/op	       0 allocs/op
+CacheHitPipeline1	  100000	     19378 ns/op	       0 B/op	       0 allocs/op
+CacheHitPipeline1	  100000	     19380 ns/op	       0 B/op	       0 allocs/op
+index_empty_miss/capacity=128	   78125	        44.07 ns/op	  67108864 packet-reserved-B	         0 pool-consumed-B	         0 packet-live-B	         0 class-live-B	       0 B/op	       0 allocs/op
+index_empty_miss/capacity=128	   78125	        44.21 ns/op	  67108864 packet-reserved-B	         0 pool-consumed-B	         0 packet-live-B	         0 class-live-B	       0 B/op	       0 allocs/op
+index_empty_miss/capacity=128	   78125	        44.20 ns/op	  67108864 packet-reserved-B	         0 pool-consumed-B	         0 packet-live-B	         0 class-live-B	       0 B/op	       0 allocs/op
+index_sparse_miss/capacity=128	   78125	        44.25 ns/op	  67108864 packet-reserved-B	      1944 pool-consumed-B	       928.0 packet-live-B	      1024 class-live-B	       0 B/op	       0 allocs/op
+index_sparse_miss/capacity=128	   78125	        44.18 ns/op	  67108864 packet-reserved-B	      1944 pool-consumed-B	       928.0 packet-live-B	      1024 class-live-B	       0 B/op	       0 allocs/op
+index_sparse_miss/capacity=128	   78125	        44.24 ns/op	  67108864 packet-reserved-B	      1944 pool-consumed-B	       928.0 packet-live-B	      1024 class-live-B	       0 B/op	       0 allocs/op
+index_full_miss/capacity=128	   78125	        44.17 ns/op	  67108864 packet-reserved-B	     16280 pool-consumed-B	      7424 packet-live-B	      8192 class-live-B	       0 B/op	       0 allocs/op
+index_full_miss/capacity=128	   78125	        43.94 ns/op	  67108864 packet-reserved-B	     16280 pool-consumed-B	      7424 packet-live-B	      8192 class-live-B	       0 B/op	       0 allocs/op
+index_full_miss/capacity=128	   78125	        44.16 ns/op	  67108864 packet-reserved-B	     16280 pool-consumed-B	      7424 packet-live-B	      8192 class-live-B	       0 B/op	       0 allocs/op
+index_full_first/capacity=128	  100000	        50.25 ns/op	  67108864 packet-reserved-B	     16280 pool-consumed-B	      7424 packet-live-B	      8192 class-live-B	       0 B/op	       0 allocs/op
+index_full_first/capacity=128	  100000	        50.22 ns/op	  67108864 packet-reserved-B	     16280 pool-consumed-B	      7424 packet-live-B	      8192 class-live-B	       0 B/op	       0 allocs/op
+index_full_first/capacity=128	  100000	        50.45 ns/op	  67108864 packet-reserved-B	     16280 pool-consumed-B	      7424 packet-live-B	      8192 class-live-B	       0 B/op	       0 allocs/op
+index_full_last/capacity=128	   78125	        60.41 ns/op	  67108864 packet-reserved-B	     16280 pool-consumed-B	      7424 packet-live-B	      8192 class-live-B	       0 B/op	       0 allocs/op
+index_full_last/capacity=128	   78125	        60.36 ns/op	  67108864 packet-reserved-B	     16280 pool-consumed-B	      7424 packet-live-B	      8192 class-live-B	       0 B/op	       0 allocs/op
+index_full_last/capacity=128	   78125	        60.32 ns/op	  67108864 packet-reserved-B	     16280 pool-consumed-B	      7424 packet-live-B	      8192 class-live-B	       0 B/op	       0 allocs/op
+index_full_random/capacity=128	   78125	        57.49 ns/op	  67108864 packet-reserved-B	     16280 pool-consumed-B	      7424 packet-live-B	      8192 class-live-B	       0 B/op	       0 allocs/op
+index_full_random/capacity=128	   78125	        57.59 ns/op	  67108864 packet-reserved-B	     16280 pool-consumed-B	      7424 packet-live-B	      8192 class-live-B	       0 B/op	       0 allocs/op
+index_full_random/capacity=128	   78125	        57.54 ns/op	  67108864 packet-reserved-B	     16280 pool-consumed-B	      7424 packet-live-B	      8192 class-live-B	       0 B/op	       0 allocs/op
+index_empty_miss/capacity=1024	    9765	       178.1 ns/op	  67108864 packet-reserved-B	         0 pool-consumed-B	         0 packet-live-B	         0 class-live-B	       0 B/op	       0 allocs/op
+index_empty_miss/capacity=1024	    9765	       178.9 ns/op	  67108864 packet-reserved-B	         0 pool-consumed-B	         0 packet-live-B	         0 class-live-B	       0 B/op	       0 allocs/op
+index_empty_miss/capacity=1024	    9765	       180.5 ns/op	  67108864 packet-reserved-B	         0 pool-consumed-B	         0 packet-live-B	         0 class-live-B	       0 B/op	       0 allocs/op
+index_sparse_miss/capacity=1024	    9765	       177.9 ns/op	  67108864 packet-reserved-B	     16280 pool-consumed-B	      7424 packet-live-B	      8192 class-live-B	       0 B/op	       0 allocs/op
+index_sparse_miss/capacity=1024	    9765	       178.7 ns/op	  67108864 packet-reserved-B	     16280 pool-consumed-B	      7424 packet-live-B	      8192 class-live-B	       0 B/op	       0 allocs/op
+index_sparse_miss/capacity=1024	    9765	       180.0 ns/op	  67108864 packet-reserved-B	     16280 pool-consumed-B	      7424 packet-live-B	      8192 class-live-B	       0 B/op	       0 allocs/op
+index_full_miss/capacity=1024	    9765	       178.4 ns/op	  67108864 packet-reserved-B	    130968 pool-consumed-B	     59392 packet-live-B	     65536 class-live-B	       0 B/op	       0 allocs/op
+index_full_miss/capacity=1024	    9765	       177.9 ns/op	  67108864 packet-reserved-B	    130968 pool-consumed-B	     59392 packet-live-B	     65536 class-live-B	       0 B/op	       0 allocs/op
+index_full_miss/capacity=1024	    9765	       180.0 ns/op	  67108864 packet-reserved-B	    130968 pool-consumed-B	     59392 packet-live-B	     65536 class-live-B	       0 B/op	       0 allocs/op
+index_full_first/capacity=1024	  100000	        50.26 ns/op	  67108864 packet-reserved-B	    130968 pool-consumed-B	     59392 packet-live-B	     65536 class-live-B	       0 B/op	       0 allocs/op
+index_full_first/capacity=1024	  100000	        50.30 ns/op	  67108864 packet-reserved-B	    130968 pool-consumed-B	     59392 packet-live-B	     65536 class-live-B	       0 B/op	       0 allocs/op
+index_full_first/capacity=1024	  100000	        50.18 ns/op	  67108864 packet-reserved-B	    130968 pool-consumed-B	     59392 packet-live-B	     65536 class-live-B	       0 B/op	       0 allocs/op
+index_full_last/capacity=1024	    9765	       197.5 ns/op	  67108864 packet-reserved-B	    130968 pool-consumed-B	     59392 packet-live-B	     65536 class-live-B	       0 B/op	       0 allocs/op
+index_full_last/capacity=1024	    9765	       197.8 ns/op	  67108864 packet-reserved-B	    130968 pool-consumed-B	     59392 packet-live-B	     65536 class-live-B	       0 B/op	       0 allocs/op
+index_full_last/capacity=1024	    9765	       195.5 ns/op	  67108864 packet-reserved-B	    130968 pool-consumed-B	     59392 packet-live-B	     65536 class-live-B	       0 B/op	       0 allocs/op
+index_full_random/capacity=1024	    9765	       130.1 ns/op	  67108864 packet-reserved-B	    130968 pool-consumed-B	     59392 packet-live-B	     65536 class-live-B	       0 B/op	       0 allocs/op
+index_full_random/capacity=1024	    9765	       132.1 ns/op	  67108864 packet-reserved-B	    130968 pool-consumed-B	     59392 packet-live-B	     65536 class-live-B	       0 B/op	       0 allocs/op
+index_full_random/capacity=1024	    9765	       129.4 ns/op	  67108864 packet-reserved-B	    130968 pool-consumed-B	     59392 packet-live-B	     65536 class-live-B	       0 B/op	       0 allocs/op
+index_empty_miss/capacity=10000	    1000	      1643 ns/op	  67108864 packet-reserved-B	         0 pool-consumed-B	         0 packet-live-B	         0 class-live-B	       0 B/op	       0 allocs/op
+index_empty_miss/capacity=10000	    1000	      1548 ns/op	  67108864 packet-reserved-B	         0 pool-consumed-B	         0 packet-live-B	         0 class-live-B	       0 B/op	       0 allocs/op
+index_empty_miss/capacity=10000	    1000	      1549 ns/op	  67108864 packet-reserved-B	         0 pool-consumed-B	         0 packet-live-B	         0 class-live-B	       0 B/op	       0 allocs/op
+index_sparse_miss/capacity=10000	    1000	      1591 ns/op	  67108864 packet-reserved-B	    159896 pool-consumed-B	     72500 packet-live-B	     80000 class-live-B	       0 B/op	       0 allocs/op
+index_sparse_miss/capacity=10000	    1000	      1584 ns/op	  67108864 packet-reserved-B	    159896 pool-consumed-B	     72500 packet-live-B	     80000 class-live-B	       0 B/op	       0 allocs/op
+index_sparse_miss/capacity=10000	    1000	      1548 ns/op	  67108864 packet-reserved-B	    159896 pool-consumed-B	     72500 packet-live-B	     80000 class-live-B	       0 B/op	       0 allocs/op
+index_full_miss/capacity=10000	    1000	      1549 ns/op	  67108864 packet-reserved-B	   1279896 pool-consumed-B	    580000 packet-live-B	    640000 class-live-B	       0 B/op	       0 allocs/op
+index_full_miss/capacity=10000	    1000	      1595 ns/op	  67108864 packet-reserved-B	   1279896 pool-consumed-B	    580000 packet-live-B	    640000 class-live-B	       0 B/op	       0 allocs/op
+index_full_miss/capacity=10000	    1000	      1575 ns/op	  67108864 packet-reserved-B	   1279896 pool-consumed-B	    580000 packet-live-B	    640000 class-live-B	       0 B/op	       0 allocs/op
+index_full_first/capacity=10000	  100000	        50.13 ns/op	  67108864 packet-reserved-B	   1279896 pool-consumed-B	    580000 packet-live-B	    640000 class-live-B	       0 B/op	       0 allocs/op
+index_full_first/capacity=10000	  100000	        50.22 ns/op	  67108864 packet-reserved-B	   1279896 pool-consumed-B	    580000 packet-live-B	    640000 class-live-B	       0 B/op	       0 allocs/op
+index_full_first/capacity=10000	  100000	        50.28 ns/op	  67108864 packet-reserved-B	   1279896 pool-consumed-B	    580000 packet-live-B	    640000 class-live-B	       0 B/op	       0 allocs/op
+index_full_last/capacity=10000	    1000	      1570 ns/op	  67108864 packet-reserved-B	   1279896 pool-consumed-B	    580000 packet-live-B	    640000 class-live-B	       0 B/op	       0 allocs/op
+index_full_last/capacity=10000	    1000	      1622 ns/op	  67108864 packet-reserved-B	   1279896 pool-consumed-B	    580000 packet-live-B	    640000 class-live-B	       0 B/op	       0 allocs/op
+index_full_last/capacity=10000	    1000	      1572 ns/op	  67108864 packet-reserved-B	   1279896 pool-consumed-B	    580000 packet-live-B	    640000 class-live-B	       0 B/op	       0 allocs/op
+index_full_random/capacity=10000	    1000	       881.2 ns/op	  67108864 packet-reserved-B	   1279896 pool-consumed-B	    580000 packet-live-B	    640000 class-live-B	       0 B/op	       0 allocs/op
+index_full_random/capacity=10000	    1000	       883.2 ns/op	  67108864 packet-reserved-B	   1279896 pool-consumed-B	    580000 packet-live-B	    640000 class-live-B	       0 B/op	       0 allocs/op
+index_full_random/capacity=10000	    1000	       880.3 ns/op	  67108864 packet-reserved-B	   1279896 pool-consumed-B	    580000 packet-live-B	    640000 class-live-B	       0 B/op	       0 allocs/op
+index_empty_miss/capacity=100000	     128	     16185 ns/op	  67108864 packet-reserved-B	         0 pool-consumed-B	         0 packet-live-B	         0 class-live-B	       0 B/op	       0 allocs/op
+index_empty_miss/capacity=100000	     128	     16056 ns/op	  67108864 packet-reserved-B	         0 pool-consumed-B	         0 packet-live-B	         0 class-live-B	       0 B/op	       0 allocs/op
+index_empty_miss/capacity=100000	     128	     15684 ns/op	  67108864 packet-reserved-B	         0 pool-consumed-B	         0 packet-live-B	         0 class-live-B	       0 B/op	       0 allocs/op
+index_sparse_miss/capacity=100000	     128	     16366 ns/op	  67108864 packet-reserved-B	   1599896 pool-consumed-B	    725000 packet-live-B	    800000 class-live-B	       0 B/op	       0 allocs/op
+index_sparse_miss/capacity=100000	     128	     16587 ns/op	  67108864 packet-reserved-B	   1599896 pool-consumed-B	    725000 packet-live-B	    800000 class-live-B	       0 B/op	       0 allocs/op
+index_sparse_miss/capacity=100000	     128	     15749 ns/op	  67108864 packet-reserved-B	   1599896 pool-consumed-B	    725000 packet-live-B	    800000 class-live-B	       0 B/op	       0 allocs/op
+index_full_miss/capacity=100000	     128	     16852 ns/op	  67108864 packet-reserved-B	  12799896 pool-consumed-B	   5800000 packet-live-B	   6400000 class-live-B	       0 B/op	       0 allocs/op
+index_full_miss/capacity=100000	     128	     16045 ns/op	  67108864 packet-reserved-B	  12799896 pool-consumed-B	   5800000 packet-live-B	   6400000 class-live-B	       0 B/op	       0 allocs/op
+index_full_miss/capacity=100000	     128	     16268 ns/op	  67108864 packet-reserved-B	  12799896 pool-consumed-B	   5800000 packet-live-B	   6400000 class-live-B	       0 B/op	       0 allocs/op
+index_full_first/capacity=100000	  100000	        50.10 ns/op	  67108864 packet-reserved-B	  12799896 pool-consumed-B	   5800000 packet-live-B	   6400000 class-live-B	       0 B/op	       0 allocs/op
+index_full_first/capacity=100000	  100000	        50.22 ns/op	  67108864 packet-reserved-B	  12799896 pool-consumed-B	   5800000 packet-live-B	   6400000 class-live-B	       0 B/op	       0 allocs/op
+index_full_first/capacity=100000	  100000	        50.20 ns/op	  67108864 packet-reserved-B	  12799896 pool-consumed-B	   5800000 packet-live-B	   6400000 class-live-B	       0 B/op	       0 allocs/op
+index_full_last/capacity=100000	     128	     15561 ns/op	  67108864 packet-reserved-B	  12799896 pool-consumed-B	   5800000 packet-live-B	   6400000 class-live-B	       0 B/op	       0 allocs/op
+index_full_last/capacity=100000	     128	     15906 ns/op	  67108864 packet-reserved-B	  12799896 pool-consumed-B	   5800000 packet-live-B	   6400000 class-live-B	       0 B/op	       0 allocs/op
+index_full_last/capacity=100000	     128	     15680 ns/op	  67108864 packet-reserved-B	  12799896 pool-consumed-B	   5800000 packet-live-B	   6400000 class-live-B	       0 B/op	       0 allocs/op
+index_full_random/capacity=100000	     128	      8588 ns/op	  67108864 packet-reserved-B	  12799896 pool-consumed-B	   5800000 packet-live-B	   6400000 class-live-B	       0 B/op	       0 allocs/op
+index_full_random/capacity=100000	     128	      8630 ns/op	  67108864 packet-reserved-B	  12799896 pool-consumed-B	   5800000 packet-live-B	   6400000 class-live-B	       0 B/op	       0 allocs/op
+index_full_random/capacity=100000	     128	      8668 ns/op	  67108864 packet-reserved-B	  12799896 pool-consumed-B	   5800000 packet-live-B	   6400000 class-live-B	       0 B/op	       0 allocs/op
+lookup_positive_last/capacity=128	   78125	      8694 ns/op	  67108864 packet-reserved-B	     16280 pool-consumed-B	      7424 packet-live-B	      8192 class-live-B	       0 B/op	       0 allocs/op
+lookup_positive_last/capacity=128	   78125	      8697 ns/op	  67108864 packet-reserved-B	     16280 pool-consumed-B	      7424 packet-live-B	      8192 class-live-B	       0 B/op	       0 allocs/op
+lookup_positive_last/capacity=128	   78125	      8692 ns/op	  67108864 packet-reserved-B	     16280 pool-consumed-B	      7424 packet-live-B	      8192 class-live-B	       0 B/op	       0 allocs/op
+lookup_denial_last/capacity=128	   78125	      9354 ns/op	  67108864 packet-reserved-B	     48944 pool-consumed-B	     17408 packet-live-B	     24576 class-live-B	       0 B/op	       0 allocs/op
+lookup_denial_last/capacity=128	   78125	      9346 ns/op	  67108864 packet-reserved-B	     48944 pool-consumed-B	     17408 packet-live-B	     24576 class-live-B	       0 B/op	       0 allocs/op
+lookup_denial_last/capacity=128	   78125	      9348 ns/op	  67108864 packet-reserved-B	     48944 pool-consumed-B	     17408 packet-live-B	     24576 class-live-B	       0 B/op	       0 allocs/op
+lookup_sparse_miss/capacity=128	   78125	        87.23 ns/op	  67108864 packet-reserved-B	      1944 pool-consumed-B	       928.0 packet-live-B	      1024 class-live-B	       0 B/op	       0 allocs/op
+lookup_sparse_miss/capacity=128	   78125	        87.30 ns/op	  67108864 packet-reserved-B	      1944 pool-consumed-B	       928.0 packet-live-B	      1024 class-live-B	       0 B/op	       0 allocs/op
+lookup_sparse_miss/capacity=128	   78125	        87.42 ns/op	  67108864 packet-reserved-B	      1944 pool-consumed-B	       928.0 packet-live-B	      1024 class-live-B	       0 B/op	       0 allocs/op
+pipeline_positive_last/capacity=128	   78125	     19423 ns/op	  67108864 packet-reserved-B	     16280 pool-consumed-B	      7424 packet-live-B	      8192 class-live-B	       0 B/op	       0 allocs/op
+pipeline_positive_last/capacity=128	   78125	     19418 ns/op	  67108864 packet-reserved-B	     16280 pool-consumed-B	      7424 packet-live-B	      8192 class-live-B	       0 B/op	       0 allocs/op
+pipeline_positive_last/capacity=128	   78125	     19424 ns/op	  67108864 packet-reserved-B	     16280 pool-consumed-B	      7424 packet-live-B	      8192 class-live-B	       0 B/op	       0 allocs/op
+lookup_positive_last/capacity=1024	    9765	      8832 ns/op	  67108864 packet-reserved-B	    130968 pool-consumed-B	     59392 packet-live-B	     65536 class-live-B	       0 B/op	       0 allocs/op
+lookup_positive_last/capacity=1024	    9765	      8832 ns/op	  67108864 packet-reserved-B	    130968 pool-consumed-B	     59392 packet-live-B	     65536 class-live-B	       0 B/op	       0 allocs/op
+lookup_positive_last/capacity=1024	    9765	      8834 ns/op	  67108864 packet-reserved-B	    130968 pool-consumed-B	     59392 packet-live-B	     65536 class-live-B	       0 B/op	       0 allocs/op
+lookup_denial_last/capacity=1024	    9765	      9639 ns/op	  67108864 packet-reserved-B	    393008 pool-consumed-B	    139264 packet-live-B	    196608 class-live-B	       0 B/op	       0 allocs/op
+lookup_denial_last/capacity=1024	    9765	      9638 ns/op	  67108864 packet-reserved-B	    393008 pool-consumed-B	    139264 packet-live-B	    196608 class-live-B	       0 B/op	       0 allocs/op
+lookup_denial_last/capacity=1024	    9765	      9632 ns/op	  67108864 packet-reserved-B	    393008 pool-consumed-B	    139264 packet-live-B	    196608 class-live-B	       0 B/op	       0 allocs/op
+lookup_sparse_miss/capacity=1024	    9765	       359.2 ns/op	  67108864 packet-reserved-B	     16280 pool-consumed-B	      7424 packet-live-B	      8192 class-live-B	       0 B/op	       0 allocs/op
+lookup_sparse_miss/capacity=1024	    9765	       358.9 ns/op	  67108864 packet-reserved-B	     16280 pool-consumed-B	      7424 packet-live-B	      8192 class-live-B	       0 B/op	       0 allocs/op
+lookup_sparse_miss/capacity=1024	    9765	       358.1 ns/op	  67108864 packet-reserved-B	     16280 pool-consumed-B	      7424 packet-live-B	      8192 class-live-B	       0 B/op	       0 allocs/op
+pipeline_positive_last/capacity=1024	    9765	     19571 ns/op	  67108864 packet-reserved-B	    130968 pool-consumed-B	     59392 packet-live-B	     65536 class-live-B	       0 B/op	       0 allocs/op
+pipeline_positive_last/capacity=1024	    9765	     19582 ns/op	  67108864 packet-reserved-B	    130968 pool-consumed-B	     59392 packet-live-B	     65536 class-live-B	       0 B/op	       0 allocs/op
+pipeline_positive_last/capacity=1024	    9765	     19574 ns/op	  67108864 packet-reserved-B	    130968 pool-consumed-B	     59392 packet-live-B	     65536 class-live-B	       0 B/op	       0 allocs/op
+lookup_positive_last/capacity=10000	    1000	     10307 ns/op	  67108864 packet-reserved-B	   1279896 pool-consumed-B	    580000 packet-live-B	    640000 class-live-B	       0 B/op	       0 allocs/op
+lookup_positive_last/capacity=10000	    1000	     10302 ns/op	  67108864 packet-reserved-B	   1279896 pool-consumed-B	    580000 packet-live-B	    640000 class-live-B	       0 B/op	       0 allocs/op
+lookup_positive_last/capacity=10000	    1000	     10276 ns/op	  67108864 packet-reserved-B	   1279896 pool-consumed-B	    580000 packet-live-B	    640000 class-live-B	       0 B/op	       0 allocs/op
+lookup_denial_last/capacity=10000	    1000	     12756 ns/op	  67108864 packet-reserved-B	   3839792 pool-consumed-B	   1360000 packet-live-B	   1920000 class-live-B	       0 B/op	       0 allocs/op
+lookup_denial_last/capacity=10000	    1000	     12845 ns/op	  67108864 packet-reserved-B	   3839792 pool-consumed-B	   1360000 packet-live-B	   1920000 class-live-B	       0 B/op	       0 allocs/op
+lookup_denial_last/capacity=10000	    1000	     12605 ns/op	  67108864 packet-reserved-B	   3839792 pool-consumed-B	   1360000 packet-live-B	   1920000 class-live-B	       0 B/op	       0 allocs/op
+lookup_sparse_miss/capacity=10000	    1000	      3147 ns/op	  67108864 packet-reserved-B	    159896 pool-consumed-B	     72500 packet-live-B	     80000 class-live-B	       0 B/op	       0 allocs/op
+lookup_sparse_miss/capacity=10000	    1000	      3137 ns/op	  67108864 packet-reserved-B	    159896 pool-consumed-B	     72500 packet-live-B	     80000 class-live-B	       0 B/op	       0 allocs/op
+lookup_sparse_miss/capacity=10000	    1000	      3142 ns/op	  67108864 packet-reserved-B	    159896 pool-consumed-B	     72500 packet-live-B	     80000 class-live-B	       0 B/op	       0 allocs/op
+pipeline_positive_last/capacity=10000	    1000	     21091 ns/op	  67108864 packet-reserved-B	   1279896 pool-consumed-B	    580000 packet-live-B	    640000 class-live-B	       0 B/op	       0 allocs/op
+pipeline_positive_last/capacity=10000	    1000	     21092 ns/op	  67108864 packet-reserved-B	   1279896 pool-consumed-B	    580000 packet-live-B	    640000 class-live-B	       0 B/op	       0 allocs/op
+pipeline_positive_last/capacity=10000	    1000	     21079 ns/op	  67108864 packet-reserved-B	   1279896 pool-consumed-B	    580000 packet-live-B	    640000 class-live-B	       0 B/op	       0 allocs/op
+lookup_positive_last/capacity=100000	     128	     25201 ns/op	  67108864 packet-reserved-B	  12799896 pool-consumed-B	   5800000 packet-live-B	   6400000 class-live-B	       0 B/op	       0 allocs/op
+lookup_positive_last/capacity=100000	     128	     25847 ns/op	  67108864 packet-reserved-B	  12799896 pool-consumed-B	   5800000 packet-live-B	   6400000 class-live-B	       0 B/op	       0 allocs/op
+lookup_positive_last/capacity=100000	     128	     25006 ns/op	  67108864 packet-reserved-B	  12799896 pool-consumed-B	   5800000 packet-live-B	   6400000 class-live-B	       0 B/op	       0 allocs/op
+lookup_denial_last/capacity=100000	     128	     42559 ns/op	  67108864 packet-reserved-B	  38399792 pool-consumed-B	  13600000 packet-live-B	  19200000 class-live-B	       0 B/op	       0 allocs/op
+lookup_denial_last/capacity=100000	     128	     42691 ns/op	  67108864 packet-reserved-B	  38399792 pool-consumed-B	  13600000 packet-live-B	  19200000 class-live-B	       0 B/op	       0 allocs/op
+lookup_denial_last/capacity=100000	     128	     42427 ns/op	  67108864 packet-reserved-B	  38399792 pool-consumed-B	  13600000 packet-live-B	  19200000 class-live-B	       0 B/op	       0 allocs/op
+lookup_sparse_miss/capacity=100000	     128	     32778 ns/op	  67108864 packet-reserved-B	   1599896 pool-consumed-B	    725000 packet-live-B	    800000 class-live-B	       0 B/op	       0 allocs/op
+lookup_sparse_miss/capacity=100000	     128	     32100 ns/op	  67108864 packet-reserved-B	   1599896 pool-consumed-B	    725000 packet-live-B	    800000 class-live-B	       0 B/op	       0 allocs/op
+lookup_sparse_miss/capacity=100000	     128	     33104 ns/op	  67108864 packet-reserved-B	   1599896 pool-consumed-B	    725000 packet-live-B	    800000 class-live-B	       0 B/op	       0 allocs/op
+pipeline_positive_last/capacity=100000	     128	     36598 ns/op	  67108864 packet-reserved-B	  12799896 pool-consumed-B	   5800000 packet-live-B	   6400000 class-live-B	       0 B/op	       0 allocs/op
+pipeline_positive_last/capacity=100000	     128	     35838 ns/op	  67108864 packet-reserved-B	  12799896 pool-consumed-B	   5800000 packet-live-B	   6400000 class-live-B	       0 B/op	       0 allocs/op
+pipeline_positive_last/capacity=100000	     128	     35761 ns/op	  67108864 packet-reserved-B	  12799896 pool-consumed-B	   5800000 packet-live-B	   6400000 class-live-B	       0 B/op	       0 allocs/op
+insert_evict/capacity=128	   78125	     15773 ns/op	  67108864 packet-reserved-B	     16280 pool-consumed-B	      7424 packet-live-B	      8192 class-live-B	       0 B/op	       0 allocs/op
+insert_evict/capacity=128	   78125	     15751 ns/op	  67108864 packet-reserved-B	     16280 pool-consumed-B	      7424 packet-live-B	      8192 class-live-B	       0 B/op	       0 allocs/op
+insert_evict/capacity=128	   78125	     15752 ns/op	  67108864 packet-reserved-B	     16280 pool-consumed-B	      7424 packet-live-B	      8192 class-live-B	       0 B/op	       0 allocs/op
+insert_evict/capacity=1024	    9765	     16171 ns/op	  67108864 packet-reserved-B	    130968 pool-consumed-B	     59392 packet-live-B	     65536 class-live-B	       0 B/op	       0 allocs/op
+insert_evict/capacity=1024	    9765	     16170 ns/op	  67108864 packet-reserved-B	    130968 pool-consumed-B	     59392 packet-live-B	     65536 class-live-B	       0 B/op	       0 allocs/op
+insert_evict/capacity=1024	    9765	     16156 ns/op	  67108864 packet-reserved-B	    130968 pool-consumed-B	     59392 packet-live-B	     65536 class-live-B	       0 B/op	       0 allocs/op
+insert_evict/capacity=10000	    1000	     20617 ns/op	  67108864 packet-reserved-B	   1279896 pool-consumed-B	    580000 packet-live-B	    640000 class-live-B	       0 B/op	       0 allocs/op
+insert_evict/capacity=10000	    1000	     20627 ns/op	  67108864 packet-reserved-B	   1279896 pool-consumed-B	    580000 packet-live-B	    640000 class-live-B	       0 B/op	       0 allocs/op
+insert_evict/capacity=10000	    1000	     20575 ns/op	  67108864 packet-reserved-B	   1279896 pool-consumed-B	    580000 packet-live-B	    640000 class-live-B	       0 B/op	       0 allocs/op
+insert_evict/capacity=100000	     128	     65930 ns/op	  67108864 packet-reserved-B	  12799896 pool-consumed-B	   5800000 packet-live-B	   6400000 class-live-B	       0 B/op	       0 allocs/op
+insert_evict/capacity=100000	     128	     65997 ns/op	  67108864 packet-reserved-B	  12799896 pool-consumed-B	   5800000 packet-live-B	   6400000 class-live-B	       0 B/op	       0 allocs/op
+insert_evict/capacity=100000	     128	     66750 ns/op	  67108864 packet-reserved-B	  12799896 pool-consumed-B	   5800000 packet-live-B	   6400000 class-live-B	       0 B/op	       0 allocs/op
+Corrected candidate exit=0
+
+Default-budget capacity report committed before measurement: 3011d180d9d94772be98e250ee93ebdf67bdc4c4
+Command: ./zig-out/bin/dns-benchmark layout
+Entry=320 bytes, Key=262 bytes, alignment=8 bytes
+Entry offsets: key=52, bytes=8, inserted_s=24, previous=36, next=44
+Packet pool control=296 bytes per zone, benchmark backing=67108864 bytes
+capacity=128: two metadata column allocations=80896 bytes
+capacity=1024: two metadata column allocations=647168 bytes
+capacity=10000: two metadata column allocations=6320000 bytes
+capacity=100000: two metadata column allocations=63200000 bytes
+Metadata sizes exclude packet backing, allocator overhead, runtime, and kernel memory.
+default backing=8388608 class=64 blocks=65536 live=4194304 rounded=4194304 consumed=8388504
+default backing=8388608 class=128 blocks=32768 live=4194304 rounded=4194304 consumed=8388504
+default backing=8388608 class=256 blocks=16384 live=4194304 rounded=4194304 consumed=8388376
+default backing=8388608 class=512 blocks=8192 live=4194304 rounded=4194304 consumed=8388120
+default backing=8388608 class=1024 blocks=4096 live=4194304 rounded=4194304 consumed=8387608
+default backing=8388608 class=2048 blocks=2048 live=4194304 rounded=4194304 consumed=8386584
+default backing=8388608 class=4096 blocks=1024 live=4194304 rounded=4194304 consumed=8384536
+default backing=8388608 class=8192 blocks=512 live=4194304 rounded=4194304 consumed=8380440
+default backing=8388608 class=16384 blocks=256 live=4194304 rounded=4194304 consumed=8372248
+default backing=8388608 class=32768 blocks=128 live=4194304 rounded=4194304 consumed=8355864
+default backing=8388608 class=65536 blocks=64 live=4194240 rounded=4194304 consumed=8323096
+Default capacity report exit=0
+
+Pinned arena source for the in-place growth accounting
+539e20f7faa7d7267305b7a51c829bd86d914a2175d92415399dc27b18883a3a  /nix/store/afbxfxrx3fmvhzp7ni9li5l3v2fbw7yn-zig-0.16.0/lib/zig/std/heap/ArenaAllocator.zig
+Relevant path: std/heap/ArenaAllocator.zig:351-389. The fit attempt advances end_index; the resize path reserves from the advanced index.
+
+Validation commands on restored source
+zig build test-resolver -Doptimize=ReleaseSafe
+ztest: 59 passed, 0 failed, 0 skipped (of 59 total) in 287ms
+zig build test-config -Doptimize=ReleaseSafe
+ztest: 16 passed, 0 failed, 0 skipped (of 16 total) in 36ms
+zig build test-runtime -Doptimize=ReleaseSafe -Druntime-filter=forward
+ztest: 54 passed, 0 failed, 0 skipped (of 54 total) in 6799ms
+zig build test-runtime -Doptimize=ReleaseSafe -Druntime-filter='cache stress native': 3 passed, 0 failed.
+zig build -Doptimize=ReleaseSafe: passed.
+zig build bench-build -Doptimize=ReleaseSafe: passed.
+./zig-out/bin/dns-benchmark smoke: exit 0.
+zig fmt --check build.zig src tests: passed.
+ziglint: passed.
+ziglint build.zig src tests: passed.
+
+Expected regression red
+The initial forward selection expected 9 teardown memory events but observed 11. The new backing contributes one allocation and one post-barrier release. The corrected exact trace passes all 54 tests. Runtime teardown code is unchanged.
+
+Reuse mutation
+Command: zig test -OReleaseSafe --dep resolver -Mroot=tests/resolver.zig -OReleaseSafe -Mresolver=src/resolver.zig -lc --test-filter "cache full packet arena refresh"
+Mutation changes the same-class reuse rejection from != to ==. Exit 1 is the intended test failure.
+1/2 resolver.test_0...OK
+2/2 resolver.cache_packets.test.cache full packet arena refresh eviction and cross bank transfer allocate nothing...expected .stored, found .exhausted
+FAIL (TestExpectedEqual)
+1 passed; 0 skipped; 1 failed.
+error: the following test command failed with exit code 1:
+.zig-cache/o/db40b41b3abd9b652086b81079e63d6e/root --seed=0x8e52332f
+Restored src/cache.zig SHA-256 equals its pre-mutation value:
+82d228afa5769578d629e191aa0f48b2517bf55261a9e4eaba59a91de850f581
+
+Semantic compilation: both commands exit 0 for target=aarch64-macos and target=x86_64-linux.
+zig test -fno-emit-bin -OReleaseSafe -target "$target" --dep runtime -Mroot=tests/runtime.zig -OReleaseSafe -target "$target" --dep ztls -Mruntime=src/runtime.zig -OReleaseSafe -target "$target" $(pkg-config --cflags libcrypto) --dep build_options -Mztls=zig-pkg/ztls-0.0.0-SHHDXs82FQCAmFWzSMV6dLKeWCINCwtyqK701HtCwaKF/src/root.zig -Mbuild_options=.zig-cache/c/cda87752df7ead3d209e33a6bcd2e2e2/options.zig -lc
+zig test -fno-emit-bin -OReleaseSafe -target "$target" --dep resolver -Mroot=tests/resolver.zig -OReleaseSafe -target "$target" -Mresolver=src/resolver.zig -lc
+These commands do not prove native foreign-target execution.
+
+Retained limits: classes do not rebalance, arena growth leaves holes, and the default byte budget does not guarantee the configured entry occupancy. The benchmark explicitly reserves 64 MiB. Existing libcrypto setup and key-update exceptions remain unchanged. No public DNS, existing-listener query, deployment, restart investigation, or full-runtime suite accompanies this capture.

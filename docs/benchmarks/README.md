@@ -1,6 +1,6 @@
 # Cache baseline (#1)
 
-The [retained stdlib SoA comparison](#stdlib-soa-comparison-1) follows the original baseline below.
+The [stdlib SoA comparison](#stdlib-soa-comparison-1) and [packet pool comparison](#packet-pool-comparison-1) follow the original baseline below.
 
 [Raw trials, counters, profile, and disassembly](2026-09-06-cache-baseline.txt) use production source `822e3aa5424b8aaa034af7688104ba51697d07d2`.
 The host is launchpad: aarch64 Neoverse-V3, Linux 7.2.3, Zig 0.16.0, and ReleaseSafe.
@@ -173,3 +173,104 @@ The restored resolver run passes all 52 tests. The raw capture records commands 
 
 The change meets the local performance retention gate. Parent review and full resolver acceptance remain separate.
 Native foreign-target execution, production load, soak, and packet slab storage remain outside this slice.
+
+## Packet pool comparison (#1)
+
+[Raw trials and validation](2026-09-06-cache-packets.txt) compare lookup-only source `d1eb1d9` with packet storage source `58dff94`.
+The final benchmark configuration is committed as `23b5580` before measurement.
+Both binaries use ReleaseSafe on the same launchpad host. The lookup-only binary was copied before source edits.
+The original baseline and SoA captures remain unchanged.
+
+### Boundaries and configuration
+
+The 47 cases retain three trials each, with the original iteration counts, occupancy, keys, and timed production boundaries.
+All setup and memory-report operations remain outside the timer. Direct seeds use the production pool ownership helper and `Bank.put`.
+The scaling fixture explicitly reserves 64 MiB of packet backing at every capacity.
+The one-entry pipeline keeps the production 8 MiB default. Neither setup policy establishes a latency improvement.
+
+The first committed fixture reserved 32 MiB. Its 100000-positive plus 100000-denial seed failed with `OutOfMemory` before denial timing.
+The capture retains that failure and its earlier completed trials. Those partial results do not supply the comparison below.
+The corrected 64 MiB fixture fills both banks completely and completes all 141 trials.
+The initial lookup-only run supplies the baseline. No CPU affinity, frequency control, or isolation applies.
+
+### Allocation and latency
+
+Production insertion with eviction falls from one general-purpose allocation to zero at every capacity.
+Requested general-purpose bytes per operation fall from 58 to zero. Pool allocation and bookkeeping remain inside the preallocated backing.
+Tests also reject backing allocation during initial insertion, refresh, lookup, and packet reuse after removal.
+This is not a whole-process zero-allocation claim. Existing libcrypto setup and key-update exceptions remain unchanged.
+
+Values below are medians of three trials, in microseconds per operation. Each cell shows lookup-only → packet pools.
+
+| Capacity per bank | Insert and evict | Pipeline last-slot hit | Denial lookup hit |
+|---:|---:|---:|---:|
+| 128 | 15.760 → 15.752 | 19.415 → 19.423 | 9.332 → 9.348 |
+| 1024 | 16.188 → 16.170 | 19.546 → 19.574 | 9.611 → 9.638 |
+| 10000 | 20.890 → 20.617 | 21.205 → 21.091 | 12.811 → 12.756 |
+| 100000 | 65.307 → 65.997 | 36.591 → 35.838 | 43.180 → 42.559 |
+
+Default-capacity churn falls 1.31%. Maximum-capacity churn rises 1.06%, with candidate trials from 65.930 through 66.750 microseconds.
+The one-entry pipeline changes from 19.365 to 19.380 microseconds, a 0.08% increase.
+Sparse lookup miss medians rise between 0.28% and 0.96% across the four capacities.
+These short trials support the allocation result without a material latency regression. They do not establish a latency win or tail behavior.
+
+### Reserved and used memory
+
+`Entry` remains 320 bytes. Actual metadata columns rise from 315 to 316 bytes per slot for explicit packet class ownership.
+Two default-capacity banks therefore rise from 6300000 to 6320000 bytes, a 0.32% increase.
+Pool control occupies 296 bytes per zone, within the tested 512-byte cap and the existing fixed runtime zone budget.
+The configured backing includes every stdlib arena header, alignment gap, free block, and unused arena byte.
+
+The positive seed is 58 bytes in the 64-byte class. The denial seed is 78 bytes in the 128-byte class.
+The table shows completely full positive and denial banks. Values are bytes, not RSS.
+
+| Capacity per bank | Live DNS bytes | Live class bytes | Consumed backing | Reserved benchmark backing |
+|---:|---:|---:|---:|---:|
+| 128 | 17408 | 24576 | 48944 | 67108864 |
+| 1024 | 139264 | 196608 | 393008 | 67108864 |
+| 10000 | 1360000 | 1920000 | 3839792 | 67108864 |
+| 100000 | 13600000 | 19200000 | 38399792 | 67108864 |
+
+For these seeds, class rounding adds 41.18% to live bytes. Stdlib arena consumption then approaches twice the class bytes.
+The largest fixture therefore consumes about 38.4 MB, not the 19.2 MB that class sizes alone predict.
+
+The pinned `std/heap/ArenaAllocator.zig:351–389` advances `node.end_index` before the fit check.
+Its in-place resize path uses that advanced index and reserves another allocation length.
+With these FBA-backed pools, each such growth leaves approximately one block unused. This explains the observed cost beyond header metadata.
+The toolchain source hash accompanies the capture. No stdlib or dependency source changes accompany this slice.
+The production default reserves 8388608 backing bytes, independently of occupancy. It fits the default-capacity seed but not the largest fixture.
+The old implementation requests only live packet bytes from its general allocator. Its allocator rounding and metadata are not measured here.
+Fixed reservations increase empty-cache memory commitments. These results make no total-memory or RSS improvement claim.
+
+The bounded layout report from committed source `3011d18` exhausts each class with an independent, empty 8 MiB backing allocation.
+Every run reaches 4 MiB of live class storage before exhaustion. These are separate single-class maxima, not simultaneous quotas.
+
+| Packet class bytes | Blocks at the default budget |
+|---:|---:|
+| 64 | 65536 |
+| 128 | 32768 |
+| 512 | 8192 |
+| 4096 | 1024 |
+| 65536 | 64 |
+
+The raw capture includes all eleven classes. Full-size DNS messages use 65535 bytes within the final class.
+Classes never rebalance. A free block in one class cannot satisfy another class, and arena growth can fail with unused backing space.
+A changed packet-size mix can strand free blocks while another class rejects insertion. Repeated same-class refresh still succeeds under complete backing exhaustion.
+The minimum 64 KiB budget cannot hold a full-size class block plus its arena headers.
+Same-class refresh and eviction transfer existing blocks after all fallible rewrites. Other exhaustion preserves old data and returns the uncached upstream answer.
+
+### Correctness and limits
+
+The final candidate passes 59 resolver tests, 16 config tests, all 54 forward-selected tests, and the separate native cache stress selection.
+Native ReleaseSafe build, benchmark smoke, formatting, and both lint invocations pass.
+Runtime and resolver test roots pass macOS and x86_64 Linux semantic compilation. These checks do not establish native foreign-target execution.
+
+New tests cover every packet class boundary, including production storage and delivery of a 65535-byte message.
+They cover pool reuse, class pressure, transactional failure, both-bank isolation, same-class transfer, disabled storage, and startup rollback.
+A mutation disables same-class reuse. The full-arena refresh test fails with `expected .stored, found .exhausted`.
+The restored source hash matches its pre-mutation hash, and all resolver tests pass afterward.
+
+The forward selection initially rejects its old teardown trace count: nine events versus eleven after the additional packet allocation.
+The fixture now requires the exact new allocation and release pair after the same retirement barrier. Runtime teardown behavior remains unchanged.
+No full runtime or restart suite runs for this slice. Existing listeners remain untouched.
+Parent review owns retention and final acceptance. Production load, soak, and full SPEC acceptance remain separate work.

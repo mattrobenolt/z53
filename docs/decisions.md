@@ -1288,3 +1288,24 @@ The valid upstream answer survives unsuccessful insertion.
 
 Cache insertions, refreshes, evictions, removals, and lookups never call the general allocator after initialization.
 This is not a whole-process allocation claim. Existing libcrypto setup and key-update exceptions remain unchanged.
+
+The [paired measurement](benchmarks/2026-09-06-cache-packets.txt) records candidate `58dff94` and the corrected benchmark configuration `23b5580`.
+Both commits precede their measurements. Production churn changes from one general-purpose allocation to zero at all four capacities.
+Default-capacity churn changes from 20.890 to 20.617 microseconds. Maximum-capacity churn rises from 65.307 to 65.997 microseconds.
+The [comparison](benchmarks/README.md#packet-pool-comparison-1) retains all memory costs and timing regressions. No latency or total-memory improvement claim follows.
+
+The first 32 MiB benchmark budget fails at 100000 positive plus 100000 denial entries.
+The retained failure exposes stdlib arena consumption near twice the class bytes for these seeds.
+The pinned `std/heap/ArenaAllocator.zig:351–389` advances its end index before the fit check.
+The in-place resize path then uses that advanced index and reserves another allocation length.
+Each such growth leaves approximately one block unused. This is more than header metadata overhead.
+An independent default-budget report reaches 4 MiB of live class storage in each 8 MiB backing allocation.
+It fits 65536 single-class 64-byte blocks or 64 single-class 65536-byte blocks, not both populations together.
+A different size mix can strand free blocks in classes that no longer receive packets.
+The corrected benchmark explicitly reserves 64 MiB and completes all trials with the original full occupancy.
+The 8 MiB production default remains a separate product choice.
+
+Tests cover every class boundary, full-size DNS delivery, exhausted refresh, class pressure, both-bank isolation, and startup rollback.
+A mutation disables same-class reuse. The full-arena refresh test fails with `expected .stored, found .exhausted` before source restoration.
+The final resolver suite passes 59 tests. The config suite passes 16 tests, and the forward selection passes all 54 tests.
+The forwarding fixture now accounts for the extra startup allocation without any runtime teardown change.
