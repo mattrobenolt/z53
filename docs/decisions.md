@@ -1352,3 +1352,29 @@ Native Linux fixtures exercise UDP, forced TCP, verified DoT, idle recovery, and
 Synthetic linked-order tests cover ownership permutations, not kernel completion order.
 Foreign semantic compilation does not establish native macOS or x86 Linux execution.
 Parent-owned live configuration checks and native foreign execution remain separate. Historical restart failures remain unresolved and untested in this slice.
+
+## Reusable wire scratch (#1)
+
+Parser bitmaps and encoder dictionaries retain their backing storage between requests.
+`ScratchSet` resets a small map of initialized words. Its first write clears one backing word before publication.
+Membership reads consult that map before any backing-word read. Direct access to stale words does not represent logical membership.
+The compression dictionary retains exact suffix checks and its existing bounded probe sequence.
+
+Membership uses a selected `u64` through `IntegerBitSet`, not the value receiver on `ArrayBitSet`.
+Packaged disassembly exposed 2048-byte and 8192-byte copies from that value receiver.
+`Packet.name` now reads immutable provenance without a private map copy. Inspection never publishes new label boundaries.
+Wire-order parsing still establishes all provenance and rejects malformed compression targets.
+
+`ArrayBuffer` owns fixed append-only storage and its active length.
+RDATA parts and rewrite order use that shared type. `clear()` changes only the length.
+Checked appends reject external lengths before writes or narrow casts. Unchecked appends require a capacity proof at the caller.
+Stream cursors and sparse maps remain separate types. No asynchronous ownership barrier changes.
+
+Current aarch64 codec sizes are 105736 bytes per Packet and 57976 bytes per rewrite workspace.
+Encoder occupies 45288 bytes, Boundaries occupies 10400 bytes, and Parts occupies 44 bytes.
+The earlier exact runtime layouts remain historical measurements. The 40 MiB runtime and 12 MiB forwarding caps remain unchanged.
+
+ReleaseSafe and the portable baseline CPU remain the package defaults.
+The comparison also tests explicit `neoverse_v3` builds without a production deployment.
+An explicit CPU model avoids dependence on the machine that supplies a Nix build.
+The [scratch comparison](benchmarks/2026-09-08-scratch.txt) records the measured source revisions and limits.

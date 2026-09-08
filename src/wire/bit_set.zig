@@ -5,6 +5,7 @@ pub fn ScratchSet(comptime capacity: usize) type {
     const Bits = std.bit_set.ArrayBitSet(u64, capacity);
     const words = std.math.divCeil(usize, capacity, 64) catch unreachable;
     return struct {
+        // Backing words can be stale or undefined. Only isSet and set expose logical membership.
         bits: Bits,
         initialized: std.bit_set.ArrayBitSet(u64, words),
         const Self = @This();

@@ -357,3 +357,98 @@ The generator smoke and disabled-cache control pass their expected checks.
 All-system flake evaluation and source formatting/lints pass.
 The production resolver retains PID 782149 and zero automatic restarts after measurement.
 No benchmark query reaches the production listener or a public upstream.
+
+## Scratch reuse and CPU targets — 2026-09-08
+
+[Raw capture](2026-09-08-scratch.txt). Issue #1.
+
+The package comparison uses source `9a7c2c4` before optimization and `be029b3` after optimization.
+All z53 variants use ReleaseSafe. The package defaults remain `-Dcpu=baseline`.
+A second package pair uses explicit `-Dcpu=neoverse_v3`, not a change to the production target.
+AArch64 baseline includes NEON. The comparison does not equate baseline with scalar-only code.
+
+### Retained work
+
+`ScratchSet` resets word-validity metadata instead of its complete backing array.
+The first write initializes one dirty word. Membership reads consult validity first.
+`Packet.name` reads immutable provenance. Encoder occupancy gates every retained dictionary offset.
+The compression dictionary retains exact suffix checks and bounded probing.
+
+Selected-word access removes the remaining by-value `ArrayBitSet` copies.
+The captured `Packet.name` function uses a 384-byte stack frame, without the earlier 2048-byte and 8192-byte copies.
+Small copies that construct decoded names remain. This is evidence for the captured build, not every target.
+
+The later `ef97a67` refactor adds `ArrayBuffer` for RDATA parts and rewrite order.
+Its clear operation resets only the active length. Overflow checks precede writes and narrow casts.
+The refactor follows the full package comparison. Its microbenchmark results remain within one percent of the measured source.
+A final package smoke exercises the refactor separately.
+
+### Microbenchmarks
+
+Each figure is the median of three trials on CPU 2, with ReleaseSafe and the baseline target.
+The pipeline uses a last-slot positive hit at 10000 entries. The wire case decodes one A response.
+
+| Source | Change | Pipeline, ns | Wire, ns |
+|---|---|---:|---:|
+| `a08b14b` | Before | 40624 | 3207 |
+| `028f64c` | Dirty storage with validity maps | 5145 | 103.8 |
+| `44ad350` | Immutable name inspection | 4380 | 90.80 |
+| `2f52957` | Retained permutation scratch | 3892 | 91.76 |
+| `05ece77` | Selected bitmap words | 3315 | 49.03 |
+| `ef97a67` | Shared append-only buffers | 3322 | 49.38 |
+
+The final pipeline latency falls by 91.8 percent. The shared-buffer refactor is a structural improvement, not a separate speed claim.
+All timed cases report zero allocator calls per operation. This does not remove the documented OpenSSL allocation exceptions.
+
+### Socket throughput
+
+The owned-loopback fixture uses 4096 warm names and 32 outstanding queries.
+Each figure is the median of three three-second trials. The capture also contains the one-name population.
+The generator and resolver use the same CPU assignments as the preceding CoreDNS comparison.
+Completion logs go to `/dev/null`. The fixture excludes hosts and TLS.
+
+| Resolver | CPU target | UDP QPS | TCP QPS |
+|---|---|---:|---:|
+| Before | baseline | 17697 | 16022 |
+| Before | neoverse_v3 | 29524 | 27425 |
+| After | baseline | 96000 | 72627 |
+| After | neoverse_v3 | 99879 | 74240 |
+| CoreDNS | packaged Go build | 89774 | 105587 |
+
+The baseline source change improves UDP throughput by 5.42 times and TCP throughput by 4.53 times.
+CoreDNS still delivers more TCP throughput. The optimized UDP results are close to CoreDNS in this fixture.
+The small target-specific TCP gain has overlapping trial ranges. Three short trials do not establish a reliable gain of that size.
+Single-outstanding throughput still contains generator gaps and does not establish capacity.
+
+The 90 timed trials complete 12628129 queries with zero losses and only NOERROR responses.
+No timed trial increases the owned upstream log. No query reaches a production listener or public upstream.
+All z53 variants show approximately 59 MiB sampled RSS after the 4096-name TCP trials.
+The change reduces work, not the configured storage bounds.
+
+### Profile and checks
+
+Userspace-cycle profiles contain 576 baseline samples and 551 V3 samples, with zero lost samples.
+The baseline `memset` share falls from the earlier 87.01 percent to 13.81 percent.
+The V3 profile attributes 7.08 percent to `memset`. No compiler-runtime replacement accompanies these results.
+`Driver.drive` accounts for 48.62 percent and 59.64 percent, respectively, including its inlined helpers.
+Some samples remain unresolved. These shares do not measure request-latency attribution.
+
+The final source passes these checks:
+
+- 42 wire tests and 60 resolver tests on baseline and V3 targets.
+- 60 native forwarding tests and 12 completion-log tests on Linux.
+- 20008 decoder fuzz executions and 20247 structured-relocation fuzz executions.
+- Wire semantic compilation for aarch64 macOS and x86_64 Linux.
+- A Nix package build and nine owned-loopback smoke trials.
+- Formatting, both ziglint commands, and whitespace checks.
+
+The earlier scratch candidate also passes all 18 native health tests.
+Negative controls detect stale words and shared-provenance writes.
+Other controls detect missing occupancy resets and incorrect collision matches.
+Buffer controls detect whole-value clear and success instead of `NoSpaceLeft`. The controls are restored before the final green runs.
+Independent code reviews report no remaining correctness blockers.
+
+The transport scheduler and repeated pipeline stages remain unchanged.
+Production remains at source `9a7c2c4`. The Linux service retains PID 782149 and zero automatic restarts after these checks.
+These measurements do not establish a saturation limit or tail latency.
+They do not establish native Mac execution or deployment acceptance.

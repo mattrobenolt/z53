@@ -65,6 +65,9 @@ Section 6 contains both reference configs as ZON.
 11. Every long-lived structure is bounded and pre-sized. Nothing grows
     without a configured bound.
 
+Reusable wire workspaces retain their backing storage between requests.
+Validity metadata prevents reads of stale scratch entries. Append-only work lists reset their active lengths without a backing-buffer clear.
+
 ### 1.1 Linux client runtime bounds
 
 The Linux event thread owns these fixed resources:
