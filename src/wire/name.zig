@@ -1,4 +1,5 @@
 const std = @import("std");
+pub const ScratchSet = @import("bit_set.zig").ScratchSet;
 
 pub const Error = error{
     Truncated,
@@ -10,11 +11,12 @@ pub const Error = error{
 };
 pub const Compression = enum { allowed, forbidden };
 pub const Boundaries = struct {
-    labels: std.StaticBitSet(16384),
-    opaque_bytes: std.StaticBitSet(65536),
+    labels: ScratchSet(16384),
+    opaque_bytes: ScratchSet(65536),
 
     pub fn init(self: *Boundaries) void {
-        self.* = .{ .labels = .initEmpty(), .opaque_bytes = .initEmpty() };
+        self.labels.init();
+        self.opaque_bytes.init();
     }
 
     pub fn isSet(self: *const Boundaries, index: usize) bool {

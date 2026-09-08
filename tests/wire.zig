@@ -6,4 +6,5 @@ test {
     _ = @import("wire/rewrite.zig");
     _ = @import("wire/limits.zig");
     _ = @import("wire/extra.zig");
+    _ = @import("wire/reuse.zig");
 }

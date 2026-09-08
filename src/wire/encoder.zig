@@ -9,6 +9,7 @@ pub const Encoder = struct {
     cursor: usize,
     header: wire.Header,
     dictionary: [16384]u16,
+    occupied: names.ScratchSet(16384),
     boundaries: names.Boundaries,
     section: wire.Section,
 
@@ -18,7 +19,7 @@ pub const Encoder = struct {
         self.cursor = 12;
         self.header = header.*;
         self.header.counts = @splat(0);
-        self.dictionary = @splat(0);
+        self.occupied.init();
         self.boundaries.init();
         self.section = .question;
     }
@@ -75,8 +76,8 @@ pub const Encoder = struct {
         const hash = std.hash.Wyhash.hash(0, suffix);
         for (0..self.dictionary.len) |probe| {
             const slot = (hash +% probe) % self.dictionary.len;
+            if (!self.occupied.isSet(slot)) return null;
             const offset = self.dictionary[slot];
-            if (offset == 0) return null;
             var expanded: wire.Name = undefined;
             _ = names.decode(
                 &expanded,
@@ -95,8 +96,9 @@ pub const Encoder = struct {
         const hash = std.hash.Wyhash.hash(0, suffix);
         for (0..self.dictionary.len) |probe| {
             const slot = (hash +% probe) % self.dictionary.len;
-            if (self.dictionary[slot] != 0) continue;
+            if (self.occupied.isSet(slot)) continue;
             self.dictionary[slot] = offset;
+            self.occupied.set(slot);
             return;
         }
         // Saturation reduces compression only; offsets never alias new data.
