@@ -285,6 +285,94 @@ test "health full sessions defer overdue timers and retain fair cursor" {
     try testing.expectEqual(1, forward.health[1].failures);
 }
 
+// SPEC §§1.3, 3.6: supported, health-enabled endpoints retain stable sparse identifiers.
+test "health configured candidates exclude disabled zones and preserve sparse fair order" {
+    var zones = [_]config.Zone{
+        .{ .suffix = ".", .max_fails = 0, .upstreams = &.{.{ .address = "127.0.0.1:10001" }} },
+        .{ .suffix = "one.", .upstreams = &.{
+            .{ .address = "127.0.0.1:10001" },
+            .{ .address = "unsupported.example:53" },
+            .{ .address = "127.0.0.1:10001", .force_tcp = true },
+        } },
+        .{ .suffix = "two.", .upstreams = &.{.{ .address = "127.0.0.1:10001" }} },
+    };
+    const settings: config.Config = .{ .zones = &zones };
+    const forward = try testing.allocator.create(forwarding.Forward);
+    defer testing.allocator.destroy(forward);
+    try forward.init(testing.io, &settings);
+    defer forward.deinit();
+    try testing.expectEqualSlices(u16, &.{ 16, 18, 32 }, forward.probe_endpoints.constSlice());
+    for (forward.probe_endpoints.constSlice()) |endpoint| forward.health[endpoint].failures = 2;
+    try testing.expectEqual(@as(?u64, 0), forward.probeDeadline());
+    const first = forward.probe(0).?;
+    const second = forward.probe(0).?;
+    try testing.expectEqual(@as(u16, 16), forward.transactions[first].purpose.probe);
+    try testing.expectEqual(@as(u16, 18), forward.transactions[second].purpose.probe);
+    try testing.expectEqual(null, forward.probe(0));
+    try testing.expectEqual(null, forward.probeDeadline());
+    finishLocalProbe(forward, first);
+    const third = forward.probe(500_000_000).?;
+    try testing.expectEqual(@as(u16, 32), forward.transactions[third].purpose.probe);
+    finishLocalProbe(forward, second);
+    const fourth = forward.probe(500_000_000).?;
+    try testing.expectEqual(@as(u16, 16), forward.transactions[fourth].purpose.probe);
+    finishLocalProbe(forward, third);
+    finishLocalProbe(forward, fourth);
+}
+
+fn finishLocalProbe(forward: *forwarding.Forward, index: u16) void {
+    forward.transactions[index].completion = .local_failure;
+    forward.transactions[index].state = .deliver;
+    forward.finishProbe(index);
+}
+
+// SPEC §§3.6, 5.1: empty configurations and disabled health have no probe candidates.
+test "health empty candidate lists do not wrap or retain an earlier configuration" {
+    var fixture: Fixture = undefined;
+    try fixture.init(1);
+    defer fixture.deinit();
+    const forward = fixture.forward;
+    try testing.expectEqual(3, forward.probe_endpoints.len);
+    forward.deinit();
+    for (&fixture.zones) |*zone| zone.max_fails = 0;
+    try forward.init(testing.io, &fixture.settings);
+    try testing.expectEqual(0, forward.probe_endpoints.len);
+    try testing.expectEqual(null, forward.probe(std.math.maxInt(u64)));
+    try testing.expectEqual(null, forward.probeDeadline());
+    forward.deinit();
+    const empty: config.Config = .{ .zones = &.{} };
+    try forward.init(testing.io, &empty);
+    try testing.expectEqual(0, forward.probe_endpoints.len);
+    try testing.expectEqual(null, forward.probe(std.math.maxInt(u64)));
+    try testing.expectEqual(null, forward.probeDeadline());
+}
+
+// SPEC §§1.3, 5.1: every configured slot fits, including the final capacity-derived length.
+test "health candidate list admits the complete endpoint capacity" {
+    const forward = try testing.allocator.create(forwarding.Forward);
+    defer testing.allocator.destroy(forward);
+    const upstreams: [config.upstreams_max]config.Upstream = @splat(.{
+        .address = "127.0.0.1:10001",
+    });
+    var suffixes: [config.zones_max][16]u8 = undefined;
+    var zones: [config.zones_max]config.Zone = undefined;
+    for (&zones, 0..) |*zone, index| {
+        zone.* = .{
+            .suffix = try std.fmt.bufPrint(&suffixes[index], "zone{d}.", .{index}),
+            .upstreams = &upstreams,
+        };
+    }
+    const settings: config.Config = .{ .zones = &zones };
+    try forward.init(testing.io, &settings);
+    defer forward.deinit();
+    try testing.expectEqual(forwarding.endpoints_max, forward.probe_endpoints.len);
+    for (forward.probe_endpoints.constSlice(), 0..) |endpoint, index| {
+        try testing.expectEqual(index, endpoint);
+    }
+    try testing.expectEqual(null, forward.probe(0));
+    try testing.expectEqual(0, forward.probe_cursor);
+}
+
 // SPEC §3.6: backend allocation and buffer failures remain local, unlike certificate rejection.
 test "health TLS typed crypto and certificate classification" {
     const tls = forwarding.tls;

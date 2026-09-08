@@ -104,6 +104,7 @@ pub const Forward = struct {
     endpoints: [endpoints_max]std.Io.net.IpAddress,
     protocols: [endpoints_max]?Transport,
     health: [endpoints_max]Health,
+    probe_endpoints: wire.ArrayBuffer(u16, endpoints_max),
     probe_cursor: u16,
     probe_retry_ns: u64,
     transactions: [transactions_max]Transaction,
@@ -125,6 +126,7 @@ pub const Forward = struct {
         self.support = @splat(.unsupported);
         self.protocols = @splat(null);
         self.health = @splat(.{});
+        self.probe_endpoints.clear();
         self.probe_cursor = 0;
         self.probe_retry_ns = 0;
         for (&self.transactions) |*transaction| transaction.state = .free;
@@ -151,6 +153,10 @@ pub const Forward = struct {
                 self.protocols[position] = if (upstream.tls != null)
                     .tls
                 else if (upstream.force_tcp) .tcp else .udp;
+                if (zone.max_fails != 0) {
+                    // Immutable configuration bounds the list and excludes unused endpoint slots.
+                    self.probe_endpoints.appendAssumeCapacity(@intCast(position));
+                }
                 if (cursor == 0) self.support[index] = .supported;
             }
         }
@@ -270,8 +276,8 @@ pub const Forward = struct {
 
     fn probesActive(self: *const Forward) u16 {
         var count: u16 = 0;
-        for (&self.health) |*health| {
-            if (health.probe != null) count += 1;
+        for (self.probe_endpoints.constSlice()) |endpoint| {
+            if (self.health[endpoint].probe != null) count += 1;
         }
         std.debug.assert(count <= probes_max);
         return count;
@@ -280,15 +286,12 @@ pub const Forward = struct {
     pub fn probeDeadline(self: *const Forward) ?u64 {
         if (self.probesActive() == probes_max) return null;
         var nearest: ?u64 = null;
-        for (self.config.zones, 0..) |*zone, zone_index| {
-            for (zone.upstreams, 0..) |_, cursor| {
-                const endpoint: u16 = @intCast(zone_index * config.upstreams_max + cursor);
-                if (!self.down(endpoint)) continue;
-                const health = &self.health[endpoint];
-                if (health.probe != null) continue;
-                const due_ns = @max(health.due_ns, self.probe_retry_ns);
-                nearest = @min(nearest orelse due_ns, due_ns);
-            }
+        for (self.probe_endpoints.constSlice()) |endpoint| {
+            if (!self.down(endpoint)) continue;
+            const health = &self.health[endpoint];
+            if (health.probe != null) continue;
+            const due_ns = @max(health.due_ns, self.probe_retry_ns);
+            nearest = @min(nearest orelse due_ns, due_ns);
         }
         return nearest;
     }
@@ -297,10 +300,10 @@ pub const Forward = struct {
     pub fn probe(self: *Forward, now_ns: u64) ?u16 {
         if (self.probesActive() == probes_max) return null;
         if (now_ns < self.probe_retry_ns) return null;
-        for (0..endpoints_max) |_| {
-            const endpoint = self.probe_cursor;
-            self.probe_cursor = (endpoint + 1) % endpoints_max;
-            if (self.protocols[endpoint] == null) continue;
+        for (0..self.probe_endpoints.len) |_| {
+            const endpoint = self.probe_endpoints.constSlice()[self.probe_cursor];
+            self.probe_cursor += 1;
+            if (self.probe_cursor == self.probe_endpoints.len) self.probe_cursor = 0;
             if (!self.down(endpoint)) continue;
             const health = &self.health[endpoint];
             if (health.probe != null) continue;
