@@ -26,6 +26,12 @@ pub const Sink = struct {
     }
 };
 
+/// The event thread owns this workspace. Each synchronous sink call consumes its borrowed bytes.
+pub const Logger = struct {
+    sink: Sink = .{},
+    buffer: [line_bytes_max]u8 = undefined,
+};
+
 pub fn peer(
     storage: *const system.sockaddr.storage,
     length: system.socklen_t,
@@ -54,7 +60,7 @@ pub fn peer(
 }
 
 pub fn completed(
-    sink: *const Sink,
+    logger: *Logger,
     io: std.Io,
     packet: *wire.Packet,
     query: *const Query,
@@ -63,12 +69,11 @@ pub fn completed(
     upstream: ?*const Upstream,
     finished_ns: u64,
 ) void {
-    var buffer: [line_bytes_max]u8 = undefined;
-    const bytes = format(&buffer, packet, query, input, answer, upstream, .{
+    const bytes = format(&logger.buffer, packet, query, input, answer, upstream, .{
         .unix_ms = std.Io.Timestamp.now(io, .real).toMilliseconds(),
         .finished_ns = finished_ns,
     }) catch return;
-    sink.write(io, sink.context, bytes) catch return;
+    logger.sink.write(io, logger.sink.context, bytes) catch return;
 }
 
 pub const Time = struct { unix_ms: i64, finished_ns: u64 };
@@ -162,32 +167,30 @@ fn upstreamFields(writer: *std.Io.Writer, upstream: *const Upstream) std.Io.Writ
     }
 }
 
-pub fn failure(sink: *const Sink, io: std.Io, upstream: *const Upstream, reason: []const u8) void {
-    var buffer: [line_bytes_max]u8 = undefined;
-    var writer: std.Io.Writer = .fixed(&buffer);
+pub fn failure(logger: *Logger, io: std.Io, upstream: *const Upstream, reason: []const u8) void {
+    var writer: std.Io.Writer = .fixed(&logger.buffer);
     timestamp(&writer, std.Io.Timestamp.now(io, .real).toMilliseconds()) catch return;
     writer.writeAll(" event=upstream_failure") catch return;
     upstreamFields(&writer, upstream) catch return;
     writer.writeAll(" reason=\"") catch return;
     escaped(&writer, reason[0..@min(reason.len, 128)], .text) catch return;
     writer.writeAll("\"\n") catch return;
-    sink.write(io, sink.context, writer.buffered()) catch return;
+    logger.sink.write(io, logger.sink.context, writer.buffered()) catch return;
 }
 
 pub fn health(
-    sink: *const Sink,
+    logger: *Logger,
     io: std.Io,
     upstream: *const Upstream,
     state: enum { down, restored },
     failures: u32,
 ) void {
-    var buffer: [line_bytes_max]u8 = undefined;
-    var writer: std.Io.Writer = .fixed(&buffer);
+    var writer: std.Io.Writer = .fixed(&logger.buffer);
     timestamp(&writer, std.Io.Timestamp.now(io, .real).toMilliseconds()) catch return;
     writer.writeAll(" event=upstream_health") catch return;
     upstreamFields(&writer, upstream) catch return;
     writer.print(" state={s} failures={d}\n", .{ @tagName(state), failures }) catch return;
-    sink.write(io, sink.context, writer.buffered()) catch return;
+    logger.sink.write(io, logger.sink.context, writer.buffered()) catch return;
 }
 
 fn timestamp(writer: *std.Io.Writer, unix_ms: i64) std.Io.Writer.Error!void {

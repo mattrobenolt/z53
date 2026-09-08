@@ -339,7 +339,7 @@ test "forward native both clients reuse queued frames and allocation guard loggi
     defer harness.deinit();
     try harness.start();
     var logs: logging.Capture = .{};
-    harness.service.forward.logger = logs.sink();
+    harness.service.forward.logger.sink = logs.sink();
     const allocations = harness.allocator.alloc_index;
     harness.allocator.fail_index = allocations;
     const datagram = try harness.client(system.SOCK.DGRAM);
@@ -1988,8 +1988,8 @@ const LinuxPair = struct {
         fn delivered(self: *Fixture, rcode: u4) !void {
             const service = self.service;
             var logs: logging.Capture = .{};
-            service.forward.logger = logs.sink();
-            defer service.forward.logger = .{};
+            service.forward.logger.sink = logs.sink();
+            defer service.forward.logger.sink = .{};
             try service.deliverForwards();
             try testing.expectEqual(.free, service.forward.transactions[0].state);
             try testing.expectEqual(.response, service.clients[0].phase);
@@ -2024,7 +2024,7 @@ const LinuxPair = struct {
             service.forward.health[0] = .{ .failures = 1, .probe = 0 };
             service.forward.transactions[0].purpose = .{ .probe = 0 };
             var logs: logging.Capture = .{};
-            service.forward.logger = logs.sink();
+            service.forward.logger.sink = logs.sink();
             const token = service.proctor.ownership[fixture.slot].token(fixture.slot);
             const before = fixture.snapshot();
             try fixture.pair(order, try fixture.response(), negative(.CANCELED));
@@ -2063,7 +2063,7 @@ const LinuxPair = struct {
                 service.forward.health[0] = .{ .failures = 1, .probe = 0 };
                 service.forward.transactions[0].purpose = .{ .probe = 0 };
                 var logs: logging.Capture = .{};
-                service.forward.logger = logs.sink();
+                service.forward.logger.sink = logs.sink();
                 try fixture.pair(order, negative(failure), negative(.CANCELED));
                 try testing.expectEqual(1, service.forward.health[0].failures);
                 try testing.expectEqual(@as(?u16, 0), service.forward.health[0].probe);
@@ -2822,7 +2822,7 @@ test "forward UDP native answer with unused TLS fallback and cache hit logging" 
     harness.zones[0].cache = .{ .capacity = 1 };
     try harness.start();
     var logs: logging.Capture = .{};
-    harness.service.forward.logger = logs.sink();
+    harness.service.forward.logger.sink = logs.sink();
     try testing.expectEqual(.supported, harness.service.forward.support[0]);
     const client = try harness.client(system.SOCK.DGRAM);
     defer _ = system.close(client);
@@ -2966,7 +2966,7 @@ test "health forward UDP native timeout advances to TCP fallback logging" {
     try harness.start();
     var logs: logging.Capture = .{};
     errdefer std.debug.print("Health fixture log:\n{s}", .{logs.bytes()});
-    harness.service.forward.logger = logs.sink();
+    harness.service.forward.logger.sink = logs.sink();
     const client = try harness.client(system.SOCK.DGRAM);
     defer _ = system.close(client);
     var input: [512]u8 = undefined;
@@ -3214,7 +3214,7 @@ test "forward TLS native encrypted exchange reuse and key update logging" {
     harness.zones[0].cache = .{ .capacity = 2 };
     try harness.start();
     var logs: logging.Capture = .{};
-    harness.service.forward.logger = logs.sink();
+    harness.service.forward.logger.sink = logs.sink();
     try dotTrust(&harness);
     var peer: DotPeer = undefined;
     try peer.init();
@@ -3275,7 +3275,7 @@ test "health forward TLS native rejects wrong hostname and untrusted CA probes" 
         harness.zones[0].health_check_interval_s = 0.01;
         try harness.start();
         var logs: logging.Capture = .{};
-        harness.service.forward.logger = logs.sink();
+        harness.service.forward.logger.sink = logs.sink();
         if (failure == .hostname) try dotTrust(&harness);
         var peer: DotPeer = undefined;
         try peer.init();
@@ -3318,7 +3318,7 @@ test "forward TLS native authentication failure advances configured sequence log
     harness.zones[0].upstreams = &harness.upstreams;
     try harness.start();
     var logs: logging.Capture = .{};
-    harness.service.forward.logger = logs.sink();
+    harness.service.forward.logger.sink = logs.sink();
     try dotTrust(&harness);
     var peer: DotPeer = undefined;
     try peer.init();
@@ -3398,7 +3398,7 @@ test "logging native local fragmented and coalesced TCP and sink failure" {
     defer harness.deinit();
     try harness.start();
     var logs: logging.Capture = .{};
-    harness.service.forward.logger = logs.sink();
+    harness.service.forward.logger.sink = logs.sink();
     const client = try harness.client(system.SOCK.STREAM);
     defer _ = system.close(client);
     var input: [512]u8 = undefined;
@@ -3441,7 +3441,7 @@ test "logging native concurrent TCP accepts retain distinct peers" {
     defer harness.deinit();
     try harness.start();
     var logs: logging.Capture = .{};
-    harness.service.forward.logger = logs.sink();
+    harness.service.forward.logger.sink = logs.sink();
     const first = try harness.client(system.SOCK.STREAM);
     defer _ = system.close(first);
     const other = try harness.client(system.SOCK.STREAM);
@@ -3470,7 +3470,7 @@ test "cache stress native full cache mixed concurrent clients and upstream reuse
     harness.zones[0].read_timeout_s = 0.2;
     try harness.start();
     var logs: logging.Capture = .{};
-    harness.service.forward.logger = logs.sink();
+    harness.service.forward.logger.sink = logs.sink();
     var clients: [8]?system.fd_t = @splat(null);
     defer for (clients) |client| {
         if (client) |descriptor| _ = system.close(descriptor);
@@ -3561,7 +3561,7 @@ test "health native UDP exclusion recovery error rcode and no probe completion l
     harness.zones[0].health_check_interval_s = 0.1;
     try harness.start();
     var logs: logging.Capture = .{};
-    harness.service.forward.logger = logs.sink();
+    harness.service.forward.logger.sink = logs.sink();
     errdefer std.debug.print("Health fixture log:\n{s}", .{logs.bytes()});
     const allocations = harness.allocator.alloc_index;
     harness.allocator.fail_index = allocations;
@@ -3653,7 +3653,7 @@ test "health native all down stale and forced TCP probe recovery reuse" {
     harness.zones[0].health_check_interval_s = 0.1;
     try harness.start();
     var logs: logging.Capture = .{};
-    harness.service.forward.logger = logs.sink();
+    harness.service.forward.logger.sink = logs.sink();
     const client = try harness.client(system.SOCK.DGRAM);
     defer _ = system.close(client);
     var input: [512]u8 = undefined;
@@ -3713,7 +3713,7 @@ test "health native pending UDP probe stop retains buffers and counters" {
     try harness.start();
     var logs: logging.Capture = .{};
     errdefer std.debug.print("Health fixture log:\n{s}", .{logs.bytes()});
-    harness.service.forward.logger = logs.sink();
+    harness.service.forward.logger.sink = logs.sink();
     const client = try harness.client(system.SOCK.DGRAM);
     defer _ = system.close(client);
     var input: [512]u8 = undefined;
@@ -3769,7 +3769,7 @@ test "health native verified DoT probe and authenticated connection reuse" {
     try peer.init();
     defer peer.deinit();
     var logs: logging.Capture = .{};
-    harness.service.forward.logger = logs.sink();
+    harness.service.forward.logger.sink = logs.sink();
     const client = try harness.client(system.SOCK.DGRAM);
     defer _ = system.close(client);
     var input: [512]u8 = undefined;

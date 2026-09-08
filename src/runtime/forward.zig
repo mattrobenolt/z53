@@ -10,6 +10,7 @@ pub const tls = @import("tls.zig");
 pub const transactions_max = 32;
 pub const sessions_max = 32;
 pub const endpoints_max = config.zones_max * config.upstreams_max;
+const ProbeEndpoints = wire.ArrayBuffer(u16, endpoints_max);
 pub const storage_bytes_max = 12 * 1024 * 1024;
 pub const Transport = enum { udp, tcp, tls };
 pub const Destination = struct {
@@ -104,15 +105,15 @@ pub const Forward = struct {
     endpoints: [endpoints_max]std.Io.net.IpAddress,
     protocols: [endpoints_max]?Transport,
     health: [endpoints_max]Health,
-    probe_endpoints: wire.ArrayBuffer(u16, endpoints_max),
-    probe_cursor: u16,
+    probe_endpoints: ProbeEndpoints,
+    probe_cursor: ProbeEndpoints.Index,
     probe_retry_ns: u64,
     transactions: [transactions_max]Transaction,
     sessions: [sessions_max]Session,
     random: std.Random.DefaultCsprng,
     trust: tls.Trust,
     io: std.Io,
-    logger: log.Sink,
+    logger: log.Logger,
 
     pub fn init(
         self: *Forward,
@@ -121,7 +122,7 @@ pub const Forward = struct {
     ) (std.Io.RandomSecureError || tls.TrustError)!void {
         self.config = settings;
         self.io = io;
-        self.logger = .{};
+        self.logger.sink = .{};
         self.trust.bundle = .empty;
         self.support = @splat(.unsupported);
         self.protocols = @splat(null);
@@ -534,7 +535,7 @@ pub const Forward = struct {
         };
     }
 
-    pub fn failed(self: *const Forward, index: u16, reason: []const u8) void {
+    pub fn failed(self: *Forward, index: u16, reason: []const u8) void {
         const selected = self.selectedUpstream(index);
         log.failure(&self.logger, self.io, &selected, reason);
     }
@@ -597,7 +598,9 @@ pub fn duration(seconds: f64) u64 {
 }
 
 comptime {
-    std.debug.assert(@sizeOf(std.Io.net.IpAddress) + @sizeOf(?Transport) + @sizeOf(Health) <= 64);
+    const endpoint_bytes = @sizeOf(std.Io.net.IpAddress) + @sizeOf(?Transport) + @sizeOf(Health);
+    const candidates_bytes = @sizeOf(ProbeEndpoints);
+    std.debug.assert(endpoint_bytes * endpoints_max + candidates_bytes <= 64 * endpoints_max);
     std.debug.assert(@sizeOf(Forward) <= storage_bytes_max);
 }
 

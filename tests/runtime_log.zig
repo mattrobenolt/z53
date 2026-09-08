@@ -139,6 +139,46 @@ test "logging formatter hostile maximum name and local source has no upstream" {
     try testing.expect(std.mem.indexOfScalar(u8, forwarded, 0x1b) == null);
 }
 
+// SPEC §§1.10, 4: sequential log events retain storage but expose only the current line.
+test "logging retained workspace preserves dirty tail across event kinds and sink failure" {
+    const packet = try testing.allocator.create(wire.Packet);
+    defer testing.allocator.destroy(packet);
+    var capture: Capture = .{};
+    var logger: log.Logger = .{ .sink = capture.sink() };
+    @memset(&logger.buffer, 0xa5);
+    var name: wire.Name = undefined;
+    try name.fromText("retained.log.example.");
+    var input: [512]u8 = undefined;
+    const query = try request(&input, &name, 1);
+    const observation: log.Query = .{ .client = null, .protocol = .udp, .started_ns = 0 };
+    const answer: runtime.pipeline.resolver.Answer = .{ .bytes = query, .source = .cache };
+    log.completed(&logger, testing.io, packet, &observation, query, &answer, null, 0);
+    try testing.expectEqual(1, capture.attempts);
+    try capture.contains("qname=\"retained.log.example.\"");
+    var extent = capture.length;
+    for (logger.buffer[extent..]) |byte| try testing.expectEqual(@as(u8, 0xa5), byte);
+    const upstream: log.Upstream = .{
+        .address = try std.Io.net.IpAddress.parse("127.0.0.1", 53),
+        .protocol = .udp,
+    };
+    capture.length = 0;
+    log.failure(&logger, testing.io, &upstream, "test");
+    try testing.expectEqual(1, capture.count("\n"));
+    try testing.expectEqual(0, capture.count("retained.log.example"));
+    extent = @max(extent, capture.length);
+    for (logger.buffer[extent..]) |byte| try testing.expectEqual(@as(u8, 0xa5), byte);
+    capture.length = 0;
+    capture.mode = .fail;
+    log.health(&logger, testing.io, &upstream, .down, 2);
+    try testing.expectEqual(0, capture.length);
+    capture.mode = .capture;
+    log.completed(&logger, testing.io, packet, &observation, query, &answer, null, 0);
+    try testing.expectEqual(4, capture.attempts);
+    try testing.expectEqual(1, capture.count("\n"));
+    try testing.expectEqual(0, capture.count("event=upstream_health"));
+    try capture.contains("src=cache");
+}
+
 // SPEC §§3.9, 4: malformed packets use placeholders and sink failure cannot escape publication.
 test "logging malformed query reply and failed capture sink" {
     const packet = try testing.allocator.create(wire.Packet);
@@ -170,8 +210,8 @@ test "logging malformed query reply and failed capture sink" {
     );
     try testing.expect(std.mem.indexOf(u8, broken, "rcode=unknown") != null);
     var capture: Capture = .{ .mode = .fail };
-    const sink = capture.sink();
-    log.completed(&sink, testing.io, packet, &observation, &malformed, &result, null, 0);
+    var logger: log.Logger = .{ .sink = capture.sink() };
+    log.completed(&logger, testing.io, packet, &observation, &malformed, &result, null, 0);
     try testing.expectEqual(1, capture.attempts);
     try testing.expectEqual(0, capture.length);
     try testing.expectEqual(1, (try wire.Header.decode(&reply)).bits & 15);

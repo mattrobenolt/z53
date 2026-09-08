@@ -32,7 +32,7 @@ const Fixture = struct {
         errdefer self.forward.deinit();
         try self.workspace.init(testing.allocator, testing.io, &self.settings);
         self.logs = .{};
-        self.forward.logger = self.logs.sink();
+        self.forward.logger.sink = self.logs.sink();
     }
 
     fn deinit(self: *Fixture) void {
