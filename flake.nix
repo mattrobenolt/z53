@@ -70,7 +70,13 @@
                 actionlint
                 llvmPackages.bintools
               ]
-              ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [ pkgs.perf ]
+              ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [
+                pkgs.perf
+                # #1: loopback comparisons use the same generator and CPU affinity.
+                pkgs.dnsperf
+                pkgs.coredns
+                pkgs.util-linux
+              ]
               ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isDarwin [ pkgs.logrotate ];
           };
         };

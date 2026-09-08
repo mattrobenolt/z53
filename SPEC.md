@@ -879,7 +879,10 @@ Benchmarks cover the wire codec, the suffix matcher, and the real resolver/cache
 Cache baselines distinguish index scans, response delivery, and insertion with eviction.
 Captures record capacity, occupancy, hit position, build mode, and timed boundaries.
 Directly seeded fixtures must identify their setup policy. They do not measure production cache population.
-zig-benchmark is the harness. Commit a capture for any performance claim.
+zig-benchmark supplies the in-process harness. Commit a capture for any performance claim.
+End-to-end comparisons use dnsperf against owned loopback resolvers and an owned upstream.
+These comparisons record build flags, CPU affinity, cache occupancy, query concurrency, and log destinations.
+The production resolver and public upstreams receive no benchmark traffic.
 CI runs a short benchmark smoke run. In-process timings do not establish end-to-end throughput or production soak acceptance.
 
 ### 9.5 Nix and CI

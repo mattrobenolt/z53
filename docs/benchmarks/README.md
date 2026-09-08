@@ -5,7 +5,8 @@ The [stdlib SoA comparison](#stdlib-soa-comparison-1) and [packet pool compariso
 [Raw trials, counters, profile, and disassembly](2026-09-06-cache-baseline.txt) use production source `822e3aa5424b8aaa034af7688104ba51697d07d2`.
 The host is launchpad: aarch64 Neoverse-V3, Linux 7.2.3, Zig 0.16.0, and ReleaseSafe.
 The flake supplies the tools. Dependency pins and production algorithms remain unchanged.
-Production packaging does not yet specify a release profile. Debug results are not comparison baselines.
+This historical baseline predates production packaging. Current packages use ReleaseSafe and the baseline CPU target.
+Debug results are not comparison baselines.
 
 ## Run
 
