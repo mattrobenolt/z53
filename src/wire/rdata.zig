@@ -1,23 +1,23 @@
 const wire = @import("../wire.zig");
+const ArrayBuffer = @import("../array_buffer.zig").ArrayBuffer;
 const names = wire.names;
 
 pub const Range = struct { start: u16, end: u16 };
 pub const NamePart = struct { offset: u16, compression: names.Compression };
 pub const Part = union(enum) { bytes: Range, name: NamePart };
 pub const Parts = struct {
-    items: [7]Part,
-    count: u8,
+    items: ArrayBuffer(Part, 7),
 
     fn add(self: *Parts, part: Part) void {
-        self.items[self.count] = part;
-        self.count += 1;
+        // The largest supported RDATA layout has seven parts, independent of wire lengths.
+        self.items.appendAssumeCapacity(part);
     }
 };
 
 /// RFC 3597 §4 lists all historical compression-capable layouts.
 /// Legacy non-1035 names decode compression but never emit it.
 pub fn parse(target: *Parts, packet: *wire.Packet, record: *const wire.Record) wire.Error!void {
-    target.count = 0;
+    target.items.clear();
     var cursor: usize = record.data_start;
     const end: usize = record.data_end;
     switch (record.kind) {

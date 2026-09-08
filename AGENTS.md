@@ -89,6 +89,15 @@ The rules that carry the most weight here:
 `zig fmt` and ziglint run in the devshell and in CI. Both must pass before
  every commit. ziglint is the minimum bar, not the ceiling.
 
+### Reusable buffers
+
+- Use `ArrayBuffer(T, N)` from `src/array_buffer.zig` for fixed append-only collections.
+- Derive capacity and index types from the buffer type.
+- Use `clear()` to reset retained storage. Do not assign `.empty` on the reuse path.
+- Use checked append methods for input-derived lengths.
+- Use `appendAssumeCapacity` only after a capacity proof.
+- Keep stream cursors, sparse maps, and kernel-owned buffers in types that express their different lifetimes.
+
 ### Booleans are a code smell
 
 Every `bool` must survive scrutiny. Before writing one, check in order:

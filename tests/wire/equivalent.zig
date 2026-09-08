@@ -20,9 +20,9 @@ pub fn equivalent(
     var target_parts: wire.rdata.Parts = undefined;
     try wire.rdata.parse(&source_parts, source, left);
     try wire.rdata.parse(&target_parts, target, right);
-    try std.testing.expectEqual(source_parts.count, target_parts.count);
-    const first_parts = source_parts.items[0..source_parts.count];
-    const second_parts = target_parts.items[0..target_parts.count];
+    try std.testing.expectEqual(source_parts.items.len, target_parts.items.len);
+    const first_parts = source_parts.items.constSlice();
+    const second_parts = target_parts.items.constSlice();
     for (first_parts, second_parts) |first, second| {
         switch (first) {
             .bytes => |range| try std.testing.expectEqualSlices(

@@ -8,4 +8,5 @@ test {
     _ = @import("wire/extra.zig");
     _ = @import("wire/reuse.zig");
     _ = @import("wire/compression_reuse.zig");
+    _ = @import("wire/array_buffer.zig");
 }

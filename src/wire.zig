@@ -1,5 +1,6 @@
 //! Bounded DNS views. Input storage must remain immutable while a Packet lives.
 const std = @import("std");
+pub const ArrayBuffer = @import("array_buffer.zig").ArrayBuffer;
 pub const names = @import("wire/name.zig");
 pub const rdata = @import("wire/rdata.zig");
 pub const Encoder = @import("wire/encoder.zig").Encoder;

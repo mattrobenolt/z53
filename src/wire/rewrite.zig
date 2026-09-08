@@ -1,4 +1,5 @@
 const wire = @import("../wire.zig");
+const ArrayBuffer = @import("../array_buffer.zig").ArrayBuffer;
 
 pub const Edns = struct {
     payload_bytes: u16,
@@ -22,9 +23,8 @@ pub const Settings = struct {
 /// One synchronous workspace, owned by the event thread. No query heap use.
 pub const Workspace = struct {
     encoder: wire.Encoder,
-    order: [wire.records_max]u16,
+    order: ArrayBuffer(u16, wire.records_max),
     seen: wire.names.ScratchSet(wire.records_max),
-    count: u16,
 
     pub fn rewrite(
         self: *Workspace,
@@ -51,8 +51,8 @@ pub const Workspace = struct {
         self.start(packet, output[0 .. capacity - reserve], settings) catch |err| {
             return if (err == error.NoSpace) overflow else err;
         };
-        var cutoff: u16 = self.count;
-        for (self.order[0..self.count], 0..) |index, position| {
+        var cutoff: u16 = self.order.len;
+        for (self.order.constSlice(), 0..) |index, position| {
             self.encoder.record(packet, &packet.records[index]) catch |err| {
                 if (err != error.NoSpace) return err;
                 switch (settings.limit) {
@@ -62,11 +62,11 @@ pub const Workspace = struct {
                 break;
             };
         }
-        if (cutoff < self.count) {
+        if (cutoff < self.order.len) {
             cutoff = try self.wholeSets(packet, cutoff);
             try self.start(packet, output[0 .. capacity - reserve], settings);
             self.encoder.header.bits |= @intFromEnum(wire.Flag.truncated);
-            for (self.order[0..cutoff]) |index| {
+            for (self.order.constSlice()[0..cutoff]) |index| {
                 try self.encoder.record(packet, &packet.records[index]);
             }
         }
@@ -84,7 +84,7 @@ pub const Workspace = struct {
             if (settings.order.len != packet.record_count) return error.InvalidOrder;
         }
         self.seen.init();
-        self.count = 0;
+        self.order.clear();
         var previous: wire.Section = .question;
         for (0..packet.record_count) |position| {
             const index: u16 = if (settings.order.len == 0)
@@ -98,8 +98,8 @@ pub const Workspace = struct {
             if (@intFromEnum(record.section) < @intFromEnum(previous)) return error.InvalidOrder;
             previous = record.section;
             if (record.kind == 41) continue;
-            self.order[self.count] = index;
-            self.count += 1;
+            // Packet validation bounds the complete list, including omitted OPT records.
+            self.order.appendAssumeCapacity(index);
         }
     }
 
@@ -130,9 +130,9 @@ pub const Workspace = struct {
         var left: usize = initial;
         while (left > 0) {
             left -= 1;
-            for (cutoff..self.count) |right| {
-                const source = &packet.records[self.order[left]];
-                const target = &packet.records[self.order[right]];
+            for (cutoff..self.order.len) |right| {
+                const source = &packet.records[self.order.constSlice()[left]];
+                const target = &packet.records[self.order.constSlice()[right]];
                 if (try sameSet(packet, source, target)) {
                     cutoff = @intCast(left);
                     break;

@@ -156,9 +156,9 @@ fn equivalent(
     var target_parts: wire.rdata.Parts = undefined;
     try wire.rdata.parse(&source_parts, source, left);
     try wire.rdata.parse(&target_parts, target, right);
-    try testing.expectEqual(source_parts.count, target_parts.count);
-    const source_items = source_parts.items[0..source_parts.count];
-    const target_items = target_parts.items[0..target_parts.count];
+    try testing.expectEqual(source_parts.items.len, target_parts.items.len);
+    const source_items = source_parts.items.constSlice();
+    const target_items = target_parts.items.constSlice();
     for (source_items, target_items) |a, b| {
         switch (a) {
             .bytes => |range| try testing.expectEqualSlices(

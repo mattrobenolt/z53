@@ -148,7 +148,7 @@ pub const Encoder = struct {
         const length_offset = try self.beginRecord(&owner, value);
         var parts: wire.rdata.Parts = undefined;
         try wire.rdata.parse(&parts, packet, value);
-        for (parts.items[0..parts.count]) |part| {
+        for (parts.items.constSlice()) |part| {
             switch (part) {
                 .bytes => |range| try self.bytes(packet.bytes[range.start..range.end]),
                 .name => |reference| {
