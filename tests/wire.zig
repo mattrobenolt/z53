@@ -7,4 +7,5 @@ test {
     _ = @import("wire/limits.zig");
     _ = @import("wire/extra.zig");
     _ = @import("wire/reuse.zig");
+    _ = @import("wire/compression_reuse.zig");
 }
