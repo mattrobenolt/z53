@@ -95,6 +95,35 @@ pub fn decode(
     boundaries: *Boundaries,
     compression: Compression,
 ) Error!usize {
+    return decodeWith(.record, target, packet, start, end, boundaries, compression);
+}
+
+/// Parsed names need no new provenance and no private copy of the boundary maps.
+pub fn read(
+    target: *Name,
+    packet: []const u8,
+    start: usize,
+    end: usize,
+    boundaries: *const Boundaries,
+    compression: Compression,
+) Error!usize {
+    return decodeWith(.inspect, target, packet, start, end, boundaries, compression);
+}
+
+const Access = enum { record, inspect };
+fn BoundaryPointer(comptime access: Access) type {
+    return if (access == .record) *Boundaries else *const Boundaries;
+}
+
+fn decodeWith(
+    comptime access: Access,
+    target: *Name,
+    packet: []const u8,
+    start: usize,
+    end: usize,
+    boundaries: BoundaryPointer(access),
+    compression: Compression,
+) Error!usize {
     target.length = 0;
     if (end > packet.len) return error.Truncated;
     if (packet.len > 65535) return error.InvalidName;
@@ -111,12 +140,12 @@ pub fn decode(
             const pointer = (@as(usize, length & 0x3f) << 8) | packet[cursor + 1];
             if (pointer >= cursor) return error.InvalidPointer;
             if (!boundaries.isSet(pointer)) {
-                try decodeOpaque(target, packet, pointer, cursor, boundaries);
-                mark(boundaries, cursor);
+                try decodeOpaque(access, target, packet, pointer, cursor, boundaries);
+                mark(access, boundaries, cursor);
                 return consumed orelse cursor + 2;
             }
             if (consumed == null) consumed = cursor + 2;
-            mark(boundaries, cursor);
+            mark(access, boundaries, cursor);
             ceiling = cursor;
             cursor = pointer;
             continue;
@@ -124,7 +153,7 @@ pub fn decode(
         if (length > 63) return error.LabelTooLong;
         const next = cursor + 1 + @as(usize, length);
         if (next > ceiling) return error.Truncated;
-        mark(boundaries, cursor);
+        mark(access, boundaries, cursor);
         try target.append(packet[cursor..next]);
         cursor = next;
         if (length == 0) return consumed orelse cursor;
@@ -132,16 +161,19 @@ pub fn decode(
     return error.InvalidPointer;
 }
 
-fn mark(boundaries: *Boundaries, offset: usize) void {
-    if (offset < 16384) boundaries.set(offset);
+fn mark(comptime access: Access, boundaries: BoundaryPointer(access), offset: usize) void {
+    if (access == .record) {
+        if (offset < 16384) boundaries.set(offset);
+    }
 }
 
 fn decodeOpaque(
+    comptime access: Access,
     target: *Name,
     packet: []const u8,
     start: usize,
     ceiling: usize,
-    boundaries: *Boundaries,
+    boundaries: BoundaryPointer(access),
 ) Error!void {
     var suffix: Name = .{ .length = 0 };
     var cursor = start;
@@ -160,10 +192,12 @@ fn decodeOpaque(
         if (length != 0) continue;
         try target.append(suffix.wire());
         // Publish boundaries only after the entire fallback and prefixed name pass.
-        var offset = start;
-        while (offset < cursor) {
-            mark(boundaries, offset);
-            offset += @as(usize, packet[offset]) + 1;
+        if (access == .record) {
+            var offset = start;
+            while (offset < cursor) {
+                mark(access, boundaries, offset);
+                offset += @as(usize, packet[offset]) + 1;
+            }
         }
         return;
     }

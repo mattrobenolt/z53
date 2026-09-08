@@ -161,8 +161,7 @@ pub const Packet = struct {
     }
 
     pub fn name(self: *const Packet, target: *Name, offset: u16) Error!void {
-        var boundaries = self.boundaries;
-        _ = try names.decode(target, self.bytes, offset, self.bytes.len, &boundaries, .allowed);
+        _ = try names.read(target, self.bytes, offset, self.bytes.len, &self.boundaries, .allowed);
     }
 
     fn readOpt(self: *Packet, record: *const Record) Error!void {

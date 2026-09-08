@@ -66,3 +66,18 @@ test "encoder reset retains dirty offsets without retaining old names" {
         try std.testing.expectEqualSlices(u8, "\xc0\x0c", output[second..][0..2]);
     }
 }
+
+// RFC 3597 §4: a name inspection does not publish new parser provenance.
+test "name inspection preserves opaque boundary state" {
+    var builder: fixture.Builder = undefined;
+    builder.init();
+    builder.record("\x00", 65400, .answer, "\x01x\x07example\x00");
+    var packet: wire.Packet = undefined;
+    try packet.parse(try builder.finish());
+    const offset = packet.records[0].data_start;
+    try std.testing.expect(!packet.boundaries.isSet(offset));
+    var name: wire.Name = undefined;
+    try packet.name(&name, offset);
+    try std.testing.expectEqualSlices(u8, "\x01x\x07example\x00", name.wire());
+    try std.testing.expect(!packet.boundaries.isSet(offset));
+}
