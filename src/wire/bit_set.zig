@@ -6,7 +6,7 @@ pub fn ScratchSet(comptime capacity: usize) type {
     const words = std.math.divCeil(usize, capacity, 64) catch unreachable;
     return struct {
         bits: Bits,
-        initialized: std.StaticBitSet(words),
+        initialized: std.bit_set.ArrayBitSet(u64, words),
         const Self = @This();
 
         pub fn init(self: *Self) void {
@@ -15,18 +15,24 @@ pub fn ScratchSet(comptime capacity: usize) type {
 
         pub fn isSet(self: *const Self, index: usize) bool {
             std.debug.assert(index < capacity);
-            if (!self.initialized.isSet(index / 64)) return false;
-            return self.bits.isSet(index);
+            if (!contains(&self.initialized.masks, index / 64)) return false;
+            return contains(&self.bits.masks, index);
         }
 
         pub fn set(self: *Self, index: usize) void {
             std.debug.assert(index < capacity);
             const word = index / 64;
-            if (!self.initialized.isSet(word)) {
+            if (!contains(&self.initialized.masks, word)) {
                 self.bits.masks[word] = 0;
                 self.initialized.set(word);
             }
             self.bits.set(index);
+        }
+
+        fn contains(masks: []const u64, index: usize) bool {
+            // ArrayBitSet.isSet takes its entire backing array by value.
+            const word: std.bit_set.IntegerBitSet(64) = .{ .mask = masks[index / 64] };
+            return word.isSet(index % 64);
         }
     };
 }
