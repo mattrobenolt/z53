@@ -275,3 +275,85 @@ The forward selection initially rejects its old teardown trace count: nine event
 The fixture now requires the exact new allocation and release pair after the same retirement barrier. Runtime teardown behavior remains unchanged.
 No full runtime or restart suite runs for this slice. Existing listeners remain untouched.
 Parent review owns retention and final acceptance. Production load, soak, and full SPEC acceptance remain separate work.
+
+## CoreDNS and build-mode comparison (#1)
+
+The [raw capture](2026-09-08-coredns.txt) compares the deployed package with ReleaseFast and CoreDNS 1.14.6 on launchpad.
+Production source is `9a7c2c4`. Harness source is `6cd62a7`.
+The Nix derivations have identical inputs and source. Only the optimization flag and output path differ.
+Production remains on ReleaseSafe with the baseline CPU target.
+
+### Workload
+
+`scripts/compare-coredns.py` uses dnsperf 2.16.0 and owned loopback services.
+Each resolver receives one CPU. CoreDNS uses `GOMAXPROCS=1` and `GOGC=100`.
+The generator uses two other CPUs for its sender and receiver.
+The host retains normal workloads. No CPU isolation or frequency control applies.
+
+The workload uses shuffled A queries and a single-address answer with TTL 3600.
+Both resolvers use their default cache capacities. The cache also contains one readiness name outside the workload.
+An owned CoreDNS template supplies all initial answers. The upstream log stays unchanged during every timed trial.
+A disabled-cache control fails at that check.
+
+Query logs remain enabled on both resolvers, with output to `/dev/null`.
+The timings include formatting and writes, but exclude journald persistence and disk backpressure.
+These configurations omit hosts and TLS. They do not measure the complete deployment configuration.
+
+### Results
+
+Values are medians of three three-second trials. Resolver order rotates between trials.
+Throughput uses 32 clients and at most 32 outstanding queries.
+The latency column uses UDP with one outstanding query and reports the mean within each trial.
+
+| Workload names | Resolver | UDP queries/s | TCP queries/s | Low-load UDP latency, µs |
+|---:|---|---:|---:|---:|
+| 1 | z53 ReleaseSafe | 17954 | 16511 | 58 |
+| 1 | z53 ReleaseFast | 18407 | 16666 | 58 |
+| 1 | CoreDNS | 94905 | 112144 | 16 |
+| 4096 | z53 ReleaseSafe | 17945 | 16164 | 60 |
+| 4096 | z53 ReleaseFast | 18431 | 16569 | 59 |
+| 4096 | CoreDNS | 92433 | 109996 | 16 |
+
+At 4096 names, CoreDNS delivers 5.15 times the UDP throughput and 6.81 times the TCP throughput of ReleaseSafe.
+ReleaseFast improves the medians by 2.7% and 2.5%, respectively.
+The UDP trial ranges overlap. Three short trials do not establish a reliable small throughput gain.
+Single-outstanding throughput contains generator gaps and varies substantially. It does not establish a capacity limit.
+
+All 54 timed trials complete 5988170 queries with zero losses and only NOERROR responses.
+This is an observed throughput comparison, not a search for maximum sustainable load or a tail-latency result.
+
+After the TCP trials at 4096 names, median sampled RSS is:
+
+| Resolver | RSS, MiB |
+|---|---:|
+| z53 ReleaseSafe | 59.04 |
+| z53 ReleaseFast | 12.47 |
+| CoreDNS | 58.84 |
+
+These are resident process measurements for this fixture, not reserved storage sizes or deployment memory budgets.
+The ReleaseFast RSS reduction does not establish a reduction in the configured allocation bounds.
+
+### Profile
+
+Separate profiles sample userspace cycles at 199 Hz during the 4096-name UDP workload.
+ReleaseSafe attributes 87.01% to `compiler_rt.memset`. ReleaseFast attributes 85.46% to the same function.
+The profiles contain 588 and 602 samples, respectively, with zero lost samples.
+Both binaries contain the same byte-at-a-time loop:
+
+```asm
+subs x2, x2, #1
+strb w1, [x8], #1
+b.ne <loop>
+```
+
+The capture includes both disassemblies and the profile commands.
+The next performance investigation targets this memory-fill path, not removal of runtime safety checks.
+No production optimization or build-mode change accompanies these measurements.
+
+### Checks and limits
+
+The ReleaseFast resolver and wire suites pass 60 and 35 tests, respectively.
+The generator smoke and disabled-cache control pass their expected checks.
+All-system flake evaluation and source formatting/lints pass.
+The production resolver retains PID 782149 and zero automatic restarts after measurement.
+No benchmark query reaches the production listener or a public upstream.

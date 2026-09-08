@@ -1,0 +1,2730 @@
+# z53/CoreDNS loopback comparison (#1) — 2026-09-08
+
+Production source: 9a7c2c48c80f584c9f7950cea568dfbedcd5869c
+Harness source: 6cd62a7
+Safe: unmodified deployed Nix package, ReleaseSafe / baseline CPU.
+Fast: same Nix derivation with only -Doptimize=ReleaseSafe replaced by -Doptimize=ReleaseFast.
+
+The workload uses one A record with TTL 3600 and address 192.0.2.1.
+The cache also contains one readiness name, outside the timed workload.
+Both resolvers retain query formatting and writes to /dev/null.
+CoreDNS uses GOMAXPROCS=1 and GOGC=100. GODEBUG and GOMEMLIMIT are absent.
+No CPU isolation or frequency control applies. The host retains normal workloads.
+RSS comes from /proc/PID/status after each trial. These configurations omit hosts and TLS.
+The q=1 runs contain gaps between requests and do not establish maximum throughput.
+The 32-outstanding runs report observed throughput, not a full saturation search.
+
+## Reproduction
+
+nix develop
+nix build .#z53 --out-link /tmp/z53-compare-safe-package
+nix build --impure --expr 'let f = builtins.getFlake "git+file:///Users/matt/code/z53"; in f.packages.aarch64-linux.z53.overrideAttrs (old: { zigBuildFlags = map (flag: if flag == "-Doptimize=ReleaseSafe" then "-Doptimize=ReleaseFast" else flag) old.zigBuildFlags; })' --out-link /tmp/z53-compare-fast-package
+python3 scripts/compare-coredns.py --safe /tmp/z53-compare-safe-package/bin/z53 --fast /tmp/z53-compare-fast-package/bin/z53 --output /tmp/z53-coredns-new-run
+
+## Metadata
+{
+  "uname": [
+    "Linux",
+    "launchpad",
+    "7.2.3",
+    "#1-NixOS SMP PREEMPT Wed Sep  2 12:33:21 UTC 2026",
+    "aarch64"
+  ],
+  "source": "6cd62a7edc9d38de26e61bc8acf526bbd81fe8e4",
+  "core_version": "CoreDNS-1.14.6\nlinux/arm64, go1.26.7, \n",
+  "dnsperf": "/nix/store/d48qfnrgy99n4p6l875vr57dfa6sm1h8-dnsperf-2.16.0/bin/dnsperf",
+  "resolver_cpu": 2,
+  "generator_cpus": [
+    0,
+    3
+  ],
+  "upstream_cpu": 1,
+  "logging": "enabled, both resolver sinks /dev/null",
+  "GOMAXPROCS": 1,
+  "binaries": {
+    "safe": {
+      "path": "/nix/store/vg4gbwdg89p6bsrrq1pfxy6qpmx5n91j-z53-0.0.0/bin/z53",
+      "sha256": "43aa8a31bf5cd0008e31eaf7ba61a2f1ae7593b46b6187276f502a8c87181997"
+    },
+    "fast": {
+      "path": "/nix/store/1cs68xdw00d95vmyym8jmrv7k6q205a7-z53-0.0.0/bin/z53",
+      "sha256": "d1e5ccc30d1008f1d7129dd2171f5e0bfa3d39421a4266fffb260f3d09c32c6f"
+    },
+    "coredns": {
+      "path": "/nix/store/p11n7jgnn38x48inq3x785zwgj1kfn25-coredns-1.14.6/bin/coredns",
+      "sha256": "a6b9498b44fc5e2a6c0f53129d83f4e246154359117a98507c9b4806f78d55c2"
+    }
+  }
+}
+
+## Example resolver configurations
+
+4096-0-safe.conf
+.{
+    .listen = .{ "127.0.0.1:53935" },
+    .zones = .{ .{
+        .suffix = ".",
+        .upstreams = .{ .{ .address = "127.0.0.1:59613" } },
+        .max_fails = 0,
+    } },
+}
+
+4096-0-fast.conf
+.{
+    .listen = .{ "127.0.0.1:47471" },
+    .zones = .{ .{
+        .suffix = ".",
+        .upstreams = .{ .{ .address = "127.0.0.1:59613" } },
+        .max_fails = 0,
+    } },
+}
+
+4096-0-coredns.conf
+.:49043 {
+    bind 127.0.0.1
+    log
+    errors
+    cache 3600
+    forward . 127.0.0.1:59613 {
+        policy sequential
+        max_fails 0
+    }
+}
+
+upstream.Corefile
+bench.test:59613 {
+    bind 127.0.0.1
+    log
+    template IN A {
+        answer "{{ .Name }} 3600 IN A 192.0.2.1"
+    }
+}
+
+## Parsed measurements
+[
+  {
+    "sent": 38800.0,
+    "completed": 38800.0,
+    "lost": 0.0,
+    "qps": 12933.083294,
+    "latency_s": 6.3e-05,
+    "runtime_s": 3.000058,
+    "variant": "safe",
+    "names": 1,
+    "trial": 0,
+    "protocol": "udp",
+    "outstanding": 1,
+    "cpu_s": 2.26,
+    "rss_kib": 60452,
+    "upstream_bytes": 0
+  },
+  {
+    "sent": 48587.0,
+    "completed": 48587.0,
+    "lost": 0.0,
+    "qps": 16184.973794,
+    "latency_s": 0.001961,
+    "runtime_s": 3.001982,
+    "variant": "safe",
+    "names": 1,
+    "trial": 0,
+    "protocol": "udp",
+    "outstanding": 32,
+    "cpu_s": 2.93,
+    "rss_kib": 60452,
+    "upstream_bytes": 0
+  },
+  {
+    "sent": 50213.0,
+    "completed": 50213.0,
+    "lost": 0.0,
+    "qps": 16510.574718,
+    "latency_s": 0.001906,
+    "runtime_s": 3.041263,
+    "variant": "safe",
+    "names": 1,
+    "trial": 0,
+    "protocol": "tcp",
+    "outstanding": 32,
+    "cpu_s": 2.8899999999999997,
+    "rss_kib": 60452,
+    "upstream_bytes": 0
+  },
+  {
+    "sent": 36640.0,
+    "completed": 36640.0,
+    "lost": 0.0,
+    "qps": 12213.097213,
+    "latency_s": 6.2e-05,
+    "runtime_s": 3.000058,
+    "variant": "fast",
+    "names": 1,
+    "trial": 0,
+    "protocol": "udp",
+    "outstanding": 1,
+    "cpu_s": 2.11,
+    "rss_kib": 12104,
+    "upstream_bytes": 0
+  },
+  {
+    "sent": 55544.0,
+    "completed": 55544.0,
+    "lost": 0.0,
+    "qps": 18504.365903,
+    "latency_s": 0.001711,
+    "runtime_s": 3.00167,
+    "variant": "fast",
+    "names": 1,
+    "trial": 0,
+    "protocol": "udp",
+    "outstanding": 32,
+    "cpu_s": 2.9,
+    "rss_kib": 12112,
+    "upstream_bytes": 0
+  },
+  {
+    "sent": 50709.0,
+    "completed": 50709.0,
+    "lost": 0.0,
+    "qps": 16642.664349,
+    "latency_s": 0.001844,
+    "runtime_s": 3.046928,
+    "variant": "fast",
+    "names": 1,
+    "trial": 0,
+    "protocol": "tcp",
+    "outstanding": 32,
+    "cpu_s": 2.84,
+    "rss_kib": 12260,
+    "upstream_bytes": 0
+  },
+  {
+    "sent": 82485.0,
+    "completed": 82485.0,
+    "lost": 0.0,
+    "qps": 27494.89002,
+    "latency_s": 1.6e-05,
+    "runtime_s": 3.000012,
+    "variant": "coredns",
+    "names": 1,
+    "trial": 0,
+    "protocol": "udp",
+    "outstanding": 1,
+    "cpu_s": 1.01,
+    "rss_kib": 54676,
+    "upstream_bytes": 0
+  },
+  {
+    "sent": 287053.0,
+    "completed": 287053.0,
+    "lost": 0.0,
+    "qps": 95675.499296,
+    "latency_s": 0.000322,
+    "runtime_s": 3.000277,
+    "variant": "coredns",
+    "names": 1,
+    "trial": 0,
+    "protocol": "udp",
+    "outstanding": 32,
+    "cpu_s": 2.69,
+    "rss_kib": 56272,
+    "upstream_bytes": 0
+  },
+  {
+    "sent": 330414.0,
+    "completed": 330414.0,
+    "lost": 0.0,
+    "qps": 110122.913161,
+    "latency_s": 0.000278,
+    "runtime_s": 3.000411,
+    "variant": "coredns",
+    "names": 1,
+    "trial": 0,
+    "protocol": "tcp",
+    "outstanding": 32,
+    "cpu_s": 2.2800000000000002,
+    "rss_kib": 55892,
+    "upstream_bytes": 0
+  },
+  {
+    "sent": 43786.0,
+    "completed": 43786.0,
+    "lost": 0.0,
+    "qps": 14595.114407,
+    "latency_s": 5.8e-05,
+    "runtime_s": 3.000045,
+    "variant": "fast",
+    "names": 1,
+    "trial": 1,
+    "protocol": "udp",
+    "outstanding": 1,
+    "cpu_s": 2.35,
+    "rss_kib": 12104,
+    "upstream_bytes": 0
+  },
+  {
+    "sent": 55252.0,
+    "completed": 55252.0,
+    "lost": 0.0,
+    "qps": 18407.13578,
+    "latency_s": 0.001715,
+    "runtime_s": 3.001662,
+    "variant": "fast",
+    "names": 1,
+    "trial": 1,
+    "protocol": "udp",
+    "outstanding": 32,
+    "cpu_s": 2.86,
+    "rss_kib": 12112,
+    "upstream_bytes": 0
+  },
+  {
+    "sent": 50717.0,
+    "completed": 50717.0,
+    "lost": 0.0,
+    "qps": 16666.277808,
+    "latency_s": 0.00188,
+    "runtime_s": 3.043091,
+    "variant": "fast",
+    "names": 1,
+    "trial": 1,
+    "protocol": "tcp",
+    "outstanding": 32,
+    "cpu_s": 2.87,
+    "rss_kib": 12260,
+    "upstream_bytes": 0
+  },
+  {
+    "sent": 119454.0,
+    "completed": 119454.0,
+    "lost": 0.0,
+    "qps": 39817.867274,
+    "latency_s": 1.6e-05,
+    "runtime_s": 3.00001,
+    "variant": "coredns",
+    "names": 1,
+    "trial": 1,
+    "protocol": "udp",
+    "outstanding": 1,
+    "cpu_s": 1.46,
+    "rss_kib": 54604,
+    "upstream_bytes": 0
+  },
+  {
+    "sent": 282631.0,
+    "completed": 282631.0,
+    "lost": 0.0,
+    "qps": 94202.106349,
+    "latency_s": 0.000328,
+    "runtime_s": 3.000262,
+    "variant": "coredns",
+    "names": 1,
+    "trial": 1,
+    "protocol": "udp",
+    "outstanding": 32,
+    "cpu_s": 2.6800000000000006,
+    "rss_kib": 55668,
+    "upstream_bytes": 0
+  },
+  {
+    "sent": 337629.0,
+    "completed": 337629.0,
+    "lost": 0.0,
+    "qps": 112535.085032,
+    "latency_s": 0.000275,
+    "runtime_s": 3.000211,
+    "variant": "coredns",
+    "names": 1,
+    "trial": 1,
+    "protocol": "tcp",
+    "outstanding": 32,
+    "cpu_s": 2.38,
+    "rss_kib": 55812,
+    "upstream_bytes": 0
+  },
+  {
+    "sent": 42127.0,
+    "completed": 42127.0,
+    "lost": 0.0,
+    "qps": 14042.155466,
+    "latency_s": 5.8e-05,
+    "runtime_s": 3.000038,
+    "variant": "safe",
+    "names": 1,
+    "trial": 1,
+    "protocol": "udp",
+    "outstanding": 1,
+    "cpu_s": 2.29,
+    "rss_kib": 60452,
+    "upstream_bytes": 0
+  },
+  {
+    "sent": 53893.0,
+    "completed": 53893.0,
+    "lost": 0.0,
+    "qps": 17954.177254,
+    "latency_s": 0.001758,
+    "runtime_s": 3.001697,
+    "variant": "safe",
+    "names": 1,
+    "trial": 1,
+    "protocol": "udp",
+    "outstanding": 32,
+    "cpu_s": 2.89,
+    "rss_kib": 60452,
+    "upstream_bytes": 0
+  },
+  {
+    "sent": 49774.0,
+    "completed": 49774.0,
+    "lost": 0.0,
+    "qps": 16339.85748,
+    "latency_s": 0.001912,
+    "runtime_s": 3.046171,
+    "variant": "safe",
+    "names": 1,
+    "trial": 1,
+    "protocol": "tcp",
+    "outstanding": 32,
+    "cpu_s": 2.88,
+    "rss_kib": 60452,
+    "upstream_bytes": 0
+  },
+  {
+    "sent": 91378.0,
+    "completed": 91378.0,
+    "lost": 0.0,
+    "qps": 30458.866297,
+    "latency_s": 1.6e-05,
+    "runtime_s": 3.000046,
+    "variant": "coredns",
+    "names": 1,
+    "trial": 2,
+    "protocol": "udp",
+    "outstanding": 1,
+    "cpu_s": 1.1199999999999999,
+    "rss_kib": 54808,
+    "upstream_bytes": 0
+  },
+  {
+    "sent": 284739.0,
+    "completed": 284739.0,
+    "lost": 0.0,
+    "qps": 94904.901448,
+    "latency_s": 0.000295,
+    "runtime_s": 3.000256,
+    "variant": "coredns",
+    "names": 1,
+    "trial": 2,
+    "protocol": "udp",
+    "outstanding": 32,
+    "cpu_s": 2.68,
+    "rss_kib": 56396,
+    "upstream_bytes": 0
+  },
+  {
+    "sent": 336464.0,
+    "completed": 336464.0,
+    "lost": 0.0,
+    "qps": 112144.424143,
+    "latency_s": 0.000275,
+    "runtime_s": 3.000274,
+    "variant": "coredns",
+    "names": 1,
+    "trial": 2,
+    "protocol": "tcp",
+    "outstanding": 32,
+    "cpu_s": 2.36,
+    "rss_kib": 56040,
+    "upstream_bytes": 0
+  },
+  {
+    "sent": 42414.0,
+    "completed": 42414.0,
+    "lost": 0.0,
+    "qps": 14137.962299,
+    "latency_s": 5.8e-05,
+    "runtime_s": 3.000008,
+    "variant": "safe",
+    "names": 1,
+    "trial": 2,
+    "protocol": "udp",
+    "outstanding": 1,
+    "cpu_s": 2.27,
+    "rss_kib": 60452,
+    "upstream_bytes": 0
+  },
+  {
+    "sent": 54158.0,
+    "completed": 54158.0,
+    "lost": 0.0,
+    "qps": 18040.819862,
+    "latency_s": 0.00175,
+    "runtime_s": 3.00197,
+    "variant": "safe",
+    "names": 1,
+    "trial": 2,
+    "protocol": "udp",
+    "outstanding": 32,
+    "cpu_s": 2.9299999999999997,
+    "rss_kib": 60452,
+    "upstream_bytes": 0
+  },
+  {
+    "sent": 50403.0,
+    "completed": 50403.0,
+    "lost": 0.0,
+    "qps": 16541.36128,
+    "latency_s": 0.001866,
+    "runtime_s": 3.047089,
+    "variant": "safe",
+    "names": 1,
+    "trial": 2,
+    "protocol": "tcp",
+    "outstanding": 32,
+    "cpu_s": 2.8500000000000005,
+    "rss_kib": 60452,
+    "upstream_bytes": 0
+  },
+  {
+    "sent": 36221.0,
+    "completed": 36221.0,
+    "lost": 0.0,
+    "qps": 12073.453369,
+    "latency_s": 5.8e-05,
+    "runtime_s": 3.000053,
+    "variant": "fast",
+    "names": 1,
+    "trial": 2,
+    "protocol": "udp",
+    "outstanding": 1,
+    "cpu_s": 1.9,
+    "rss_kib": 12104,
+    "upstream_bytes": 0
+  },
+  {
+    "sent": 52540.0,
+    "completed": 52540.0,
+    "lost": 0.0,
+    "qps": 17502.15529,
+    "latency_s": 0.001801,
+    "runtime_s": 3.001916,
+    "variant": "fast",
+    "names": 1,
+    "trial": 2,
+    "protocol": "udp",
+    "outstanding": 32,
+    "cpu_s": 2.93,
+    "rss_kib": 12112,
+    "upstream_bytes": 0
+  },
+  {
+    "sent": 51188.0,
+    "completed": 51188.0,
+    "lost": 0.0,
+    "qps": 16828.127445,
+    "latency_s": 0.001857,
+    "runtime_s": 3.041812,
+    "variant": "fast",
+    "names": 1,
+    "trial": 2,
+    "protocol": "tcp",
+    "outstanding": 32,
+    "cpu_s": 2.8499999999999996,
+    "rss_kib": 12260,
+    "upstream_bytes": 0
+  },
+  {
+    "sent": 42575.0,
+    "completed": 42575.0,
+    "lost": 0.0,
+    "qps": 14191.373378,
+    "latency_s": 6e-05,
+    "runtime_s": 3.000062,
+    "variant": "safe",
+    "names": 4096,
+    "trial": 0,
+    "protocol": "udp",
+    "outstanding": 1,
+    "cpu_s": 2.37,
+    "rss_kib": 60452,
+    "upstream_bytes": 0
+  },
+  {
+    "sent": 47865.0,
+    "completed": 47865.0,
+    "lost": 0.0,
+    "qps": 15945.86302,
+    "latency_s": 0.001961,
+    "runtime_s": 3.001719,
+    "variant": "safe",
+    "names": 4096,
+    "trial": 0,
+    "protocol": "udp",
+    "outstanding": 32,
+    "cpu_s": 2.8200000000000003,
+    "rss_kib": 60452,
+    "upstream_bytes": 0
+  },
+  {
+    "sent": 49148.0,
+    "completed": 49148.0,
+    "lost": 0.0,
+    "qps": 16163.787433,
+    "latency_s": 0.001942,
+    "runtime_s": 3.040624,
+    "variant": "safe",
+    "names": 4096,
+    "trial": 0,
+    "protocol": "tcp",
+    "outstanding": 32,
+    "cpu_s": 2.88,
+    "rss_kib": 60452,
+    "upstream_bytes": 0
+  },
+  {
+    "sent": 36973.0,
+    "completed": 36973.0,
+    "lost": 0.0,
+    "qps": 12324.09096,
+    "latency_s": 5.8e-05,
+    "runtime_s": 3.000059,
+    "variant": "fast",
+    "names": 4096,
+    "trial": 0,
+    "protocol": "udp",
+    "outstanding": 1,
+    "cpu_s": 1.98,
+    "rss_kib": 12616,
+    "upstream_bytes": 0
+  },
+  {
+    "sent": 55323.0,
+    "completed": 55323.0,
+    "lost": 0.0,
+    "qps": 18430.930568,
+    "latency_s": 0.001686,
+    "runtime_s": 3.001639,
+    "variant": "fast",
+    "names": 4096,
+    "trial": 0,
+    "protocol": "udp",
+    "outstanding": 32,
+    "cpu_s": 2.8800000000000003,
+    "rss_kib": 12624,
+    "upstream_bytes": 0
+  },
+  {
+    "sent": 50668.0,
+    "completed": 50668.0,
+    "lost": 0.0,
+    "qps": 16639.464048,
+    "latency_s": 0.001873,
+    "runtime_s": 3.04505,
+    "variant": "fast",
+    "names": 4096,
+    "trial": 0,
+    "protocol": "tcp",
+    "outstanding": 32,
+    "cpu_s": 2.8599999999999994,
+    "rss_kib": 12772,
+    "upstream_bytes": 0
+  },
+  {
+    "sent": 97589.0,
+    "completed": 97589.0,
+    "lost": 0.0,
+    "qps": 32529.438961,
+    "latency_s": 1.6e-05,
+    "runtime_s": 3.000021,
+    "variant": "coredns",
+    "names": 4096,
+    "trial": 0,
+    "protocol": "udp",
+    "outstanding": 1,
+    "cpu_s": 1.23,
+    "rss_kib": 58500,
+    "upstream_bytes": 0
+  },
+  {
+    "sent": 279913.0,
+    "completed": 279913.0,
+    "lost": 0.0,
+    "qps": 93295.439168,
+    "latency_s": 0.000331,
+    "runtime_s": 3.000286,
+    "variant": "coredns",
+    "names": 4096,
+    "trial": 0,
+    "protocol": "udp",
+    "outstanding": 32,
+    "cpu_s": 2.7,
+    "rss_kib": 60612,
+    "upstream_bytes": 0
+  },
+  {
+    "sent": 329353.0,
+    "completed": 329353.0,
+    "lost": 0.0,
+    "qps": 109775.697645,
+    "latency_s": 0.000279,
+    "runtime_s": 3.000236,
+    "variant": "coredns",
+    "names": 4096,
+    "trial": 0,
+    "protocol": "tcp",
+    "outstanding": 32,
+    "cpu_s": 2.3499999999999996,
+    "rss_kib": 60252,
+    "upstream_bytes": 0
+  },
+  {
+    "sent": 38399.0,
+    "completed": 38399.0,
+    "lost": 0.0,
+    "qps": 12799.581336,
+    "latency_s": 6e-05,
+    "runtime_s": 3.00002,
+    "variant": "fast",
+    "names": 4096,
+    "trial": 1,
+    "protocol": "udp",
+    "outstanding": 1,
+    "cpu_s": 2.1500000000000004,
+    "rss_kib": 12616,
+    "upstream_bytes": 0
+  },
+  {
+    "sent": 52025.0,
+    "completed": 52025.0,
+    "lost": 0.0,
+    "qps": 17332.226381,
+    "latency_s": 0.001827,
+    "runtime_s": 3.001634,
+    "variant": "fast",
+    "names": 4096,
+    "trial": 1,
+    "protocol": "udp",
+    "outstanding": 32,
+    "cpu_s": 2.92,
+    "rss_kib": 12624,
+    "upstream_bytes": 0
+  },
+  {
+    "sent": 50227.0,
+    "completed": 50227.0,
+    "lost": 0.0,
+    "qps": 16514.504731,
+    "latency_s": 0.0019,
+    "runtime_s": 3.041387,
+    "variant": "fast",
+    "names": 4096,
+    "trial": 1,
+    "protocol": "tcp",
+    "outstanding": 32,
+    "cpu_s": 2.88,
+    "rss_kib": 12772,
+    "upstream_bytes": 0
+  },
+  {
+    "sent": 125765.0,
+    "completed": 125765.0,
+    "lost": 0.0,
+    "qps": 41921.373217,
+    "latency_s": 1.6e-05,
+    "runtime_s": 3.000021,
+    "variant": "coredns",
+    "names": 4096,
+    "trial": 1,
+    "protocol": "udp",
+    "outstanding": 1,
+    "cpu_s": 1.56,
+    "rss_kib": 59268,
+    "upstream_bytes": 0
+  },
+  {
+    "sent": 277325.0,
+    "completed": 277325.0,
+    "lost": 0.0,
+    "qps": 92433.409282,
+    "latency_s": 0.000335,
+    "runtime_s": 3.000268,
+    "variant": "coredns",
+    "names": 4096,
+    "trial": 1,
+    "protocol": "udp",
+    "outstanding": 32,
+    "cpu_s": 2.7,
+    "rss_kib": 61360,
+    "upstream_bytes": 0
+  },
+  {
+    "sent": 330012.0,
+    "completed": 330012.0,
+    "lost": 0.0,
+    "qps": 109995.530344,
+    "latency_s": 0.000281,
+    "runtime_s": 3.000231,
+    "variant": "coredns",
+    "names": 4096,
+    "trial": 1,
+    "protocol": "tcp",
+    "outstanding": 32,
+    "cpu_s": 2.3500000000000005,
+    "rss_kib": 60984,
+    "upstream_bytes": 0
+  },
+  {
+    "sent": 42448.0,
+    "completed": 42448.0,
+    "lost": 0.0,
+    "qps": 14149.106948,
+    "latency_s": 6e-05,
+    "runtime_s": 3.000048,
+    "variant": "safe",
+    "names": 4096,
+    "trial": 1,
+    "protocol": "udp",
+    "outstanding": 1,
+    "cpu_s": 2.34,
+    "rss_kib": 60452,
+    "upstream_bytes": 0
+  },
+  {
+    "sent": 53864.0,
+    "completed": 53864.0,
+    "lost": 0.0,
+    "qps": 17944.689419,
+    "latency_s": 0.001742,
+    "runtime_s": 3.001668,
+    "variant": "safe",
+    "names": 4096,
+    "trial": 1,
+    "protocol": "udp",
+    "outstanding": 32,
+    "cpu_s": 2.89,
+    "rss_kib": 60452,
+    "upstream_bytes": 0
+  },
+  {
+    "sent": 49438.0,
+    "completed": 49438.0,
+    "lost": 0.0,
+    "qps": 16243.819607,
+    "latency_s": 0.001929,
+    "runtime_s": 3.043496,
+    "variant": "safe",
+    "names": 4096,
+    "trial": 1,
+    "protocol": "tcp",
+    "outstanding": 32,
+    "cpu_s": 2.869999999999999,
+    "rss_kib": 60452,
+    "upstream_bytes": 0
+  },
+  {
+    "sent": 87479.0,
+    "completed": 87479.0,
+    "lost": 0.0,
+    "qps": 29159.579188,
+    "latency_s": 1.6e-05,
+    "runtime_s": 3.000009,
+    "variant": "coredns",
+    "names": 4096,
+    "trial": 2,
+    "protocol": "udp",
+    "outstanding": 1,
+    "cpu_s": 1.1,
+    "rss_kib": 58608,
+    "upstream_bytes": 0
+  },
+  {
+    "sent": 261491.0,
+    "completed": 261491.0,
+    "lost": 0.0,
+    "qps": 87152.249722,
+    "latency_s": 0.000333,
+    "runtime_s": 3.000393,
+    "variant": "coredns",
+    "names": 4096,
+    "trial": 2,
+    "protocol": "udp",
+    "outstanding": 32,
+    "cpu_s": 2.55,
+    "rss_kib": 60252,
+    "upstream_bytes": 0
+  },
+  {
+    "sent": 334862.0,
+    "completed": 334862.0,
+    "lost": 0.0,
+    "qps": 111609.356918,
+    "latency_s": 0.000274,
+    "runtime_s": 3.000304,
+    "variant": "coredns",
+    "names": 4096,
+    "trial": 2,
+    "protocol": "tcp",
+    "outstanding": 32,
+    "cpu_s": 2.4,
+    "rss_kib": 59848,
+    "upstream_bytes": 0
+  },
+  {
+    "sent": 33972.0,
+    "completed": 33972.0,
+    "lost": 0.0,
+    "qps": 11323.90186,
+    "latency_s": 6e-05,
+    "runtime_s": 3.000026,
+    "variant": "safe",
+    "names": 4096,
+    "trial": 2,
+    "protocol": "udp",
+    "outstanding": 1,
+    "cpu_s": 1.91,
+    "rss_kib": 60452,
+    "upstream_bytes": 0
+  },
+  {
+    "sent": 54370.0,
+    "completed": 54370.0,
+    "lost": 0.0,
+    "qps": 18112.900303,
+    "latency_s": 0.001746,
+    "runtime_s": 3.001728,
+    "variant": "safe",
+    "names": 4096,
+    "trial": 2,
+    "protocol": "udp",
+    "outstanding": 32,
+    "cpu_s": 2.92,
+    "rss_kib": 60452,
+    "upstream_bytes": 0
+  },
+  {
+    "sent": 48383.0,
+    "completed": 48383.0,
+    "lost": 0.0,
+    "qps": 15880.820487,
+    "latency_s": 0.001947,
+    "runtime_s": 3.046631,
+    "variant": "safe",
+    "names": 4096,
+    "trial": 2,
+    "protocol": "tcp",
+    "outstanding": 32,
+    "cpu_s": 2.8499999999999996,
+    "rss_kib": 60452,
+    "upstream_bytes": 0
+  },
+  {
+    "sent": 37093.0,
+    "completed": 37093.0,
+    "lost": 0.0,
+    "qps": 12364.246784,
+    "latency_s": 5.9e-05,
+    "runtime_s": 3.000021,
+    "variant": "fast",
+    "names": 4096,
+    "trial": 2,
+    "protocol": "udp",
+    "outstanding": 1,
+    "cpu_s": 2.0300000000000002,
+    "rss_kib": 12616,
+    "upstream_bytes": 0
+  },
+  {
+    "sent": 55978.0,
+    "completed": 55978.0,
+    "lost": 0.0,
+    "qps": 18648.852678,
+    "latency_s": 0.001686,
+    "runtime_s": 3.001686,
+    "variant": "fast",
+    "names": 4096,
+    "trial": 2,
+    "protocol": "udp",
+    "outstanding": 32,
+    "cpu_s": 2.9099999999999997,
+    "rss_kib": 12624,
+    "upstream_bytes": 0
+  },
+  {
+    "sent": 50419.0,
+    "completed": 50419.0,
+    "lost": 0.0,
+    "qps": 16568.792084,
+    "latency_s": 0.001893,
+    "runtime_s": 3.04301,
+    "variant": "fast",
+    "names": 4096,
+    "trial": 2,
+    "protocol": "tcp",
+    "outstanding": 32,
+    "cpu_s": 2.8599999999999994,
+    "rss_kib": 12772,
+    "upstream_bytes": 0
+  }
+]
+
+## Raw timed trials
+
+### 1-0-coredns-tcp-32.txt
+$ taskset -c 0,3 dnsperf -s 127.0.0.1 -p 43391 -d /tmp/z53-coredns-20260908/queries-1.txt -m tcp -T 1 -c 32 -q 32 -t 1 -l 3
+DNS Performance Testing Tool
+Version 2.16.0
+
+[Status] Command line: dnsperf -s 127.0.0.1 -p 43391 -d /tmp/z53-coredns-20260908/queries-1.txt -m tcp -T 1 -c 32 -q 32 -t 1 -l 3
+[Status] Sending queries (to 127.0.0.1:43391)
+[Status] Started at: Tue Sep  8 11:44:03 2026
+[Status] Stopping after 3.000000 seconds
+[Status] Testing complete (time limit)
+
+Statistics:
+
+  Queries sent:         330414
+  Queries completed:    330414 (100.00%)
+  Queries lost:         0 (0.00%)
+
+  Response codes:       NOERROR 330414 (100.00%)
+  Average packet size:  request 35, response 68
+  Run time (s):         3.000411
+  Queries per second:   110122.913161
+
+  Average Latency (s):  0.000278 (min 0.000008, max 0.007353)
+  Latency StdDev (s):   0.000248
+
+Connection Statistics:
+
+  Connection attempts:  32 (32 successful, 100.00%)
+
+  Average Latency (s):  0.001467 (min 0.000567, max 0.001600)
+  Latency StdDev (s):   0.000175
+
+
+### 1-0-coredns-udp-1.txt
+$ taskset -c 0,3 dnsperf -s 127.0.0.1 -p 43391 -d /tmp/z53-coredns-20260908/queries-1.txt -m udp -T 1 -c 1 -q 1 -t 1 -l 3
+DNS Performance Testing Tool
+Version 2.16.0
+
+[Status] Command line: dnsperf -s 127.0.0.1 -p 43391 -d /tmp/z53-coredns-20260908/queries-1.txt -m udp -T 1 -c 1 -q 1 -t 1 -l 3
+[Status] Sending queries (to 127.0.0.1:43391)
+[Status] Started at: Tue Sep  8 11:43:57 2026
+[Status] Stopping after 3.000000 seconds
+[Status] Testing complete (time limit)
+
+Statistics:
+
+  Queries sent:         82485
+  Queries completed:    82485 (100.00%)
+  Queries lost:         0 (0.00%)
+
+  Response codes:       NOERROR 82485 (100.00%)
+  Average packet size:  request 35, response 68
+  Run time (s):         3.000012
+  Queries per second:   27494.890020
+
+  Average Latency (s):  0.000016 (min 0.000012, max 0.004443)
+  Latency StdDev (s):   0.000023
+
+
+### 1-0-coredns-udp-32.txt
+$ taskset -c 0,3 dnsperf -s 127.0.0.1 -p 43391 -d /tmp/z53-coredns-20260908/queries-1.txt -m udp -T 1 -c 32 -q 32 -t 1 -l 3
+DNS Performance Testing Tool
+Version 2.16.0
+
+[Status] Command line: dnsperf -s 127.0.0.1 -p 43391 -d /tmp/z53-coredns-20260908/queries-1.txt -m udp -T 1 -c 32 -q 32 -t 1 -l 3
+[Status] Sending queries (to 127.0.0.1:43391)
+[Status] Started at: Tue Sep  8 11:44:00 2026
+[Status] Stopping after 3.000000 seconds
+[Status] Testing complete (time limit)
+
+Statistics:
+
+  Queries sent:         287053
+  Queries completed:    287053 (100.00%)
+  Queries lost:         0 (0.00%)
+
+  Response codes:       NOERROR 287053 (100.00%)
+  Average packet size:  request 35, response 68
+  Run time (s):         3.000277
+  Queries per second:   95675.499296
+
+  Average Latency (s):  0.000322 (min 0.000015, max 0.004344)
+  Latency StdDev (s):   0.000109
+
+
+### 1-0-fast-tcp-32.txt
+$ taskset -c 0,3 dnsperf -s 127.0.0.1 -p 52499 -d /tmp/z53-coredns-20260908/queries-1.txt -m tcp -T 1 -c 32 -q 32 -t 1 -l 3
+DNS Performance Testing Tool
+Version 2.16.0
+
+[Status] Command line: dnsperf -s 127.0.0.1 -p 52499 -d /tmp/z53-coredns-20260908/queries-1.txt -m tcp -T 1 -c 32 -q 32 -t 1 -l 3
+[Status] Sending queries (to 127.0.0.1:52499)
+[Status] Started at: Tue Sep  8 11:43:54 2026
+[Status] Stopping after 3.000000 seconds
+[Status] Testing complete (time limit)
+
+Statistics:
+
+  Queries sent:         50709
+  Queries completed:    50709 (100.00%)
+  Queries lost:         0 (0.00%)
+
+  Response codes:       NOERROR 50709 (100.00%)
+  Average packet size:  request 35, response 51
+  Run time (s):         3.046928
+  Queries per second:   16642.664349
+
+  Average Latency (s):  0.001844 (min 0.000073, max 0.047944)
+  Latency StdDev (s):   0.000878
+
+Connection Statistics:
+
+  Connection attempts:  32 (32 successful, 100.00%)
+
+  Average Latency (s):  0.001456 (min 0.000555, max 0.001588)
+  Latency StdDev (s):   0.000175
+
+
+### 1-0-fast-udp-1.txt
+$ taskset -c 0,3 dnsperf -s 127.0.0.1 -p 52499 -d /tmp/z53-coredns-20260908/queries-1.txt -m udp -T 1 -c 1 -q 1 -t 1 -l 3
+DNS Performance Testing Tool
+Version 2.16.0
+
+[Status] Command line: dnsperf -s 127.0.0.1 -p 52499 -d /tmp/z53-coredns-20260908/queries-1.txt -m udp -T 1 -c 1 -q 1 -t 1 -l 3
+[Status] Sending queries (to 127.0.0.1:52499)
+[Status] Started at: Tue Sep  8 11:43:48 2026
+[Status] Stopping after 3.000000 seconds
+[Status] Testing complete (time limit)
+
+Statistics:
+
+  Queries sent:         36640
+  Queries completed:    36640 (100.00%)
+  Queries lost:         0 (0.00%)
+
+  Response codes:       NOERROR 36640 (100.00%)
+  Average packet size:  request 35, response 51
+  Run time (s):         3.000058
+  Queries per second:   12213.097213
+
+  Average Latency (s):  0.000062 (min 0.000056, max 0.001956)
+  Latency StdDev (s):   0.000017
+
+
+### 1-0-fast-udp-32.txt
+$ taskset -c 0,3 dnsperf -s 127.0.0.1 -p 52499 -d /tmp/z53-coredns-20260908/queries-1.txt -m udp -T 1 -c 32 -q 32 -t 1 -l 3
+DNS Performance Testing Tool
+Version 2.16.0
+
+[Status] Command line: dnsperf -s 127.0.0.1 -p 52499 -d /tmp/z53-coredns-20260908/queries-1.txt -m udp -T 1 -c 32 -q 32 -t 1 -l 3
+[Status] Sending queries (to 127.0.0.1:52499)
+[Status] Started at: Tue Sep  8 11:43:51 2026
+[Status] Stopping after 3.000000 seconds
+[Status] Testing complete (time limit)
+
+Statistics:
+
+  Queries sent:         55544
+  Queries completed:    55544 (100.00%)
+  Queries lost:         0 (0.00%)
+
+  Response codes:       NOERROR 55544 (100.00%)
+  Average packet size:  request 35, response 51
+  Run time (s):         3.001670
+  Queries per second:   18504.365903
+
+  Average Latency (s):  0.001711 (min 0.000075, max 0.006732)
+  Latency StdDev (s):   0.000204
+
+
+### 1-0-safe-tcp-32.txt
+$ taskset -c 0,3 dnsperf -s 127.0.0.1 -p 42899 -d /tmp/z53-coredns-20260908/queries-1.txt -m tcp -T 1 -c 32 -q 32 -t 1 -l 3
+DNS Performance Testing Tool
+Version 2.16.0
+
+[Status] Command line: dnsperf -s 127.0.0.1 -p 42899 -d /tmp/z53-coredns-20260908/queries-1.txt -m tcp -T 1 -c 32 -q 32 -t 1 -l 3
+[Status] Sending queries (to 127.0.0.1:42899)
+[Status] Started at: Tue Sep  8 11:43:45 2026
+[Status] Stopping after 3.000000 seconds
+[Status] Testing complete (time limit)
+
+Statistics:
+
+  Queries sent:         50213
+  Queries completed:    50213 (100.00%)
+  Queries lost:         0 (0.00%)
+
+  Response codes:       NOERROR 50213 (100.00%)
+  Average packet size:  request 35, response 51
+  Run time (s):         3.041263
+  Queries per second:   16510.574718
+
+  Average Latency (s):  0.001906 (min 0.000076, max 0.041912)
+  Latency StdDev (s):   0.000907
+
+Connection Statistics:
+
+  Connection attempts:  32 (32 successful, 100.00%)
+
+  Average Latency (s):  0.001491 (min 0.000540, max 0.001612)
+  Latency StdDev (s):   0.000182
+
+
+### 1-0-safe-udp-1.txt
+$ taskset -c 0,3 dnsperf -s 127.0.0.1 -p 42899 -d /tmp/z53-coredns-20260908/queries-1.txt -m udp -T 1 -c 1 -q 1 -t 1 -l 3
+DNS Performance Testing Tool
+Version 2.16.0
+
+[Status] Command line: dnsperf -s 127.0.0.1 -p 42899 -d /tmp/z53-coredns-20260908/queries-1.txt -m udp -T 1 -c 1 -q 1 -t 1 -l 3
+[Status] Sending queries (to 127.0.0.1:42899)
+[Status] Started at: Tue Sep  8 11:43:39 2026
+[Status] Stopping after 3.000000 seconds
+[Status] Testing complete (time limit)
+
+Statistics:
+
+  Queries sent:         38800
+  Queries completed:    38800 (100.00%)
+  Queries lost:         0 (0.00%)
+
+  Response codes:       NOERROR 38800 (100.00%)
+  Average packet size:  request 35, response 51
+  Run time (s):         3.000058
+  Queries per second:   12933.083294
+
+  Average Latency (s):  0.000063 (min 0.000057, max 0.004864)
+  Latency StdDev (s):   0.000043
+
+
+### 1-0-safe-udp-32.txt
+$ taskset -c 0,3 dnsperf -s 127.0.0.1 -p 42899 -d /tmp/z53-coredns-20260908/queries-1.txt -m udp -T 1 -c 32 -q 32 -t 1 -l 3
+DNS Performance Testing Tool
+Version 2.16.0
+
+[Status] Command line: dnsperf -s 127.0.0.1 -p 42899 -d /tmp/z53-coredns-20260908/queries-1.txt -m udp -T 1 -c 32 -q 32 -t 1 -l 3
+[Status] Sending queries (to 127.0.0.1:42899)
+[Status] Started at: Tue Sep  8 11:43:42 2026
+[Status] Stopping after 3.000000 seconds
+[Status] Testing complete (time limit)
+
+Statistics:
+
+  Queries sent:         48587
+  Queries completed:    48587 (100.00%)
+  Queries lost:         0 (0.00%)
+
+  Response codes:       NOERROR 48587 (100.00%)
+  Average packet size:  request 35, response 51
+  Run time (s):         3.001982
+  Queries per second:   16184.973794
+
+  Average Latency (s):  0.001961 (min 0.000079, max 0.006646)
+  Latency StdDev (s):   0.000193
+
+
+### 1-1-coredns-tcp-32.txt
+$ taskset -c 0,3 dnsperf -s 127.0.0.1 -p 47205 -d /tmp/z53-coredns-20260908/queries-1.txt -m tcp -T 1 -c 32 -q 32 -t 1 -l 3
+DNS Performance Testing Tool
+Version 2.16.0
+
+[Status] Command line: dnsperf -s 127.0.0.1 -p 47205 -d /tmp/z53-coredns-20260908/queries-1.txt -m tcp -T 1 -c 32 -q 32 -t 1 -l 3
+[Status] Sending queries (to 127.0.0.1:47205)
+[Status] Started at: Tue Sep  8 11:44:21 2026
+[Status] Stopping after 3.000000 seconds
+[Status] Testing complete (time limit)
+
+Statistics:
+
+  Queries sent:         337629
+  Queries completed:    337629 (100.00%)
+  Queries lost:         0 (0.00%)
+
+  Response codes:       NOERROR 337629 (100.00%)
+  Average packet size:  request 35, response 68
+  Run time (s):         3.000211
+  Queries per second:   112535.085032
+
+  Average Latency (s):  0.000275 (min 0.000008, max 0.003093)
+  Latency StdDev (s):   0.000204
+
+Connection Statistics:
+
+  Connection attempts:  32 (32 successful, 100.00%)
+
+  Average Latency (s):  0.001475 (min 0.000577, max 0.001605)
+  Latency StdDev (s):   0.000175
+
+
+### 1-1-coredns-udp-1.txt
+$ taskset -c 0,3 dnsperf -s 127.0.0.1 -p 47205 -d /tmp/z53-coredns-20260908/queries-1.txt -m udp -T 1 -c 1 -q 1 -t 1 -l 3
+DNS Performance Testing Tool
+Version 2.16.0
+
+[Status] Command line: dnsperf -s 127.0.0.1 -p 47205 -d /tmp/z53-coredns-20260908/queries-1.txt -m udp -T 1 -c 1 -q 1 -t 1 -l 3
+[Status] Sending queries (to 127.0.0.1:47205)
+[Status] Started at: Tue Sep  8 11:44:15 2026
+[Status] Stopping after 3.000000 seconds
+[Status] Testing complete (time limit)
+
+Statistics:
+
+  Queries sent:         119454
+  Queries completed:    119454 (100.00%)
+  Queries lost:         0 (0.00%)
+
+  Response codes:       NOERROR 119454 (100.00%)
+  Average packet size:  request 35, response 68
+  Run time (s):         3.000010
+  Queries per second:   39817.867274
+
+  Average Latency (s):  0.000016 (min 0.000012, max 0.001798)
+  Latency StdDev (s):   0.000011
+
+
+### 1-1-coredns-udp-32.txt
+$ taskset -c 0,3 dnsperf -s 127.0.0.1 -p 47205 -d /tmp/z53-coredns-20260908/queries-1.txt -m udp -T 1 -c 32 -q 32 -t 1 -l 3
+DNS Performance Testing Tool
+Version 2.16.0
+
+[Status] Command line: dnsperf -s 127.0.0.1 -p 47205 -d /tmp/z53-coredns-20260908/queries-1.txt -m udp -T 1 -c 32 -q 32 -t 1 -l 3
+[Status] Sending queries (to 127.0.0.1:47205)
+[Status] Started at: Tue Sep  8 11:44:18 2026
+[Status] Stopping after 3.000000 seconds
+[Status] Testing complete (time limit)
+
+Statistics:
+
+  Queries sent:         282631
+  Queries completed:    282631 (100.00%)
+  Queries lost:         0 (0.00%)
+
+  Response codes:       NOERROR 282631 (100.00%)
+  Average packet size:  request 35, response 68
+  Run time (s):         3.000262
+  Queries per second:   94202.106349
+
+  Average Latency (s):  0.000328 (min 0.000015, max 0.005254)
+  Latency StdDev (s):   0.000110
+
+
+### 1-1-fast-tcp-32.txt
+$ taskset -c 0,3 dnsperf -s 127.0.0.1 -p 52477 -d /tmp/z53-coredns-20260908/queries-1.txt -m tcp -T 1 -c 32 -q 32 -t 1 -l 3
+DNS Performance Testing Tool
+Version 2.16.0
+
+[Status] Command line: dnsperf -s 127.0.0.1 -p 52477 -d /tmp/z53-coredns-20260908/queries-1.txt -m tcp -T 1 -c 32 -q 32 -t 1 -l 3
+[Status] Sending queries (to 127.0.0.1:52477)
+[Status] Started at: Tue Sep  8 11:44:12 2026
+[Status] Stopping after 3.000000 seconds
+[Status] Testing complete (time limit)
+
+Statistics:
+
+  Queries sent:         50717
+  Queries completed:    50717 (100.00%)
+  Queries lost:         0 (0.00%)
+
+  Response codes:       NOERROR 50717 (100.00%)
+  Average packet size:  request 35, response 51
+  Run time (s):         3.043091
+  Queries per second:   16666.277808
+
+  Average Latency (s):  0.001880 (min 0.000083, max 0.044895)
+  Latency StdDev (s):   0.000907
+
+Connection Statistics:
+
+  Connection attempts:  32 (32 successful, 100.00%)
+
+  Average Latency (s):  0.001464 (min 0.000590, max 0.001617)
+  Latency StdDev (s):   0.000176
+
+
+### 1-1-fast-udp-1.txt
+$ taskset -c 0,3 dnsperf -s 127.0.0.1 -p 52477 -d /tmp/z53-coredns-20260908/queries-1.txt -m udp -T 1 -c 1 -q 1 -t 1 -l 3
+DNS Performance Testing Tool
+Version 2.16.0
+
+[Status] Command line: dnsperf -s 127.0.0.1 -p 52477 -d /tmp/z53-coredns-20260908/queries-1.txt -m udp -T 1 -c 1 -q 1 -t 1 -l 3
+[Status] Sending queries (to 127.0.0.1:52477)
+[Status] Started at: Tue Sep  8 11:44:06 2026
+[Status] Stopping after 3.000000 seconds
+[Status] Testing complete (time limit)
+
+Statistics:
+
+  Queries sent:         43786
+  Queries completed:    43786 (100.00%)
+  Queries lost:         0 (0.00%)
+
+  Response codes:       NOERROR 43786 (100.00%)
+  Average packet size:  request 35, response 51
+  Run time (s):         3.000045
+  Queries per second:   14595.114407
+
+  Average Latency (s):  0.000058 (min 0.000055, max 0.003133)
+  Latency StdDev (s):   0.000032
+
+
+### 1-1-fast-udp-32.txt
+$ taskset -c 0,3 dnsperf -s 127.0.0.1 -p 52477 -d /tmp/z53-coredns-20260908/queries-1.txt -m udp -T 1 -c 32 -q 32 -t 1 -l 3
+DNS Performance Testing Tool
+Version 2.16.0
+
+[Status] Command line: dnsperf -s 127.0.0.1 -p 52477 -d /tmp/z53-coredns-20260908/queries-1.txt -m udp -T 1 -c 32 -q 32 -t 1 -l 3
+[Status] Sending queries (to 127.0.0.1:52477)
+[Status] Started at: Tue Sep  8 11:44:09 2026
+[Status] Stopping after 3.000000 seconds
+[Status] Testing complete (time limit)
+
+Statistics:
+
+  Queries sent:         55252
+  Queries completed:    55252 (100.00%)
+  Queries lost:         0 (0.00%)
+
+  Response codes:       NOERROR 55252 (100.00%)
+  Average packet size:  request 35, response 51
+  Run time (s):         3.001662
+  Queries per second:   18407.135780
+
+  Average Latency (s):  0.001715 (min 0.000072, max 0.013060)
+  Latency StdDev (s):   0.000514
+
+
+### 1-1-safe-tcp-32.txt
+$ taskset -c 0,3 dnsperf -s 127.0.0.1 -p 34621 -d /tmp/z53-coredns-20260908/queries-1.txt -m tcp -T 1 -c 32 -q 32 -t 1 -l 3
+DNS Performance Testing Tool
+Version 2.16.0
+
+[Status] Command line: dnsperf -s 127.0.0.1 -p 34621 -d /tmp/z53-coredns-20260908/queries-1.txt -m tcp -T 1 -c 32 -q 32 -t 1 -l 3
+[Status] Sending queries (to 127.0.0.1:34621)
+[Status] Started at: Tue Sep  8 11:44:30 2026
+[Status] Stopping after 3.000000 seconds
+[Status] Testing complete (time limit)
+
+Statistics:
+
+  Queries sent:         49774
+  Queries completed:    49774 (100.00%)
+  Queries lost:         0 (0.00%)
+
+  Response codes:       NOERROR 49774 (100.00%)
+  Average packet size:  request 35, response 51
+  Run time (s):         3.046171
+  Queries per second:   16339.857480
+
+  Average Latency (s):  0.001912 (min 0.000078, max 0.047656)
+  Latency StdDev (s):   0.000860
+
+Connection Statistics:
+
+  Connection attempts:  32 (32 successful, 100.00%)
+
+  Average Latency (s):  0.001455 (min 0.000550, max 0.001590)
+  Latency StdDev (s):   0.000175
+
+
+### 1-1-safe-udp-1.txt
+$ taskset -c 0,3 dnsperf -s 127.0.0.1 -p 34621 -d /tmp/z53-coredns-20260908/queries-1.txt -m udp -T 1 -c 1 -q 1 -t 1 -l 3
+DNS Performance Testing Tool
+Version 2.16.0
+
+[Status] Command line: dnsperf -s 127.0.0.1 -p 34621 -d /tmp/z53-coredns-20260908/queries-1.txt -m udp -T 1 -c 1 -q 1 -t 1 -l 3
+[Status] Sending queries (to 127.0.0.1:34621)
+[Status] Started at: Tue Sep  8 11:44:24 2026
+[Status] Stopping after 3.000000 seconds
+[Status] Testing complete (time limit)
+
+Statistics:
+
+  Queries sent:         42127
+  Queries completed:    42127 (100.00%)
+  Queries lost:         0 (0.00%)
+
+  Response codes:       NOERROR 42127 (100.00%)
+  Average packet size:  request 35, response 51
+  Run time (s):         3.000038
+  Queries per second:   14042.155466
+
+  Average Latency (s):  0.000058 (min 0.000057, max 0.002121)
+  Latency StdDev (s):   0.000013
+
+
+### 1-1-safe-udp-32.txt
+$ taskset -c 0,3 dnsperf -s 127.0.0.1 -p 34621 -d /tmp/z53-coredns-20260908/queries-1.txt -m udp -T 1 -c 32 -q 32 -t 1 -l 3
+DNS Performance Testing Tool
+Version 2.16.0
+
+[Status] Command line: dnsperf -s 127.0.0.1 -p 34621 -d /tmp/z53-coredns-20260908/queries-1.txt -m udp -T 1 -c 32 -q 32 -t 1 -l 3
+[Status] Sending queries (to 127.0.0.1:34621)
+[Status] Started at: Tue Sep  8 11:44:27 2026
+[Status] Stopping after 3.000000 seconds
+[Status] Testing complete (time limit)
+
+Statistics:
+
+  Queries sent:         53893
+  Queries completed:    53893 (100.00%)
+  Queries lost:         0 (0.00%)
+
+  Response codes:       NOERROR 53893 (100.00%)
+  Average packet size:  request 35, response 51
+  Run time (s):         3.001697
+  Queries per second:   17954.177254
+
+  Average Latency (s):  0.001758 (min 0.000063, max 0.008607)
+  Latency StdDev (s):   0.000254
+
+
+### 1-2-coredns-tcp-32.txt
+$ taskset -c 0,3 dnsperf -s 127.0.0.1 -p 42603 -d /tmp/z53-coredns-20260908/queries-1.txt -m tcp -T 1 -c 32 -q 32 -t 1 -l 3
+DNS Performance Testing Tool
+Version 2.16.0
+
+[Status] Command line: dnsperf -s 127.0.0.1 -p 42603 -d /tmp/z53-coredns-20260908/queries-1.txt -m tcp -T 1 -c 32 -q 32 -t 1 -l 3
+[Status] Sending queries (to 127.0.0.1:42603)
+[Status] Started at: Tue Sep  8 11:44:40 2026
+[Status] Stopping after 3.000000 seconds
+[Status] Testing complete (time limit)
+
+Statistics:
+
+  Queries sent:         336464
+  Queries completed:    336464 (100.00%)
+  Queries lost:         0 (0.00%)
+
+  Response codes:       NOERROR 336464 (100.00%)
+  Average packet size:  request 35, response 68
+  Run time (s):         3.000274
+  Queries per second:   112144.424143
+
+  Average Latency (s):  0.000275 (min 0.000008, max 0.008772)
+  Latency StdDev (s):   0.000234
+
+Connection Statistics:
+
+  Connection attempts:  32 (32 successful, 100.00%)
+
+  Average Latency (s):  0.001466 (min 0.000586, max 0.001615)
+  Latency StdDev (s):   0.000175
+
+
+### 1-2-coredns-udp-1.txt
+$ taskset -c 0,3 dnsperf -s 127.0.0.1 -p 42603 -d /tmp/z53-coredns-20260908/queries-1.txt -m udp -T 1 -c 1 -q 1 -t 1 -l 3
+DNS Performance Testing Tool
+Version 2.16.0
+
+[Status] Command line: dnsperf -s 127.0.0.1 -p 42603 -d /tmp/z53-coredns-20260908/queries-1.txt -m udp -T 1 -c 1 -q 1 -t 1 -l 3
+[Status] Sending queries (to 127.0.0.1:42603)
+[Status] Started at: Tue Sep  8 11:44:34 2026
+[Status] Stopping after 3.000000 seconds
+[Status] Testing complete (time limit)
+
+Statistics:
+
+  Queries sent:         91378
+  Queries completed:    91378 (100.00%)
+  Queries lost:         0 (0.00%)
+
+  Response codes:       NOERROR 91378 (100.00%)
+  Average packet size:  request 35, response 68
+  Run time (s):         3.000046
+  Queries per second:   30458.866297
+
+  Average Latency (s):  0.000016 (min 0.000012, max 0.001858)
+  Latency StdDev (s):   0.000014
+
+
+### 1-2-coredns-udp-32.txt
+$ taskset -c 0,3 dnsperf -s 127.0.0.1 -p 42603 -d /tmp/z53-coredns-20260908/queries-1.txt -m udp -T 1 -c 32 -q 32 -t 1 -l 3
+DNS Performance Testing Tool
+Version 2.16.0
+
+[Status] Command line: dnsperf -s 127.0.0.1 -p 42603 -d /tmp/z53-coredns-20260908/queries-1.txt -m udp -T 1 -c 32 -q 32 -t 1 -l 3
+[Status] Sending queries (to 127.0.0.1:42603)
+[Status] Started at: Tue Sep  8 11:44:37 2026
+[Status] Stopping after 3.000000 seconds
+[Status] Testing complete (time limit)
+
+Statistics:
+
+  Queries sent:         284739
+  Queries completed:    284739 (100.00%)
+  Queries lost:         0 (0.00%)
+
+  Response codes:       NOERROR 284739 (100.00%)
+  Average packet size:  request 35, response 68
+  Run time (s):         3.000256
+  Queries per second:   94904.901448
+
+  Average Latency (s):  0.000295 (min 0.000011, max 0.004163)
+  Latency StdDev (s):   0.000125
+
+
+### 1-2-fast-tcp-32.txt
+$ taskset -c 0,3 dnsperf -s 127.0.0.1 -p 47439 -d /tmp/z53-coredns-20260908/queries-1.txt -m tcp -T 1 -c 32 -q 32 -t 1 -l 3
+DNS Performance Testing Tool
+Version 2.16.0
+
+[Status] Command line: dnsperf -s 127.0.0.1 -p 47439 -d /tmp/z53-coredns-20260908/queries-1.txt -m tcp -T 1 -c 32 -q 32 -t 1 -l 3
+[Status] Sending queries (to 127.0.0.1:47439)
+[Status] Started at: Tue Sep  8 11:44:58 2026
+[Status] Stopping after 3.000000 seconds
+[Status] Testing complete (time limit)
+
+Statistics:
+
+  Queries sent:         51188
+  Queries completed:    51188 (100.00%)
+  Queries lost:         0 (0.00%)
+
+  Response codes:       NOERROR 51188 (100.00%)
+  Average packet size:  request 35, response 51
+  Run time (s):         3.041812
+  Queries per second:   16828.127445
+
+  Average Latency (s):  0.001857 (min 0.000085, max 0.043771)
+  Latency StdDev (s):   0.000822
+
+Connection Statistics:
+
+  Connection attempts:  32 (32 successful, 100.00%)
+
+  Average Latency (s):  0.002520 (min 0.000566, max 0.004528)
+  Latency StdDev (s):   0.001471
+
+
+### 1-2-fast-udp-1.txt
+$ taskset -c 0,3 dnsperf -s 127.0.0.1 -p 47439 -d /tmp/z53-coredns-20260908/queries-1.txt -m udp -T 1 -c 1 -q 1 -t 1 -l 3
+DNS Performance Testing Tool
+Version 2.16.0
+
+[Status] Command line: dnsperf -s 127.0.0.1 -p 47439 -d /tmp/z53-coredns-20260908/queries-1.txt -m udp -T 1 -c 1 -q 1 -t 1 -l 3
+[Status] Sending queries (to 127.0.0.1:47439)
+[Status] Started at: Tue Sep  8 11:44:52 2026
+[Status] Stopping after 3.000000 seconds
+[Status] Testing complete (time limit)
+
+Statistics:
+
+  Queries sent:         36221
+  Queries completed:    36221 (100.00%)
+  Queries lost:         0 (0.00%)
+
+  Response codes:       NOERROR 36221 (100.00%)
+  Average packet size:  request 35, response 51
+  Run time (s):         3.000053
+  Queries per second:   12073.453369
+
+  Average Latency (s):  0.000058 (min 0.000055, max 0.008001)
+  Latency StdDev (s):   0.000061
+
+
+### 1-2-fast-udp-32.txt
+$ taskset -c 0,3 dnsperf -s 127.0.0.1 -p 47439 -d /tmp/z53-coredns-20260908/queries-1.txt -m udp -T 1 -c 32 -q 32 -t 1 -l 3
+DNS Performance Testing Tool
+Version 2.16.0
+
+[Status] Command line: dnsperf -s 127.0.0.1 -p 47439 -d /tmp/z53-coredns-20260908/queries-1.txt -m udp -T 1 -c 32 -q 32 -t 1 -l 3
+[Status] Sending queries (to 127.0.0.1:47439)
+[Status] Started at: Tue Sep  8 11:44:55 2026
+[Status] Stopping after 3.000000 seconds
+[Status] Testing complete (time limit)
+
+Statistics:
+
+  Queries sent:         52540
+  Queries completed:    52540 (100.00%)
+  Queries lost:         0 (0.00%)
+
+  Response codes:       NOERROR 52540 (100.00%)
+  Average packet size:  request 35, response 51
+  Run time (s):         3.001916
+  Queries per second:   17502.155290
+
+  Average Latency (s):  0.001801 (min 0.000067, max 0.004163)
+  Latency StdDev (s):   0.000187
+
+
+### 1-2-safe-tcp-32.txt
+$ taskset -c 0,3 dnsperf -s 127.0.0.1 -p 60131 -d /tmp/z53-coredns-20260908/queries-1.txt -m tcp -T 1 -c 32 -q 32 -t 1 -l 3
+DNS Performance Testing Tool
+Version 2.16.0
+
+[Status] Command line: dnsperf -s 127.0.0.1 -p 60131 -d /tmp/z53-coredns-20260908/queries-1.txt -m tcp -T 1 -c 32 -q 32 -t 1 -l 3
+[Status] Sending queries (to 127.0.0.1:60131)
+[Status] Started at: Tue Sep  8 11:44:49 2026
+[Status] Stopping after 3.000000 seconds
+[Status] Testing complete (time limit)
+
+Statistics:
+
+  Queries sent:         50403
+  Queries completed:    50403 (100.00%)
+  Queries lost:         0 (0.00%)
+
+  Response codes:       NOERROR 50403 (100.00%)
+  Average packet size:  request 35, response 51
+  Run time (s):         3.047089
+  Queries per second:   16541.361280
+
+  Average Latency (s):  0.001866 (min 0.000075, max 0.047969)
+  Latency StdDev (s):   0.000854
+
+Connection Statistics:
+
+  Connection attempts:  32 (32 successful, 100.00%)
+
+  Average Latency (s):  0.001452 (min 0.000569, max 0.001593)
+  Latency StdDev (s):   0.000174
+
+
+### 1-2-safe-udp-1.txt
+$ taskset -c 0,3 dnsperf -s 127.0.0.1 -p 60131 -d /tmp/z53-coredns-20260908/queries-1.txt -m udp -T 1 -c 1 -q 1 -t 1 -l 3
+DNS Performance Testing Tool
+Version 2.16.0
+
+[Status] Command line: dnsperf -s 127.0.0.1 -p 60131 -d /tmp/z53-coredns-20260908/queries-1.txt -m udp -T 1 -c 1 -q 1 -t 1 -l 3
+[Status] Sending queries (to 127.0.0.1:60131)
+[Status] Started at: Tue Sep  8 11:44:43 2026
+[Status] Stopping after 3.000000 seconds
+[Status] Testing complete (time limit)
+
+Statistics:
+
+  Queries sent:         42414
+  Queries completed:    42414 (100.00%)
+  Queries lost:         0 (0.00%)
+
+  Response codes:       NOERROR 42414 (100.00%)
+  Average packet size:  request 35, response 51
+  Run time (s):         3.000008
+  Queries per second:   14137.962299
+
+  Average Latency (s):  0.000058 (min 0.000057, max 0.001884)
+  Latency StdDev (s):   0.000013
+
+
+### 1-2-safe-udp-32.txt
+$ taskset -c 0,3 dnsperf -s 127.0.0.1 -p 60131 -d /tmp/z53-coredns-20260908/queries-1.txt -m udp -T 1 -c 32 -q 32 -t 1 -l 3
+DNS Performance Testing Tool
+Version 2.16.0
+
+[Status] Command line: dnsperf -s 127.0.0.1 -p 60131 -d /tmp/z53-coredns-20260908/queries-1.txt -m udp -T 1 -c 32 -q 32 -t 1 -l 3
+[Status] Sending queries (to 127.0.0.1:60131)
+[Status] Started at: Tue Sep  8 11:44:46 2026
+[Status] Stopping after 3.000000 seconds
+[Status] Testing complete (time limit)
+
+Statistics:
+
+  Queries sent:         54158
+  Queries completed:    54158 (100.00%)
+  Queries lost:         0 (0.00%)
+
+  Response codes:       NOERROR 54158 (100.00%)
+  Average packet size:  request 35, response 51
+  Run time (s):         3.001970
+  Queries per second:   18040.819862
+
+  Average Latency (s):  0.001750 (min 0.000062, max 0.004755)
+  Latency StdDev (s):   0.000141
+
+
+### 4096-0-coredns-tcp-32.txt
+$ taskset -c 0,3 dnsperf -s 127.0.0.1 -p 49043 -d /tmp/z53-coredns-20260908/queries-4096.txt -m tcp -T 1 -c 32 -q 32 -t 1 -l 3
+DNS Performance Testing Tool
+Version 2.16.0
+
+[Status] Command line: dnsperf -s 127.0.0.1 -p 49043 -d /tmp/z53-coredns-20260908/queries-4096.txt -m tcp -T 1 -c 32 -q 32 -t 1 -l 3
+[Status] Sending queries (to 127.0.0.1:49043)
+[Status] Started at: Tue Sep  8 11:45:27 2026
+[Status] Stopping after 3.000000 seconds
+[Status] Testing complete (time limit)
+
+Statistics:
+
+  Queries sent:         329353
+  Queries completed:    329353 (100.00%)
+  Queries lost:         0 (0.00%)
+
+  Response codes:       NOERROR 329353 (100.00%)
+  Average packet size:  request 35, response 68
+  Run time (s):         3.000236
+  Queries per second:   109775.697645
+
+  Average Latency (s):  0.000279 (min 0.000009, max 0.005883)
+  Latency StdDev (s):   0.000222
+
+Connection Statistics:
+
+  Connection attempts:  32 (32 successful, 100.00%)
+
+  Average Latency (s):  0.001461 (min 0.000568, max 0.001598)
+  Latency StdDev (s):   0.000174
+
+
+### 4096-0-coredns-udp-1.txt
+$ taskset -c 0,3 dnsperf -s 127.0.0.1 -p 49043 -d /tmp/z53-coredns-20260908/queries-4096.txt -m udp -T 1 -c 1 -q 1 -t 1 -l 3
+DNS Performance Testing Tool
+Version 2.16.0
+
+[Status] Command line: dnsperf -s 127.0.0.1 -p 49043 -d /tmp/z53-coredns-20260908/queries-4096.txt -m udp -T 1 -c 1 -q 1 -t 1 -l 3
+[Status] Sending queries (to 127.0.0.1:49043)
+[Status] Started at: Tue Sep  8 11:45:21 2026
+[Status] Stopping after 3.000000 seconds
+[Status] Testing complete (time limit)
+
+Statistics:
+
+  Queries sent:         97589
+  Queries completed:    97589 (100.00%)
+  Queries lost:         0 (0.00%)
+
+  Response codes:       NOERROR 97589 (100.00%)
+  Average packet size:  request 35, response 68
+  Run time (s):         3.000021
+  Queries per second:   32529.438961
+
+  Average Latency (s):  0.000016 (min 0.000012, max 0.003081)
+  Latency StdDev (s):   0.000021
+
+
+### 4096-0-coredns-udp-32.txt
+$ taskset -c 0,3 dnsperf -s 127.0.0.1 -p 49043 -d /tmp/z53-coredns-20260908/queries-4096.txt -m udp -T 1 -c 32 -q 32 -t 1 -l 3
+DNS Performance Testing Tool
+Version 2.16.0
+
+[Status] Command line: dnsperf -s 127.0.0.1 -p 49043 -d /tmp/z53-coredns-20260908/queries-4096.txt -m udp -T 1 -c 32 -q 32 -t 1 -l 3
+[Status] Sending queries (to 127.0.0.1:49043)
+[Status] Started at: Tue Sep  8 11:45:24 2026
+[Status] Stopping after 3.000000 seconds
+[Status] Testing complete (time limit)
+
+Statistics:
+
+  Queries sent:         279913
+  Queries completed:    279913 (100.00%)
+  Queries lost:         0 (0.00%)
+
+  Response codes:       NOERROR 279913 (100.00%)
+  Average packet size:  request 35, response 68
+  Run time (s):         3.000286
+  Queries per second:   93295.439168
+
+  Average Latency (s):  0.000331 (min 0.000013, max 0.003887)
+  Latency StdDev (s):   0.000119
+
+
+### 4096-0-fast-tcp-32.txt
+$ taskset -c 0,3 dnsperf -s 127.0.0.1 -p 47471 -d /tmp/z53-coredns-20260908/queries-4096.txt -m tcp -T 1 -c 32 -q 32 -t 1 -l 3
+DNS Performance Testing Tool
+Version 2.16.0
+
+[Status] Command line: dnsperf -s 127.0.0.1 -p 47471 -d /tmp/z53-coredns-20260908/queries-4096.txt -m tcp -T 1 -c 32 -q 32 -t 1 -l 3
+[Status] Sending queries (to 127.0.0.1:47471)
+[Status] Started at: Tue Sep  8 11:45:18 2026
+[Status] Stopping after 3.000000 seconds
+[Status] Testing complete (time limit)
+
+Statistics:
+
+  Queries sent:         50668
+  Queries completed:    50668 (100.00%)
+  Queries lost:         0 (0.00%)
+
+  Response codes:       NOERROR 50668 (100.00%)
+  Average packet size:  request 35, response 51
+  Run time (s):         3.045050
+  Queries per second:   16639.464048
+
+  Average Latency (s):  0.001873 (min 0.000078, max 0.045592)
+  Latency StdDev (s):   0.000987
+
+Connection Statistics:
+
+  Connection attempts:  32 (32 successful, 100.00%)
+
+  Average Latency (s):  0.001461 (min 0.000574, max 0.001599)
+  Latency StdDev (s):   0.000173
+
+
+### 4096-0-fast-udp-1.txt
+$ taskset -c 0,3 dnsperf -s 127.0.0.1 -p 47471 -d /tmp/z53-coredns-20260908/queries-4096.txt -m udp -T 1 -c 1 -q 1 -t 1 -l 3
+DNS Performance Testing Tool
+Version 2.16.0
+
+[Status] Command line: dnsperf -s 127.0.0.1 -p 47471 -d /tmp/z53-coredns-20260908/queries-4096.txt -m udp -T 1 -c 1 -q 1 -t 1 -l 3
+[Status] Sending queries (to 127.0.0.1:47471)
+[Status] Started at: Tue Sep  8 11:45:12 2026
+[Status] Stopping after 3.000000 seconds
+[Status] Testing complete (time limit)
+
+Statistics:
+
+  Queries sent:         36973
+  Queries completed:    36973 (100.00%)
+  Queries lost:         0 (0.00%)
+
+  Response codes:       NOERROR 36973 (100.00%)
+  Average packet size:  request 35, response 51
+  Run time (s):         3.000059
+  Queries per second:   12324.090960
+
+  Average Latency (s):  0.000058 (min 0.000056, max 0.003656)
+  Latency StdDev (s):   0.000028
+
+
+### 4096-0-fast-udp-32.txt
+$ taskset -c 0,3 dnsperf -s 127.0.0.1 -p 47471 -d /tmp/z53-coredns-20260908/queries-4096.txt -m udp -T 1 -c 32 -q 32 -t 1 -l 3
+DNS Performance Testing Tool
+Version 2.16.0
+
+[Status] Command line: dnsperf -s 127.0.0.1 -p 47471 -d /tmp/z53-coredns-20260908/queries-4096.txt -m udp -T 1 -c 32 -q 32 -t 1 -l 3
+[Status] Sending queries (to 127.0.0.1:47471)
+[Status] Started at: Tue Sep  8 11:45:15 2026
+[Status] Stopping after 3.000000 seconds
+[Status] Testing complete (time limit)
+
+Statistics:
+
+  Queries sent:         55323
+  Queries completed:    55323 (100.00%)
+  Queries lost:         0 (0.00%)
+
+  Response codes:       NOERROR 55323 (100.00%)
+  Average packet size:  request 35, response 51
+  Run time (s):         3.001639
+  Queries per second:   18430.930568
+
+  Average Latency (s):  0.001686 (min 0.000069, max 0.006166)
+  Latency StdDev (s):   0.000234
+
+
+### 4096-0-safe-tcp-32.txt
+$ taskset -c 0,3 dnsperf -s 127.0.0.1 -p 53935 -d /tmp/z53-coredns-20260908/queries-4096.txt -m tcp -T 1 -c 32 -q 32 -t 1 -l 3
+DNS Performance Testing Tool
+Version 2.16.0
+
+[Status] Command line: dnsperf -s 127.0.0.1 -p 53935 -d /tmp/z53-coredns-20260908/queries-4096.txt -m tcp -T 1 -c 32 -q 32 -t 1 -l 3
+[Status] Sending queries (to 127.0.0.1:53935)
+[Status] Started at: Tue Sep  8 11:45:08 2026
+[Status] Stopping after 3.000000 seconds
+[Status] Testing complete (time limit)
+
+Statistics:
+
+  Queries sent:         49148
+  Queries completed:    49148 (100.00%)
+  Queries lost:         0 (0.00%)
+
+  Response codes:       NOERROR 49148 (100.00%)
+  Average packet size:  request 35, response 51
+  Run time (s):         3.040624
+  Queries per second:   16163.787433
+
+  Average Latency (s):  0.001942 (min 0.000076, max 0.042378)
+  Latency StdDev (s):   0.000900
+
+Connection Statistics:
+
+  Connection attempts:  32 (32 successful, 100.00%)
+
+  Average Latency (s):  0.001481 (min 0.000591, max 0.001622)
+  Latency StdDev (s):   0.000174
+
+
+### 4096-0-safe-udp-1.txt
+$ taskset -c 0,3 dnsperf -s 127.0.0.1 -p 53935 -d /tmp/z53-coredns-20260908/queries-4096.txt -m udp -T 1 -c 1 -q 1 -t 1 -l 3
+DNS Performance Testing Tool
+Version 2.16.0
+
+[Status] Command line: dnsperf -s 127.0.0.1 -p 53935 -d /tmp/z53-coredns-20260908/queries-4096.txt -m udp -T 1 -c 1 -q 1 -t 1 -l 3
+[Status] Sending queries (to 127.0.0.1:53935)
+[Status] Started at: Tue Sep  8 11:45:02 2026
+[Status] Stopping after 3.000000 seconds
+[Status] Testing complete (time limit)
+
+Statistics:
+
+  Queries sent:         42575
+  Queries completed:    42575 (100.00%)
+  Queries lost:         0 (0.00%)
+
+  Response codes:       NOERROR 42575 (100.00%)
+  Average packet size:  request 35, response 51
+  Run time (s):         3.000062
+  Queries per second:   14191.373378
+
+  Average Latency (s):  0.000060 (min 0.000057, max 0.003672)
+  Latency StdDev (s):   0.000022
+
+
+### 4096-0-safe-udp-32.txt
+$ taskset -c 0,3 dnsperf -s 127.0.0.1 -p 53935 -d /tmp/z53-coredns-20260908/queries-4096.txt -m udp -T 1 -c 32 -q 32 -t 1 -l 3
+DNS Performance Testing Tool
+Version 2.16.0
+
+[Status] Command line: dnsperf -s 127.0.0.1 -p 53935 -d /tmp/z53-coredns-20260908/queries-4096.txt -m udp -T 1 -c 32 -q 32 -t 1 -l 3
+[Status] Sending queries (to 127.0.0.1:53935)
+[Status] Started at: Tue Sep  8 11:45:05 2026
+[Status] Stopping after 3.000000 seconds
+[Status] Testing complete (time limit)
+
+Statistics:
+
+  Queries sent:         47865
+  Queries completed:    47865 (100.00%)
+  Queries lost:         0 (0.00%)
+
+  Response codes:       NOERROR 47865 (100.00%)
+  Average packet size:  request 35, response 51
+  Run time (s):         3.001719
+  Queries per second:   15945.863020
+
+  Average Latency (s):  0.001961 (min 0.000072, max 0.014940)
+  Latency StdDev (s):   0.000630
+
+
+### 4096-1-coredns-tcp-32.txt
+$ taskset -c 0,3 dnsperf -s 127.0.0.1 -p 40477 -d /tmp/z53-coredns-20260908/queries-4096.txt -m tcp -T 1 -c 32 -q 32 -t 1 -l 3
+DNS Performance Testing Tool
+Version 2.16.0
+
+[Status] Command line: dnsperf -s 127.0.0.1 -p 40477 -d /tmp/z53-coredns-20260908/queries-4096.txt -m tcp -T 1 -c 32 -q 32 -t 1 -l 3
+[Status] Sending queries (to 127.0.0.1:40477)
+[Status] Started at: Tue Sep  8 11:45:50 2026
+[Status] Stopping after 3.000000 seconds
+[Status] Testing complete (time limit)
+
+Statistics:
+
+  Queries sent:         330012
+  Queries completed:    330012 (100.00%)
+  Queries lost:         0 (0.00%)
+
+  Response codes:       NOERROR 330012 (100.00%)
+  Average packet size:  request 35, response 68
+  Run time (s):         3.000231
+  Queries per second:   109995.530344
+
+  Average Latency (s):  0.000281 (min 0.000009, max 0.003868)
+  Latency StdDev (s):   0.000211
+
+Connection Statistics:
+
+  Connection attempts:  32 (32 successful, 100.00%)
+
+  Average Latency (s):  0.001466 (min 0.000576, max 0.001605)
+  Latency StdDev (s):   0.000174
+
+
+### 4096-1-coredns-udp-1.txt
+$ taskset -c 0,3 dnsperf -s 127.0.0.1 -p 40477 -d /tmp/z53-coredns-20260908/queries-4096.txt -m udp -T 1 -c 1 -q 1 -t 1 -l 3
+DNS Performance Testing Tool
+Version 2.16.0
+
+[Status] Command line: dnsperf -s 127.0.0.1 -p 40477 -d /tmp/z53-coredns-20260908/queries-4096.txt -m udp -T 1 -c 1 -q 1 -t 1 -l 3
+[Status] Sending queries (to 127.0.0.1:40477)
+[Status] Started at: Tue Sep  8 11:45:44 2026
+[Status] Stopping after 3.000000 seconds
+[Status] Testing complete (time limit)
+
+Statistics:
+
+  Queries sent:         125765
+  Queries completed:    125765 (100.00%)
+  Queries lost:         0 (0.00%)
+
+  Response codes:       NOERROR 125765 (100.00%)
+  Average packet size:  request 35, response 68
+  Run time (s):         3.000021
+  Queries per second:   41921.373217
+
+  Average Latency (s):  0.000016 (min 0.000013, max 0.004083)
+  Latency StdDev (s):   0.000016
+
+
+### 4096-1-coredns-udp-32.txt
+$ taskset -c 0,3 dnsperf -s 127.0.0.1 -p 40477 -d /tmp/z53-coredns-20260908/queries-4096.txt -m udp -T 1 -c 32 -q 32 -t 1 -l 3
+DNS Performance Testing Tool
+Version 2.16.0
+
+[Status] Command line: dnsperf -s 127.0.0.1 -p 40477 -d /tmp/z53-coredns-20260908/queries-4096.txt -m udp -T 1 -c 32 -q 32 -t 1 -l 3
+[Status] Sending queries (to 127.0.0.1:40477)
+[Status] Started at: Tue Sep  8 11:45:47 2026
+[Status] Stopping after 3.000000 seconds
+[Status] Testing complete (time limit)
+
+Statistics:
+
+  Queries sent:         277325
+  Queries completed:    277325 (100.00%)
+  Queries lost:         0 (0.00%)
+
+  Response codes:       NOERROR 277325 (100.00%)
+  Average packet size:  request 35, response 68
+  Run time (s):         3.000268
+  Queries per second:   92433.409282
+
+  Average Latency (s):  0.000335 (min 0.000015, max 0.004074)
+  Latency StdDev (s):   0.000121
+
+
+### 4096-1-fast-tcp-32.txt
+$ taskset -c 0,3 dnsperf -s 127.0.0.1 -p 48569 -d /tmp/z53-coredns-20260908/queries-4096.txt -m tcp -T 1 -c 32 -q 32 -t 1 -l 3
+DNS Performance Testing Tool
+Version 2.16.0
+
+[Status] Command line: dnsperf -s 127.0.0.1 -p 48569 -d /tmp/z53-coredns-20260908/queries-4096.txt -m tcp -T 1 -c 32 -q 32 -t 1 -l 3
+[Status] Sending queries (to 127.0.0.1:48569)
+[Status] Started at: Tue Sep  8 11:45:40 2026
+[Status] Stopping after 3.000000 seconds
+[Status] Testing complete (time limit)
+
+Statistics:
+
+  Queries sent:         50227
+  Queries completed:    50227 (100.00%)
+  Queries lost:         0 (0.00%)
+
+  Response codes:       NOERROR 50227 (100.00%)
+  Average packet size:  request 35, response 51
+  Run time (s):         3.041387
+  Queries per second:   16514.504731
+
+  Average Latency (s):  0.001900 (min 0.000078, max 0.042102)
+  Latency StdDev (s):   0.000860
+
+Connection Statistics:
+
+  Connection attempts:  32 (32 successful, 100.00%)
+
+  Average Latency (s):  0.001459 (min 0.000563, max 0.001594)
+  Latency StdDev (s):   0.000172
+
+
+### 4096-1-fast-udp-1.txt
+$ taskset -c 0,3 dnsperf -s 127.0.0.1 -p 48569 -d /tmp/z53-coredns-20260908/queries-4096.txt -m udp -T 1 -c 1 -q 1 -t 1 -l 3
+DNS Performance Testing Tool
+Version 2.16.0
+
+[Status] Command line: dnsperf -s 127.0.0.1 -p 48569 -d /tmp/z53-coredns-20260908/queries-4096.txt -m udp -T 1 -c 1 -q 1 -t 1 -l 3
+[Status] Sending queries (to 127.0.0.1:48569)
+[Status] Started at: Tue Sep  8 11:45:34 2026
+[Status] Stopping after 3.000000 seconds
+[Status] Testing complete (time limit)
+
+Statistics:
+
+  Queries sent:         38399
+  Queries completed:    38399 (100.00%)
+  Queries lost:         0 (0.00%)
+
+  Response codes:       NOERROR 38399 (100.00%)
+  Average packet size:  request 35, response 51
+  Run time (s):         3.000020
+  Queries per second:   12799.581336
+
+  Average Latency (s):  0.000060 (min 0.000055, max 0.000624)
+  Latency StdDev (s):   0.000006
+
+
+### 4096-1-fast-udp-32.txt
+$ taskset -c 0,3 dnsperf -s 127.0.0.1 -p 48569 -d /tmp/z53-coredns-20260908/queries-4096.txt -m udp -T 1 -c 32 -q 32 -t 1 -l 3
+DNS Performance Testing Tool
+Version 2.16.0
+
+[Status] Command line: dnsperf -s 127.0.0.1 -p 48569 -d /tmp/z53-coredns-20260908/queries-4096.txt -m udp -T 1 -c 32 -q 32 -t 1 -l 3
+[Status] Sending queries (to 127.0.0.1:48569)
+[Status] Started at: Tue Sep  8 11:45:37 2026
+[Status] Stopping after 3.000000 seconds
+[Status] Testing complete (time limit)
+
+Statistics:
+
+  Queries sent:         52025
+  Queries completed:    52025 (100.00%)
+  Queries lost:         0 (0.00%)
+
+  Response codes:       NOERROR 52025 (100.00%)
+  Average packet size:  request 35, response 51
+  Run time (s):         3.001634
+  Queries per second:   17332.226381
+
+  Average Latency (s):  0.001827 (min 0.000071, max 0.006120)
+  Latency StdDev (s):   0.000214
+
+
+### 4096-1-safe-tcp-32.txt
+$ taskset -c 0,3 dnsperf -s 127.0.0.1 -p 36169 -d /tmp/z53-coredns-20260908/queries-4096.txt -m tcp -T 1 -c 32 -q 32 -t 1 -l 3
+DNS Performance Testing Tool
+Version 2.16.0
+
+[Status] Command line: dnsperf -s 127.0.0.1 -p 36169 -d /tmp/z53-coredns-20260908/queries-4096.txt -m tcp -T 1 -c 32 -q 32 -t 1 -l 3
+[Status] Sending queries (to 127.0.0.1:36169)
+[Status] Started at: Tue Sep  8 11:45:59 2026
+[Status] Stopping after 3.000000 seconds
+[Status] Testing complete (time limit)
+
+Statistics:
+
+  Queries sent:         49438
+  Queries completed:    49438 (100.00%)
+  Queries lost:         0 (0.00%)
+
+  Response codes:       NOERROR 49438 (100.00%)
+  Average packet size:  request 35, response 51
+  Run time (s):         3.043496
+  Queries per second:   16243.819607
+
+  Average Latency (s):  0.001929 (min 0.000075, max 0.043846)
+  Latency StdDev (s):   0.001013
+
+Connection Statistics:
+
+  Connection attempts:  32 (32 successful, 100.00%)
+
+  Average Latency (s):  0.001453 (min 0.000556, max 0.001588)
+  Latency StdDev (s):   0.000175
+
+
+### 4096-1-safe-udp-1.txt
+$ taskset -c 0,3 dnsperf -s 127.0.0.1 -p 36169 -d /tmp/z53-coredns-20260908/queries-4096.txt -m udp -T 1 -c 1 -q 1 -t 1 -l 3
+DNS Performance Testing Tool
+Version 2.16.0
+
+[Status] Command line: dnsperf -s 127.0.0.1 -p 36169 -d /tmp/z53-coredns-20260908/queries-4096.txt -m udp -T 1 -c 1 -q 1 -t 1 -l 3
+[Status] Sending queries (to 127.0.0.1:36169)
+[Status] Started at: Tue Sep  8 11:45:53 2026
+[Status] Stopping after 3.000000 seconds
+[Status] Testing complete (time limit)
+
+Statistics:
+
+  Queries sent:         42448
+  Queries completed:    42448 (100.00%)
+  Queries lost:         0 (0.00%)
+
+  Response codes:       NOERROR 42448 (100.00%)
+  Average packet size:  request 35, response 51
+  Run time (s):         3.000048
+  Queries per second:   14149.106948
+
+  Average Latency (s):  0.000060 (min 0.000057, max 0.004644)
+  Latency StdDev (s):   0.000039
+
+
+### 4096-1-safe-udp-32.txt
+$ taskset -c 0,3 dnsperf -s 127.0.0.1 -p 36169 -d /tmp/z53-coredns-20260908/queries-4096.txt -m udp -T 1 -c 32 -q 32 -t 1 -l 3
+DNS Performance Testing Tool
+Version 2.16.0
+
+[Status] Command line: dnsperf -s 127.0.0.1 -p 36169 -d /tmp/z53-coredns-20260908/queries-4096.txt -m udp -T 1 -c 32 -q 32 -t 1 -l 3
+[Status] Sending queries (to 127.0.0.1:36169)
+[Status] Started at: Tue Sep  8 11:45:56 2026
+[Status] Stopping after 3.000000 seconds
+[Status] Testing complete (time limit)
+
+Statistics:
+
+  Queries sent:         53864
+  Queries completed:    53864 (100.00%)
+  Queries lost:         0 (0.00%)
+
+  Response codes:       NOERROR 53864 (100.00%)
+  Average packet size:  request 35, response 51
+  Run time (s):         3.001668
+  Queries per second:   17944.689419
+
+  Average Latency (s):  0.001742 (min 0.000063, max 0.007161)
+  Latency StdDev (s):   0.000249
+
+
+### 4096-2-coredns-tcp-32.txt
+$ taskset -c 0,3 dnsperf -s 127.0.0.1 -p 41753 -d /tmp/z53-coredns-20260908/queries-4096.txt -m tcp -T 1 -c 32 -q 32 -t 1 -l 3
+DNS Performance Testing Tool
+Version 2.16.0
+
+[Status] Command line: dnsperf -s 127.0.0.1 -p 41753 -d /tmp/z53-coredns-20260908/queries-4096.txt -m tcp -T 1 -c 32 -q 32 -t 1 -l 3
+[Status] Sending queries (to 127.0.0.1:41753)
+[Status] Started at: Tue Sep  8 11:46:09 2026
+[Status] Stopping after 3.000000 seconds
+[Status] Testing complete (time limit)
+
+Statistics:
+
+  Queries sent:         334862
+  Queries completed:    334862 (100.00%)
+  Queries lost:         0 (0.00%)
+
+  Response codes:       NOERROR 334862 (100.00%)
+  Average packet size:  request 35, response 68
+  Run time (s):         3.000304
+  Queries per second:   111609.356918
+
+  Average Latency (s):  0.000274 (min 0.000009, max 0.003703)
+  Latency StdDev (s):   0.000208
+
+Connection Statistics:
+
+  Connection attempts:  32 (32 successful, 100.00%)
+
+  Average Latency (s):  0.001463 (min 0.000561, max 0.001597)
+  Latency StdDev (s):   0.000177
+
+
+### 4096-2-coredns-udp-1.txt
+$ taskset -c 0,3 dnsperf -s 127.0.0.1 -p 41753 -d /tmp/z53-coredns-20260908/queries-4096.txt -m udp -T 1 -c 1 -q 1 -t 1 -l 3
+DNS Performance Testing Tool
+Version 2.16.0
+
+[Status] Command line: dnsperf -s 127.0.0.1 -p 41753 -d /tmp/z53-coredns-20260908/queries-4096.txt -m udp -T 1 -c 1 -q 1 -t 1 -l 3
+[Status] Sending queries (to 127.0.0.1:41753)
+[Status] Started at: Tue Sep  8 11:46:03 2026
+[Status] Stopping after 3.000000 seconds
+[Status] Testing complete (time limit)
+
+Statistics:
+
+  Queries sent:         87479
+  Queries completed:    87479 (100.00%)
+  Queries lost:         0 (0.00%)
+
+  Response codes:       NOERROR 87479 (100.00%)
+  Average packet size:  request 35, response 68
+  Run time (s):         3.000009
+  Queries per second:   29159.579188
+
+  Average Latency (s):  0.000016 (min 0.000012, max 0.004208)
+  Latency StdDev (s):   0.000028
+
+
+### 4096-2-coredns-udp-32.txt
+$ taskset -c 0,3 dnsperf -s 127.0.0.1 -p 41753 -d /tmp/z53-coredns-20260908/queries-4096.txt -m udp -T 1 -c 32 -q 32 -t 1 -l 3
+DNS Performance Testing Tool
+Version 2.16.0
+
+[Status] Command line: dnsperf -s 127.0.0.1 -p 41753 -d /tmp/z53-coredns-20260908/queries-4096.txt -m udp -T 1 -c 32 -q 32 -t 1 -l 3
+[Status] Sending queries (to 127.0.0.1:41753)
+[Status] Started at: Tue Sep  8 11:46:06 2026
+[Status] Stopping after 3.000000 seconds
+[Status] Testing complete (time limit)
+
+Statistics:
+
+  Queries sent:         261491
+  Queries completed:    261491 (100.00%)
+  Queries lost:         0 (0.00%)
+
+  Response codes:       NOERROR 261491 (100.00%)
+  Average packet size:  request 35, response 68
+  Run time (s):         3.000393
+  Queries per second:   87152.249722
+
+  Average Latency (s):  0.000333 (min 0.000012, max 0.005788)
+  Latency StdDev (s):   0.000167
+
+
+### 4096-2-fast-tcp-32.txt
+$ taskset -c 0,3 dnsperf -s 127.0.0.1 -p 48067 -d /tmp/z53-coredns-20260908/queries-4096.txt -m tcp -T 1 -c 32 -q 32 -t 1 -l 3
+DNS Performance Testing Tool
+Version 2.16.0
+
+[Status] Command line: dnsperf -s 127.0.0.1 -p 48067 -d /tmp/z53-coredns-20260908/queries-4096.txt -m tcp -T 1 -c 32 -q 32 -t 1 -l 3
+[Status] Sending queries (to 127.0.0.1:48067)
+[Status] Started at: Tue Sep  8 11:46:31 2026
+[Status] Stopping after 3.000000 seconds
+[Status] Testing complete (time limit)
+
+Statistics:
+
+  Queries sent:         50419
+  Queries completed:    50419 (100.00%)
+  Queries lost:         0 (0.00%)
+
+  Response codes:       NOERROR 50419 (100.00%)
+  Average packet size:  request 35, response 51
+  Run time (s):         3.043010
+  Queries per second:   16568.792084
+
+  Average Latency (s):  0.001893 (min 0.000075, max 0.044120)
+  Latency StdDev (s):   0.000924
+
+Connection Statistics:
+
+  Connection attempts:  32 (32 successful, 100.00%)
+
+  Average Latency (s):  0.001462 (min 0.000575, max 0.001607)
+  Latency StdDev (s):   0.000174
+
+
+### 4096-2-fast-udp-1.txt
+$ taskset -c 0,3 dnsperf -s 127.0.0.1 -p 48067 -d /tmp/z53-coredns-20260908/queries-4096.txt -m udp -T 1 -c 1 -q 1 -t 1 -l 3
+DNS Performance Testing Tool
+Version 2.16.0
+
+[Status] Command line: dnsperf -s 127.0.0.1 -p 48067 -d /tmp/z53-coredns-20260908/queries-4096.txt -m udp -T 1 -c 1 -q 1 -t 1 -l 3
+[Status] Sending queries (to 127.0.0.1:48067)
+[Status] Started at: Tue Sep  8 11:46:25 2026
+[Status] Stopping after 3.000000 seconds
+[Status] Testing complete (time limit)
+
+Statistics:
+
+  Queries sent:         37093
+  Queries completed:    37093 (100.00%)
+  Queries lost:         0 (0.00%)
+
+  Response codes:       NOERROR 37093 (100.00%)
+  Average packet size:  request 35, response 51
+  Run time (s):         3.000021
+  Queries per second:   12364.246784
+
+  Average Latency (s):  0.000059 (min 0.000055, max 0.002124)
+  Latency StdDev (s):   0.000014
+
+
+### 4096-2-fast-udp-32.txt
+$ taskset -c 0,3 dnsperf -s 127.0.0.1 -p 48067 -d /tmp/z53-coredns-20260908/queries-4096.txt -m udp -T 1 -c 32 -q 32 -t 1 -l 3
+DNS Performance Testing Tool
+Version 2.16.0
+
+[Status] Command line: dnsperf -s 127.0.0.1 -p 48067 -d /tmp/z53-coredns-20260908/queries-4096.txt -m udp -T 1 -c 32 -q 32 -t 1 -l 3
+[Status] Sending queries (to 127.0.0.1:48067)
+[Status] Started at: Tue Sep  8 11:46:28 2026
+[Status] Stopping after 3.000000 seconds
+[Status] Testing complete (time limit)
+
+Statistics:
+
+  Queries sent:         55978
+  Queries completed:    55978 (100.00%)
+  Queries lost:         0 (0.00%)
+
+  Response codes:       NOERROR 55978 (100.00%)
+  Average packet size:  request 35, response 51
+  Run time (s):         3.001686
+  Queries per second:   18648.852678
+
+  Average Latency (s):  0.001686 (min 0.000069, max 0.005051)
+  Latency StdDev (s):   0.000122
+
+
+### 4096-2-safe-tcp-32.txt
+$ taskset -c 0,3 dnsperf -s 127.0.0.1 -p 36787 -d /tmp/z53-coredns-20260908/queries-4096.txt -m tcp -T 1 -c 32 -q 32 -t 1 -l 3
+DNS Performance Testing Tool
+Version 2.16.0
+
+[Status] Command line: dnsperf -s 127.0.0.1 -p 36787 -d /tmp/z53-coredns-20260908/queries-4096.txt -m tcp -T 1 -c 32 -q 32 -t 1 -l 3
+[Status] Sending queries (to 127.0.0.1:36787)
+[Status] Started at: Tue Sep  8 11:46:19 2026
+[Status] Stopping after 3.000000 seconds
+[Status] Testing complete (time limit)
+
+Statistics:
+
+  Queries sent:         48383
+  Queries completed:    48383 (100.00%)
+  Queries lost:         0 (0.00%)
+
+  Response codes:       NOERROR 48383 (100.00%)
+  Average packet size:  request 35, response 51
+  Run time (s):         3.046631
+  Queries per second:   15880.820487
+
+  Average Latency (s):  0.001947 (min 0.000074, max 0.048030)
+  Latency StdDev (s):   0.000978
+
+Connection Statistics:
+
+  Connection attempts:  32 (32 successful, 100.00%)
+
+  Average Latency (s):  0.001459 (min 0.000559, max 0.001599)
+  Latency StdDev (s):   0.000175
+
+
+### 4096-2-safe-udp-1.txt
+$ taskset -c 0,3 dnsperf -s 127.0.0.1 -p 36787 -d /tmp/z53-coredns-20260908/queries-4096.txt -m udp -T 1 -c 1 -q 1 -t 1 -l 3
+DNS Performance Testing Tool
+Version 2.16.0
+
+[Status] Command line: dnsperf -s 127.0.0.1 -p 36787 -d /tmp/z53-coredns-20260908/queries-4096.txt -m udp -T 1 -c 1 -q 1 -t 1 -l 3
+[Status] Sending queries (to 127.0.0.1:36787)
+[Status] Started at: Tue Sep  8 11:46:13 2026
+[Status] Stopping after 3.000000 seconds
+[Status] Testing complete (time limit)
+
+Statistics:
+
+  Queries sent:         33972
+  Queries completed:    33972 (100.00%)
+  Queries lost:         0 (0.00%)
+
+  Response codes:       NOERROR 33972 (100.00%)
+  Average packet size:  request 35, response 51
+  Run time (s):         3.000026
+  Queries per second:   11323.901860
+
+  Average Latency (s):  0.000060 (min 0.000057, max 0.004201)
+  Latency StdDev (s):   0.000026
+
+
+### 4096-2-safe-udp-32.txt
+$ taskset -c 0,3 dnsperf -s 127.0.0.1 -p 36787 -d /tmp/z53-coredns-20260908/queries-4096.txt -m udp -T 1 -c 32 -q 32 -t 1 -l 3
+DNS Performance Testing Tool
+Version 2.16.0
+
+[Status] Command line: dnsperf -s 127.0.0.1 -p 36787 -d /tmp/z53-coredns-20260908/queries-4096.txt -m udp -T 1 -c 32 -q 32 -t 1 -l 3
+[Status] Sending queries (to 127.0.0.1:36787)
+[Status] Started at: Tue Sep  8 11:46:16 2026
+[Status] Stopping after 3.000000 seconds
+[Status] Testing complete (time limit)
+
+Statistics:
+
+  Queries sent:         54370
+  Queries completed:    54370 (100.00%)
+  Queries lost:         0 (0.00%)
+
+  Response codes:       NOERROR 54370 (100.00%)
+  Average packet size:  request 35, response 51
+  Run time (s):         3.001728
+  Queries per second:   18112.900303
+
+  Average Latency (s):  0.001746 (min 0.000070, max 0.007397)
+  Latency StdDev (s):   0.000205
+
+
+## Independent userspace profiles and disassembly
+
+### safe-record.txt
+$ perf record -F 199 -e cycles:u --call-graph dwarf -p 867933 -o /tmp/z53-profile-20260908/safe.data -- sleep 4
+[ perf record: Woken up 20 times to write data ]
+[ perf record: Captured and wrote 4.792 MB /tmp/z53-profile-20260908/safe.data (588 samples) ]
+
+### safe-flat.txt
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 588  of event 'cycles:u'
+# Event count (approx.): 8768344966
+#
+# Overhead  Command  Shared Object     Symbol
+# ........  .......  ................  ......................................
+#
+    87.01%  z53      z53               [.] compiler_rt.memset
+     6.25%  z53      z53               [.] runtime.forward_linux.Driver.drive
+     2.92%  z53      z53               [.] compiler_rt.memcpy.memcpyFast
+
+
+#
+# (Tip: For a higher level overview, try: perf report --sort comm,dso)
+#
+
+### safe-memset.txt
+
+/nix/store/vg4gbwdg89p6bsrrq1pfxy6qpmx5n91j-z53-0.0.0/bin/z53:	file format elf64-littleaarch64
+
+Disassembly of section .text:
+
+000000000112d5cc <compiler_rt.memset>:
+ 112d5cc:      	cbz	x2, 0x112d5ec <memset+0x20>
+ 112d5d0:      	stp	x29, x30, [sp, #-0x10]!
+ 112d5d4:      	mov	x29, sp
+ 112d5d8:      	mov	x8, x0
+ 112d5dc:      	subs	x2, x2, #0x1
+ 112d5e0:      	strb	w1, [x8], #0x1
+ 112d5e4:      	b.ne	0x112d5dc <memset+0x10>
+ 112d5e8:      	ldp	x29, x30, [sp], #0x10
+ 112d5ec:      	ret
+
+### fast-record.txt
+$ perf record -F 199 -e cycles:u --call-graph dwarf -p 867987 -o /tmp/z53-profile-20260908/fast.data -- sleep 4
+[ perf record: Woken up 20 times to write data ]
+[ perf record: Captured and wrote 4.906 MB /tmp/z53-profile-20260908/fast.data (602 samples) ]
+
+### fast-flat.txt
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 602  of event 'cycles:u'
+# Event count (approx.): 8992580501
+#
+# Overhead  Command  Shared Object     Symbol
+# ........  .......  ................  ...........................................
+#
+    85.46%  z53      z53               [.] compiler_rt.memset
+     6.93%  z53      z53               [.] runtime.forward_linux.Driver.drive
+     3.55%  z53      z53               [.] compiler_rt.memcpy.memcpyFast
+
+
+#
+# (Tip: To see call chains by final symbol taking CPU time (bottom up) use perf report -G)
+#
+
+### fast-memset.txt
+
+/tmp/z53-compare-fast-package/bin/z53:	file format elf64-littleaarch64
+
+Disassembly of section .text:
+
+0000000001118d1c <compiler_rt.memset>:
+ 1118d1c:      	cbz	x2, 0x1118d3c <memset+0x20>
+ 1118d20:      	stp	x29, x30, [sp, #-0x10]!
+ 1118d24:      	mov	x29, sp
+ 1118d28:      	mov	x8, x0
+ 1118d2c:      	subs	x2, x2, #0x1
+ 1118d30:      	strb	w1, [x8], #0x1
+ 1118d34:      	b.ne	0x1118d2c <memset+0x10>
+ 1118d38:      	ldp	x29, x30, [sp], #0x10
+ 1118d3c:      	ret
+
+### coredns-record.txt
+$ perf record -F 199 -e cycles:u --call-graph dwarf -p 868007 -o /tmp/z53-profile-20260908/coredns.data -- sleep 4
+[ perf record: Woken up 20 times to write data ]
+[ perf record: Captured and wrote 4.851 MB /tmp/z53-profile-20260908/coredns.data (595 samples) ]
+
+### coredns-flat.txt
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 595  of event 'cycles:u'
+# Event count (approx.): 6985455153
+#
+# Overhead  Command  Shared Object     Symbol
+# ........  .......  ................  ................................................................................................
+#
+     7.25%  coredns  coredns           [.] runtime.pcvalue
+     5.33%  coredns  coredns           [.] runtime.tryDeferToSpanScan
+     4.86%  coredns  [vdso]            [.] __kernel_clock_gettime
+     4.57%  coredns  coredns           [.] runtime.mallocgcSmallScanNoHeader
+     3.63%  coredns  coredns           [.] runtime.(*stkframe).getStackMap
+     3.43%  coredns  coredns           [.] runtime.step
+     3.10%  coredns  coredns           [.] runtime.findfunc
+     2.70%  coredns  coredns           [.] runtime.scanObjectsSmall
+     2.27%  coredns  coredns           [.] runtime.(*unwinder).resolveInternal
+     2.11%  coredns  coredns           [.] runtime.(*moduledata).textAddr
+     1.88%  coredns  coredns           [.] internal/bytealg.IndexByteString
+     1.74%  coredns  coredns           [.] runtime.adjustpointers
+     1.56%  coredns  coredns           [.] github.com/miekg/dns.sprintName
+     1.55%  coredns  coredns           [.] runtime.mallocgcSmallNoscan
+     1.52%  coredns  coredns           [.] runtime.gcmarknewobject
+     1.37%  coredns  coredns           [.] runtime.memmove
+     1.19%  coredns  coredns           [.] runtime.(*mspan).writeHeapBitsSmall
+     1.05%  coredns  coredns           [.] runtime.adjustframe
+     1.04%  coredns  coredns           [.] github.com/coredns/coredns/core/dnsserver.(*Server).ServeDNS
+     1.03%  coredns  coredns           [.] runtime.funcMaxSPDelta
+     1.02%  coredns  coredns           [.] runtime.scanObject
+
+
+#
+# (Tip: Profiling branch (mis)predictions with: perf record -b / perf report)
+#
+
+## Profile driver
+import importlib.util, pathlib, subprocess, os, json, time
+
+spec = importlib.util.spec_from_file_location('bench', '/Users/matt/code/z53/scripts/compare-coredns.py')
+bench = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(bench)
+root = pathlib.Path('/tmp/z53-profile-20260908')
+root.mkdir()
+old = pathlib.Path('/tmp/z53-coredns-20260908')
+metadata = json.loads((old / 'metadata.json').read_text())
+upstream = bench.port()
+config = root / 'upstream.Corefile'
+config.write_text(f'bench.test:{upstream} {{\n bind 127.0.0.1\n log\n template IN A {{\n answer "{{{{ .Name }}}} 3600 IN A 192.0.2.1"\n }}\n}}\n')
+upstream_log = root / 'upstream.log'
+with bench.server(metadata['binaries']['coredns']['path'], config, upstream, upstream_log, 1):
+    for variant in ['safe', 'fast', 'coredns']:
+        number = bench.port()
+        config = root / f'{variant}.conf'
+        if variant == 'coredns':
+            config.write_text(f'.:{number} {{\n bind 127.0.0.1\n log\n errors\n cache 3600\n forward . 127.0.0.1:{upstream} {{\n policy sequential\n max_fails 0\n }}\n}}\n')
+        else:
+            config.write_text(f'.{{ .listen = .{{ "127.0.0.1:{number}" }}, .zones = .{{ .{{ .suffix = ".", .upstreams = .{{ .{{ .address = "127.0.0.1:{upstream}" }} }}, .max_fails = 0, }} }}, }}')
+        with bench.server(metadata['binaries'][variant]['path'], config, number, os.devnull, 2) as process:
+            bench.measure(root, old / 'queries-4096.txt', number, 'udp', 1, variant + '-warm')
+            before = upstream_log.stat().st_size
+            arguments = ['perf', 'record', '-F', '199', '-e', 'cycles:u', '--call-graph', 'dwarf',
+                         '-p', str(process.pid), '-o', str(root / f'{variant}.data'), '--', 'sleep', '4']
+            recorder = subprocess.Popen(arguments, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+            try:
+                time.sleep(0.1)
+                bench.measure(root, old / 'queries-4096.txt', number, 'udp', 32, variant + '-profile-load', 3)
+                output, _ = recorder.communicate(timeout=6)
+                assert recorder.returncode == 0, output
+            finally:
+                if recorder.poll() is None:
+                    recorder.terminate()
+                    recorder.wait(timeout=5)
+            assert upstream_log.stat().st_size == before
+            (root / f'{variant}-record.txt').write_text('$ ' + ' '.join(arguments) + '\n' + output)
+            for mode, extra in [('flat', ['--call-graph', 'none']), ('stacks', [])]:
+                arguments = ['perf', 'report', '--stdio', '--no-children', '--percent-limit', '1', '-i', str(root / f'{variant}.data')] + extra
+                output = bench.command(arguments)
+                (root / f'{variant}-{mode}.txt').write_text(output)
+                if mode == 'flat':
+                    print(variant, output, flush=True)
+
+## Disabled-cache control
+warning: Git tree '/Users/matt/code/z53' is dirty
+Traceback (most recent call last):
+  File "/tmp/z53-compare-no-cache-control.py", line 196, in <module>
+    main()
+    ~~~~^^
+  File "/tmp/z53-compare-no-cache-control.py", line 190, in main
+    results.extend(run_variant(options, root, data, upstream, upstream_log,
+                   ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                               variant, binary, count, trial))
+                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/tmp/z53-compare-no-cache-control.py", line 145, in run_variant
+    assert result["upstream_bytes"] == 0, "Cache workload reached the upstream"
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Cache workload reached the upstream
+
+The mutation adds .cache = null to the generated z53 configuration only.
+The gate rejects upstream traffic during the claimed cache-hit workload.
+The production source never changes. Context-manager cleanup stops the owned resolvers.
+
+## Validation
+
+ReleaseFast: test-resolver 60/60, test-wire 35/35, fuzz-gate fixture checks passed.
+All-system flake evaluation, zig fmt, both ziglint invocations, and nixfmt passed.
+54 timed trials completed 5,988,170 queries with zero losses and only NOERROR.
+The upstream log did not grow during any timed trial.
+Production z53 retained PID 782149 and NRestarts=0 after measurement.
+No service restart, deployment, dependency update, or production build-mode change occurred.
+
+The first smoke parser expected a different dnsperf RCODE summary format.
+The corrected parser accepts the actual NOERROR count followed by its percentage.
+An initial one-CPU generator caused severe gaps in single-outstanding runs.
+The committed harness gives its sender and receiver two CPUs.
+The raw q=1 throughput remains variable, so only its latency supplies the low-load comparison.
+The initial path-based Nix expression timed out before output.
+The git+file expression built the same-source ReleaseFast package successfully.
+
+## Nix derivation comparison
+{
+  "out": [
+    "/nix/store/vg4gbwdg89p6bsrrq1pfxy6qpmx5n91j-z53-0.0.0",
+    "/nix/store/1cs68xdw00d95vmyym8jmrv7k6q205a7-z53-0.0.0"
+  ],
+  "zigBuildFlags": [
+    "-Doptimize=ReleaseSafe -Dcpu=baseline --system zig-pkg",
+    "-Doptimize=ReleaseFast -Dcpu=baseline --system zig-pkg"
+  ],
+  "inputs_identical": true,
+  "source": "/nix/store/ykwsdaiqg8k91lab224a248b1ckkbxry-source"
+}
