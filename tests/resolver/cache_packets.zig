@@ -126,7 +126,7 @@ test "cache full packet arena refresh eviction and cross bank transfer allocate 
     try testing.expectEqual(.stored, (try fixture.forward(35)).insertion);
     try testing.expectEqual(address, fixture.cache.positive.entries.items(.bytes)[0].?.ptr);
     try testing.expect(!allocator.has_induced_failure);
-    try testing.expectEqual(3, allocator.allocations);
+    try testing.expectEqual(5, allocator.allocations);
     try testing.expectEqual(0, allocator.deallocations);
     try testing.expectEqual(0, allocator.resize_index);
 }

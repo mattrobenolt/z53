@@ -446,11 +446,11 @@ Each enabled cache allocates two fixed `std.MultiArrayList` banks at startup.
 Positive and denial entries have independent capacities and intrusive LRU lists.
 SERVFAIL consumes denial capacity.
 A successful replacement removes the same key from the other bank.
-Lookup scans dense fingerprint columns through `std.mem.findScalarPos` and checks complete keys at matching slots.
+A preallocated stdlib hash index selects stable slots. Lookup checks complete keys for each candidate.
 Eviction and recency updates use stable slot links.
 
 Each entry owns one rewritten packet, at most 65535 bytes.
-Allocated metadata has a tested upper budget of 320 bytes per configured slot.
+Allocated columns and hash indexes share a tested upper budget of 384 bytes per configured slot.
 The packet pool amendment below replaces individual packet allocations with fixed backing storage.
 
 Insertion obtains storage before eviction or transfers a same-class victim after all fallible rewrites.
@@ -1233,6 +1233,8 @@ Listener hostname support remains required. Health probes and final packaging re
 
 ## Dense cache columns (#1)
 
+The fixed hash index amendment below supersedes this lookup design and its total metadata budget.
+
 Approval: [#1](https://github.com/mattrobenolt/z53/issues/1#issuecomment-5564692321).
 Matt selected stdlib SoA lookup before a separate packet slab experiment.
 This slice changes metadata only. Packet allocation and transactional publication remain unchanged.
@@ -1270,12 +1272,13 @@ The implementation needs no custom allocator, class partition policy, or general
 The default backing budget is 8 MiB per enabled zone, shared across positive and denial banks.
 Validation permits 64 KiB through 256 MiB per zone and at most 512 MiB across enabled zones.
 These are product budgets, not performance conclusions. Disabled caches allocate neither banks nor packet backing.
-Each enabled cache makes three startup allocations. Failure releases every earlier allocation.
+This slice used three startup allocations per enabled cache. The hash index amendment below adds two.
+Failure releases every earlier allocation.
 
 The backing budget includes stdlib arena headers, alignment, free blocks, and unused arena capacity.
 Pool control occupies at most 512 additional bytes per zone and remains counted in the fixed runtime zone metadata.
 Entry columns retain their separate 320-byte-per-slot cap, including explicit packet class ownership.
-General allocator bookkeeping for the three startup allocations remains outside these byte totals.
+General allocator bookkeeping remains outside these byte totals.
 
 Classes retain their blocks until cache teardown. Free space in another class cannot satisfy an exhausted class.
 Rounding can almost double live packet bytes. Arena growth can fail with unused backing space.
@@ -1378,3 +1381,26 @@ ReleaseSafe and the portable baseline CPU remain the package defaults.
 The comparison also tests explicit `neoverse_v3` builds without a production deployment.
 An explicit CPU model avoids dependence on the machine that supplies a Nix build.
 The [scratch comparison](benchmarks/2026-09-08-scratch.txt) records the measured source revisions and limits.
+
+## Fixed cache hash index — 2026-09-08 (#1)
+
+Resource trade: [#1](https://github.com/mattrobenolt/z53/issues/1#issuecomment-5592452509).
+The cache retains its fixed `std.MultiArrayList` columns and stable LRU slots.
+One preallocated `std.HashMapUnmanaged(u32, void, Context, 80)` per bank replaces the linear fingerprint lookup.
+The index stores slot numbers. Its context reads stored fingerprints without copies of DNS keys.
+Adapted lookup hashes the requested key and compares its full name, type, class, and DO state against each candidate.
+
+Each occupied slot owns exactly one index key. Removal and transfer delete that key before the slot changes.
+Insertion publishes the new slot fingerprint before index insertion. The reserved map capacity covers every configured slot.
+Query operations use allocator-free methods. A full bank selects its LRU victim without a vacant-slot scan.
+The hash retains its low-bit entropy. Only a zero result maps to one, which preserves the vacant-column sentinel.
+
+An enabled cache now makes five startup allocations. The packet backing budget remains unchanged.
+Allocated metadata now has a 384-byte bound per configured entry, including the hash allocation and its header.
+The smallest bank needs 380 bytes. Default columns plus indexes total 6483888 bytes across both banks, up from 6320000.
+Index control stays within the fixed runtime budget. Allocation failures release all earlier storage.
+
+The stdlib miss loop stops after at most the allocated bucket count, even after tombstones fill every bucket.
+Tests exercise that state and repeated slot reuse with a failing general allocator.
+Collision fixtures rebuild the index after forced full-hash collisions and retain complete-key checks.
+The experiment requires a paired throughput gain before retention. Production remains unchanged.

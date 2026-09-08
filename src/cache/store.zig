@@ -32,7 +32,9 @@ pub const Key = struct {
         std.mem.writeInt(u16, canonical[length + 2 ..][0..2], self.class, .little);
         canonical[length + 4] = @intFromEnum(self.dnssec);
         // Zero denotes an empty slot, never a valid fingerprint. Equality resolves collisions.
-        return std.hash.Wyhash.hash(0, canonical[0 .. length + 5]) | 1;
+        // Zero marks vacant columns. The hash index needs entropy in the low bits.
+        const value = std.hash.Wyhash.hash(0, canonical[0 .. length + 5]);
+        return if (value == 0) 1 else value;
     }
 
     fn equal(self: *const Key, other: *const Key) bool {
@@ -69,32 +71,55 @@ pub const Entry = struct {
     }
 };
 
+pub const IndexContext = struct {
+    fingerprints: []const u64,
+
+    pub fn hash(self: IndexContext, index: u32) u64 {
+        return self.fingerprints[index];
+    }
+
+    pub fn eql(_: IndexContext, source: u32, target: u32) bool {
+        return source == target;
+    }
+};
+
+pub const LookupContext = struct {
+    bank: *const Bank,
+
+    pub fn hash(_: LookupContext, key: *const Key) u64 {
+        return key.fingerprint();
+    }
+
+    pub fn eql(self: LookupContext, key: *const Key, index: u32) bool {
+        return self.bank.entries.items(.key)[index].equal(key);
+    }
+};
+
 pub const Bank = struct {
+    pub const Context = IndexContext;
+
     entries: std.MultiArrayList(Entry) = .empty,
+    index: std.HashMapUnmanaged(u32, void, IndexContext, 80) = .empty,
     first: ?u32 = null,
     last: ?u32 = null,
 
     pub fn init(self: *Bank, allocator: std.mem.Allocator, capacity: u32) error{OutOfMemory}!void {
         self.* = .{};
         try self.entries.setCapacity(allocator, capacity);
+        errdefer self.entries.deinit(allocator);
         self.entries.len = capacity;
         for (0..capacity) |index| self.entries.set(index, .{});
+        try self.index.ensureTotalCapacityContext(allocator, capacity, self.indexContext());
     }
 
     pub fn deinit(self: *Bank, allocator: std.mem.Allocator) void {
+        self.index.deinit(allocator);
         self.entries.deinit(allocator);
         self.* = undefined;
     }
 
     pub fn find(self: *const Bank, key: *const Key) ?u32 {
-        const fingerprints = self.entries.items(.fingerprint);
-        const fingerprint = key.fingerprint();
-        var start: usize = 0;
-        while (std.mem.findScalarPos(u64, fingerprints, start, fingerprint)) |index| {
-            if (self.entries.items(.key)[index].equal(key)) return @intCast(index);
-            start = index + 1;
-        }
-        return null;
+        return self.index.getKeyAdapted(key, LookupContext{ .bank = self });
     }
 
     /// Publish into an empty stable slot. Fixtures use this same metadata path.
@@ -103,11 +128,15 @@ pub const Bank = struct {
         std.debug.assert(entry.bytes != null);
         self.entries.set(index, entry.*);
         self.entries.items(.fingerprint)[index] = entry.key.fingerprint();
+        // Each occupied slot owns one map key. Replacement removes its old key first.
+        self.index.putAssumeCapacityNoClobberContext(index, {}, self.indexContext());
         self.prepend(index);
     }
 
     pub fn remove(self: *Bank, storage: *packets.Storage, index: u32) void {
         self.unlink(index);
+        const removed = self.index.removeContext(index, self.indexContext());
+        std.debug.assert(removed);
         storage.destroy(
             self.entries.items(.bytes)[index].?,
             self.entries.items(.packet_class)[index],
@@ -119,6 +148,8 @@ pub const Bank = struct {
     pub fn take(self: *Bank, index: u32) []u8 {
         const bytes = self.entries.items(.bytes)[index].?;
         self.unlink(index);
+        const removed = self.index.removeContext(index, self.indexContext());
+        std.debug.assert(removed);
         self.entries.set(index, .{});
         return bytes;
     }
@@ -130,10 +161,15 @@ pub const Bank = struct {
 
     pub fn slot(self: *const Bank, key: *const Key) u32 {
         if (self.find(key)) |index| return index;
+        if (self.index.count() == self.entries.len) return self.last.?;
         if (std.mem.findScalar(u64, self.entries.items(.fingerprint), 0)) |index| {
             return @intCast(index);
         }
-        return self.last.?;
+        unreachable;
+    }
+
+    fn indexContext(self: *const Bank) IndexContext {
+        return .{ .fingerprints = self.entries.items(.fingerprint) };
     }
 
     fn prepend(self: *Bank, index: u32) void {

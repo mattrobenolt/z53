@@ -8,13 +8,13 @@ test "cache allocation budget covers insertion refresh lookup and stale delivery
     var fixture: f.Fixture = undefined;
     try fixture.init(allocator.allocator(), &f.zone);
     defer fixture.cache.deinit();
-    try testing.expectEqual(@as(usize, 3), allocator.allocations);
+    try testing.expectEqual(@as(usize, 5), allocator.allocations);
     allocator.fail_index = allocator.alloc_index;
     try testing.expect(@sizeOf(f.cache.Entry) <= 320);
     try fixture.response(0x8500);
     try fixture.record(1, .answer, 5, 0);
     _ = try fixture.forward(0);
-    try testing.expectEqual(@as(usize, 3), allocator.allocations);
+    try testing.expectEqual(@as(usize, 5), allocator.allocations);
     allocator.fail_index = allocator.alloc_index;
     const held = allocator.allocated_bytes - allocator.freed_bytes;
     for (0..32) |_| {
@@ -28,12 +28,12 @@ test "cache allocation budget covers insertion refresh lookup and stale delivery
     try testing.expect(!allocator.has_induced_failure);
     try testing.expectEqual(held, allocator.allocated_bytes - allocator.freed_bytes);
     try testing.expectEqual(.stale, (try fixture.failure(10)).answer.source);
-    try testing.expectEqual(@as(usize, 3), allocator.allocations);
+    try testing.expectEqual(@as(usize, 5), allocator.allocations);
 }
 
 // SPEC §§1.11, 3.7: each startup allocation failure releases all preceding owned storage.
 test "cache startup allocation failures roll back" {
-    for (0..3) |fail_index| {
+    for (0..5) |fail_index| {
         var allocator = testing.FailingAllocator.init(testing.allocator, .{
             .fail_index = fail_index,
         });
@@ -127,9 +127,9 @@ test "cache bounded capacity one churn and zone isolation" {
         try fixture.response(0x8500);
         try fixture.record(1, .answer, 60, 0);
         _ = try fixture.forward(0);
-        try testing.expectEqual(@as(usize, 3), allocator.allocations - allocator.deallocations);
+        try testing.expectEqual(@as(usize, 5), allocator.allocations - allocator.deallocations);
         try testing.expect(!allocator.has_induced_failure);
-        const bound = 2 * @sizeOf(f.cache.Entry) + zone.cache.?.packet_bytes_max;
+        const bound = 2 * 384 + zone.cache.?.packet_bytes_max;
         try testing.expect(allocator.allocated_bytes - allocator.freed_bytes <= bound);
         try testing.expectEqual(null, try isolated.lookup(
             &fixture.client.request,

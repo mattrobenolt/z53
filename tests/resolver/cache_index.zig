@@ -53,7 +53,7 @@ test "cache fingerprint folds case excludes tails and preserves binary framing" 
 }
 
 // SPEC §§1.11, 3.7: stable slots, collisions, removal, reuse, and LRU.
-test "cache dense index first last tails collisions and slot reuse" {
+test "cache fixed hash index collisions stable slots and slot reuse" {
     for ([_]u32{ 1, 3, 17, 33 }) |capacity| {
         var packets: f.cache.packets.Storage = undefined;
         try packets.init(testing.allocator, 64 * 1024);
@@ -74,24 +74,29 @@ test "cache dense index first last tails collisions and slot reuse" {
                 .bytes = try packets.copy(&.{42}),
             });
         }
-        // Every candidate collides with the final key, including vector and scalar tails.
+        // Rebuild after each forced full-hash collision without changing keys or slot identity.
         @memset(bank.entries.items(.fingerprint), key.fingerprint());
+        bank.index.rehash(Bank.Context{ .fingerprints = bank.entries.items(.fingerprint) });
         try testing.expectEqual(capacity - 1, bank.find(&key).?);
         var missing = key;
         missing.kind = 28;
         @memset(bank.entries.items(.fingerprint), missing.fingerprint());
+        bank.index.rehash(Bank.Context{ .fingerprints = bank.entries.items(.fingerprint) });
         try testing.expectEqual(null, bank.find(&missing));
         missing = key;
         missing.class = 3;
         @memset(bank.entries.items(.fingerprint), missing.fingerprint());
+        bank.index.rehash(Bank.Context{ .fingerprints = bank.entries.items(.fingerprint) });
         try testing.expectEqual(null, bank.find(&missing));
         missing = key;
         missing.dnssec = .requested;
         @memset(bank.entries.items(.fingerprint), missing.fingerprint());
+        bank.index.rehash(Bank.Context{ .fingerprints = bank.entries.items(.fingerprint) });
         try testing.expectEqual(null, bank.find(&missing));
         for (bank.entries.items(.key), bank.entries.items(.fingerprint)) |*stored, *fingerprint| {
             fingerprint.* = stored.fingerprint();
         }
+        bank.index.rehash(Bank.Context{ .fingerprints = bank.entries.items(.fingerprint) });
         for (0..capacity) |index| {
             try keyInit(&key, @intCast(index));
             try testing.expectEqual(index, bank.find(&key).?);
@@ -109,16 +114,71 @@ test "cache dense index first last tails collisions and slot reuse" {
         });
         try testing.expectEqual(capacity - 1, bank.find(&key).?);
         try testing.expectEqual(capacity - 1, bank.first.?);
+        const owned = bank.take(capacity - 1);
+        try testing.expectEqual(capacity - 1, bank.index.count());
+        try testing.expectEqual(null, bank.find(&key));
+        bank.put(capacity - 1, &.{ .key = key, .bytes = owned });
+        try testing.expectEqual(capacity - 1, bank.find(&key).?);
     }
 }
 
-// SPEC §1.3: the stdlib allocation is the sum of columns, not the padded Entry size or RSS.
-test "cache dense metadata byte budget matches actual allocations" {
+// SPEC §1.3: the smallest bank includes the minimum hash allocation within its per-slot budget.
+test "cache hash metadata stays bounded at small growth and maximum capacities" {
+    for ([_]u32{ 1, 2, 3, 6, 7, 12, 13, 25, 26, 128, 1024, 10000, 100000 }) |capacity| {
+        var allocator = testing.FailingAllocator.init(testing.allocator, .{});
+        var bank: Bank = .{};
+        try bank.init(allocator.allocator(), capacity);
+        defer bank.deinit(allocator.allocator());
+        try testing.expectEqual(2, allocator.allocations);
+        try testing.expect(allocator.allocated_bytes <= 384 * @as(usize, capacity));
+        try testing.expectEqual(0, bank.index.count());
+    }
+}
+
+// SPEC §1.3: metadata includes the fixed stdlib index, not just columns or the padded Entry size.
+test "cache metadata byte budget includes the preallocated hash index" {
+    var index_allocator = testing.FailingAllocator.init(testing.allocator, .{});
+    var index: std.AutoHashMapUnmanaged(u32, void) = .empty;
+    try index.ensureTotalCapacity(index_allocator.allocator(), f.zone.cache.?.capacity);
+    defer index.deinit(index_allocator.allocator());
     var allocator = testing.FailingAllocator.init(testing.allocator, .{});
     var cache: f.cache.Cache = undefined;
     try cache.init(allocator.allocator(), &f.zone);
     defer cache.deinit();
     const bytes = std.MultiArrayList(f.cache.Entry).capacityInBytes(f.zone.cache.?.capacity);
-    try testing.expectEqual(2 * bytes + f.zone.cache.?.packet_bytes_max, allocator.allocated_bytes);
-    try testing.expect(bytes <= 320 * f.zone.cache.?.capacity);
+    const bank_bytes = bytes + index_allocator.allocated_bytes;
+    const total_bytes = 2 * bank_bytes + f.zone.cache.?.packet_bytes_max;
+    try testing.expectEqual(total_bytes, allocator.allocated_bytes);
+    try testing.expect(bank_bytes <= 384 * f.zone.cache.?.capacity);
+}
+
+// SPEC §§1.10, 3.7: misses remain bounded after every bucket contains a tombstone.
+test "cache hash tombstone saturation retains miss bounds and allocation free reuse" {
+    var allocator = testing.FailingAllocator.init(testing.allocator, .{});
+    var packets: f.cache.packets.Storage = undefined;
+    try packets.init(allocator.allocator(), 64 * 1024);
+    defer packets.deinit(allocator.allocator());
+    var bank: Bank = .{};
+    try bank.init(allocator.allocator(), 1);
+    defer bank.deinit(allocator.allocator());
+    var key: Key = undefined;
+    try keyInit(&key, 0);
+    bank.put(0, &.{ .key = key, .bytes = try packets.copy(&.{42}) });
+    const allocations = allocator.alloc_index;
+    allocator.fail_index = allocations;
+    for (1..256) |index| {
+        const owned = bank.take(0);
+        try testing.expectEqual(0, bank.index.count());
+        try testing.expectEqual(null, bank.find(&key));
+        try keyInit(&key, @intCast(index));
+        bank.put(0, &.{ .key = key, .bytes = owned });
+        try testing.expectEqual(0, bank.find(&key).?);
+    }
+    for (bank.index.metadata.?[0..bank.index.capacity()]) |metadata| {
+        try testing.expectEqual(false, metadata.isFree());
+    }
+    try keyInit(&key, 1000);
+    try testing.expectEqual(null, bank.find(&key));
+    try testing.expectEqual(allocations, allocator.alloc_index);
+    try testing.expect(!allocator.has_induced_failure);
 }

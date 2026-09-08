@@ -172,11 +172,11 @@ The combined cap includes zone metadata and a separate 256 KiB allowance for Lin
 The mapping allowance includes page rounding for the submission, completion, and provided-buffer mappings.
 Configuration retains its separate section 5.1 bounds. Kernel socket memory is outside these userspace storage caps.
 
-The cache exclusion covers allocated metadata columns and the fixed packet backing allocation.
-The cache retains these separate bounds, exclusive of general allocator bookkeeping for its three startup allocations:
+The cache exclusion covers allocated metadata columns, hash indexes, and the fixed packet backing allocation.
+These bounds exclude general allocator bookkeeping for five startup allocations per enabled cache:
 
 - 1000000 aggregate positive and denial entries across all zones
-- At most 320 bytes of allocated metadata per configured entry slot
+- At most 384 bytes of allocated metadata per configured entry slot
 - At most 65535 live packet bytes per entry
 - Configured packet backing, including pool arena headers, alignment, free blocks, and unused arena capacity
 - At most 512 bytes of pool control per zone, also counted in the fixed runtime zone metadata
@@ -409,8 +409,9 @@ Connections:
 - Capacity: 10000 positive and 10000 negative entries. Evict the
   least-recently-used entry when full.
   Each bank preallocates fixed `std.MultiArrayList` columns at its configured capacity.
-  A dense 64-bit fingerprint scan selects candidates. Exact key equality resolves collisions.
-  Slots and LRU links remain stable. Queries never resize these columns.
+  A fixed `std.HashMapUnmanaged` index stores slot numbers and selects candidates through 64-bit fingerprints.
+  Exact key equality resolves collisions. Slots and LRU links remain stable.
+  Queries never resize the columns or indexes.
 - Packet storage: `packet_bytes_max` defaults to 8 MiB per zone, shared across both banks.
   One fixed allocation backs eleven `std.heap.MemoryPool` classes, from 64 through 65536 bytes in powers of two.
   Each entry records its class. Freed blocks return to that class, without a general allocator fallback.

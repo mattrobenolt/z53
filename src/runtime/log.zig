@@ -27,6 +27,7 @@ pub const Sink = struct {
 };
 
 /// The event thread owns this workspace. Each synchronous sink call consumes its borrowed bytes.
+/// Sink callbacks must not call logging functions on the same logger.
 pub const Logger = struct {
     sink: Sink = .{},
     buffer: [line_bytes_max]u8 = undefined,
