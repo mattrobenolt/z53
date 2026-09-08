@@ -152,33 +152,42 @@ test "cache metadata byte budget includes the preallocated hash index" {
     try testing.expect(bank_bytes <= 384 * f.zone.cache.?.capacity);
 }
 
-// SPEC §§1.10, 3.7: misses remain bounded after every bucket contains a tombstone.
-test "cache hash tombstone saturation retains miss bounds and allocation free reuse" {
-    var allocator = testing.FailingAllocator.init(testing.allocator, .{});
-    var packets: f.cache.packets.Storage = undefined;
-    try packets.init(allocator.allocator(), 64 * 1024);
-    defer packets.deinit(allocator.allocator());
-    var bank: Bank = .{};
-    try bank.init(allocator.allocator(), 1);
-    defer bank.deinit(allocator.allocator());
-    var key: Key = undefined;
-    try keyInit(&key, 0);
-    bank.put(0, &.{ .key = key, .bytes = try packets.copy(&.{42}) });
-    const allocations = allocator.alloc_index;
-    allocator.fail_index = allocations;
-    for (1..256) |index| {
-        const owned = bank.take(0);
-        try testing.expectEqual(0, bank.index.count());
-        try testing.expectEqual(null, bank.find(&key));
-        try keyInit(&key, @intCast(index));
-        bank.put(0, &.{ .key = key, .bytes = owned });
-        try testing.expectEqual(0, bank.find(&key).?);
+// SPEC §§1.10, 3.7: unique-name churn retains free buckets without allocations.
+test "cache hash churn retains a free bucket reserve without allocations" {
+    for ([_]u32{ 1, 6, 13, 128 }) |capacity| {
+        var allocator = testing.FailingAllocator.init(testing.allocator, .{});
+        var packets: f.cache.packets.Storage = undefined;
+        try packets.init(allocator.allocator(), 64 * 1024);
+        defer packets.deinit(allocator.allocator());
+        var bank: Bank = .{};
+        try bank.init(allocator.allocator(), capacity);
+        defer bank.deinit(allocator.allocator());
+        var key: Key = undefined;
+        for (0..capacity) |index| {
+            try keyInit(&key, @intCast(index));
+            bank.put(@intCast(index), &.{ .key = key, .bytes = try packets.copy(&.{42}) });
+        }
+        const allocations = allocator.alloc_index;
+        allocator.fail_index = allocations;
+        const reserve = (bank.index.capacity() - capacity) / 2;
+        for (0..4 * bank.index.capacity()) |index| {
+            const slot = bank.last.?;
+            const owned = bank.take(slot);
+            try testing.expectEqual(capacity - 1, bank.index.count());
+            try keyInit(&key, @intCast(capacity + index));
+            try testing.expectEqual(null, bank.find(&key));
+            bank.put(slot, &.{ .key = key, .bytes = owned });
+            try testing.expectEqual(slot, bank.find(&key).?);
+            var free: u32 = 0;
+            for (bank.index.metadata.?[0..bank.index.capacity()]) |metadata| {
+                if (metadata.isFree()) free += 1;
+            }
+            if (free < reserve) {
+                std.debug.print("free buckets={d}, required={d}\n", .{ free, reserve });
+                return error.FreeBucketReserveLost;
+            }
+        }
+        try testing.expectEqual(allocations, allocator.alloc_index);
+        try testing.expect(!allocator.has_induced_failure);
     }
-    for (bank.index.metadata.?[0..bank.index.capacity()]) |metadata| {
-        try testing.expectEqual(false, metadata.isFree());
-    }
-    try keyInit(&key, 1000);
-    try testing.expectEqual(null, bank.find(&key));
-    try testing.expectEqual(allocations, allocator.alloc_index);
-    try testing.expect(!allocator.has_induced_failure);
 }

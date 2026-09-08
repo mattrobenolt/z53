@@ -1388,7 +1388,7 @@ Resource trade: [#1](https://github.com/mattrobenolt/z53/issues/1#issuecomment-5
 The cache retains its fixed `std.MultiArrayList` columns and stable LRU slots.
 One preallocated `std.HashMapUnmanaged(u32, void, Context, 80)` per bank replaces the linear fingerprint lookup.
 The index stores slot numbers. Its context reads stored fingerprints without copies of DNS keys.
-Adapted lookup hashes the requested key and compares its full name, type, class, and DO state against each candidate.
+Adapted lookup hashes the requested key and compares the complete DNS key against each candidate.
 
 Each occupied slot owns exactly one index key. Removal and transfer delete that key before the slot changes.
 Insertion publishes the new slot fingerprint before index insertion. The reserved map capacity covers every configured slot.
@@ -1401,6 +1401,17 @@ The smallest bank needs 380 bytes. Default columns plus indexes total 6483888 by
 Index control stays within the fixed runtime budget. Allocation failures release all earlier storage.
 
 The stdlib miss loop stops after at most the allocated bucket count, even after tombstones fill every bucket.
-Tests exercise that state and repeated slot reuse with a failing general allocator.
+That bound does not prevent a performance regression. Aged index tests exposed the difference after 320000 unique replacements.
+Median misses rose from 2668 to 34077 ns. Median insert/evict rose from 5363 to 71392 ns.
+These index-only measurements exclude packet work and do not measure DNS throughput.
+
+A removal counter now triggers stdlib rehashes without allocation.
+The threshold is half the difference between allocated buckets and configured entry capacity.
+Each removal can add at most one tombstone. A rehash resets the debt before half the reserved spare buckets disappear.
+The counter uses configured capacity, so a later population increase cannot exhaust the free-bucket reserve.
+The operation changes only bucket positions.
+
+A reserve regression failed before this change with `free buckets=2, required=3`.
+It checks tight and spare capacities under unique-name churn with a failing general allocator.
 Collision fixtures rebuild the index after forced full-hash collisions and retain complete-key checks.
-The experiment requires a paired throughput gain before retention. Production remains unchanged.
+The combined index experiment requires both a paired throughput gain and an aged-churn pass before retention. Production remains unchanged.

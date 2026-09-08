@@ -412,6 +412,7 @@ Connections:
   A fixed `std.HashMapUnmanaged` index stores slot numbers and selects candidates through 64-bit fingerprints.
   Exact key equality resolves collisions. Slots and LRU links remain stable.
   Queries never resize the columns or indexes.
+  A removal counter triggers allocation-free rehashes before tombstones consume half the reserved spare buckets.
 - Packet storage: `packet_bytes_max` defaults to 8 MiB per zone, shared across both banks.
   One fixed allocation backs eleven `std.heap.MemoryPool` classes, from 64 through 65536 bytes in powers of two.
   Each entry records its class. Freed blocks return to that class, without a general allocator fallback.

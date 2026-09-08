@@ -100,6 +100,7 @@ pub const Bank = struct {
 
     entries: std.MultiArrayList(Entry) = .empty,
     index: std.HashMapUnmanaged(u32, void, IndexContext, 80) = .empty,
+    index_removals: u32 = 0,
     first: ?u32 = null,
     last: ?u32 = null,
 
@@ -135,8 +136,7 @@ pub const Bank = struct {
 
     pub fn remove(self: *Bank, storage: *packets.Storage, index: u32) void {
         self.unlink(index);
-        const removed = self.index.removeContext(index, self.indexContext());
-        std.debug.assert(removed);
+        self.removeIndex(index);
         storage.destroy(
             self.entries.items(.bytes)[index].?,
             self.entries.items(.packet_class)[index],
@@ -148,8 +148,7 @@ pub const Bank = struct {
     pub fn take(self: *Bank, index: u32) []u8 {
         const bytes = self.entries.items(.bytes)[index].?;
         self.unlink(index);
-        const removed = self.index.removeContext(index, self.indexContext());
-        std.debug.assert(removed);
+        self.removeIndex(index);
         self.entries.set(index, .{});
         return bytes;
     }
@@ -166,6 +165,18 @@ pub const Bank = struct {
             return @intCast(index);
         }
         unreachable;
+    }
+
+    fn removeIndex(self: *Bank, index: u32) void {
+        const removed = self.index.removeContext(index, self.indexContext());
+        std.debug.assert(removed);
+        self.index_removals += 1;
+        // A subsequent insertion can consume a free bucket instead of the new tombstone.
+        // Rehash before half the reserved spare buckets become tombstones.
+        const limit = (self.index.capacity() - self.entries.len) / 2;
+        if (self.index_removals < limit) return;
+        self.index.rehash(self.indexContext());
+        self.index_removals = 0;
     }
 
     fn indexContext(self: *const Bank) IndexContext {
