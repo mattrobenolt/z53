@@ -1,4 +1,3 @@
-const std = @import("std");
 const wire = @import("../wire.zig");
 
 pub const Edns = struct {
@@ -24,6 +23,7 @@ pub const Settings = struct {
 pub const Workspace = struct {
     encoder: wire.Encoder,
     order: [wire.records_max]u16,
+    seen: wire.names.ScratchSet(wire.records_max),
     count: u16,
 
     pub fn rewrite(
@@ -83,7 +83,7 @@ pub const Workspace = struct {
         if (settings.order.len != 0) {
             if (settings.order.len != packet.record_count) return error.InvalidOrder;
         }
-        var seen = std.StaticBitSet(wire.records_max).initEmpty();
+        self.seen.init();
         self.count = 0;
         var previous: wire.Section = .question;
         for (0..packet.record_count) |position| {
@@ -92,8 +92,8 @@ pub const Workspace = struct {
             else
                 settings.order[position];
             if (index >= packet.record_count) return error.InvalidOrder;
-            if (seen.isSet(index)) return error.InvalidOrder;
-            seen.set(index);
+            if (self.seen.isSet(index)) return error.InvalidOrder;
+            self.seen.set(index);
             const record = &packet.records[index];
             if (@intFromEnum(record.section) < @intFromEnum(previous)) return error.InvalidOrder;
             previous = record.section;

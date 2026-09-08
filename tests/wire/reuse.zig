@@ -4,17 +4,18 @@ const fixture = @import("fixture.zig");
 
 // SPEC §§1.10, 3.9: dirty scratch words remain unavailable after a logical reset.
 test "scratch bitmaps retain backing words and reject stale bits" {
-    inline for (.{ 16384, 65536 }) |capacity| {
+    inline for (.{ wire.records_max, 16384, 65536 }) |capacity| {
         var bits: wire.names.ScratchSet(capacity) = undefined;
         bits.bits = .initFull();
+        const original = bits.bits;
         bits.init();
         for (0..capacity) |index| try std.testing.expect(!bits.isSet(index));
-        for (bits.bits.masks) |word| try std.testing.expectEqual(std.math.maxInt(u64), word);
+        try std.testing.expectEqualSlices(u64, &original.masks, &bits.bits.masks);
         // Each first write must replace the dirty word, including its neighboring bits.
-        for (0..capacity / 64) |word| {
-            const offset = word * 64 + word % 64;
+        for (0..bits.bits.masks.len) |word| {
+            const offset = @min(capacity - 1, word * 64 + word % 64);
             bits.set(offset);
-            for (word * 64..word * 64 + 64) |index| {
+            for (word * 64..@min(capacity, word * 64 + 64)) |index| {
                 try std.testing.expectEqual(index == offset, bits.isSet(index));
             }
         }
