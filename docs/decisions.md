@@ -1414,4 +1414,37 @@ The operation changes only bucket positions.
 A reserve regression failed before this change with `free buckets=2, required=3`.
 It checks tight and spare capacities under unique-name churn with a failing general allocator.
 Collision fixtures rebuild the index after forced full-hash collisions and retain complete-key checks.
-The combined index experiment requires both a paired throughput gain and an aged-churn pass before retention. Production remains unchanged.
+The combined index passes the paired throughput and aged-churn gates.
+A longer probe includes 10000 timed operations after 320000 replacements.
+Its bounded miss and churn medians are 36.09 ns and 164.1 ns, respectively, with no allocations.
+Separate clock-instrumented trials record three rehashes per 10000 operations and rehash maxima of 116906–119126 ns.
+This occasional maintenance stall remains a tail cost. Collision-dependent probes prevent a strict linear worst-case claim.
+The [runtime capture](benchmarks/2026-09-08-runtime.txt) records complete trials and the earlier saturated-index regression.
+
+## Runtime work elimination — 2026-09-08 (#1)
+
+The forwarder enumerates only configured, supported endpoints with health enabled.
+`ArrayBuffer` retains their sparse endpoint IDs. Probe fairness, client priority, and the two-probe cap remain unchanged.
+No active list replaces the transaction or session ownership state machines.
+
+The event thread retains the logger's 3072-byte buffer.
+Each sink call receives only the current formatted prefix. Callbacks must not reenter the same logger.
+Sink failure still cannot change the DNS result. Synchronous stderr backpressure can still block the event thread.
+
+The final paired fixture records 191142 UDP QPS and 143936 TCP QPS, against 93018 and 71873 from the final scratch package.
+The runtime package delivers 2.03 times the baseline's primary geometric mean.
+Both packages retain ReleaseSafe and the baseline CPU target.
+The fresh CoreDNS comparison records 89361 UDP QPS and 108664 TCP QPS.
+All 42 final timed trials complete 15358431 queries without loss or timed upstream traffic.
+The fixture never queries production listeners or public upstreams. It excludes hosts and TLS.
+
+Three subsequent experiments fail the five-percent throughput gate:
+
+- Question-name output reuse gains 0.54%.
+- A UTC prefix cache gains 5.13%, then 3.11% in its confirmation.
+- Compile-time RFC 6761 names gain 2.24%.
+
+Targeted reverts remove all three experiments. Reverts through `135b510` restore the retained `a4871df` source exactly.
+No speculative parser or event-loop redesign follows these results.
+The capture records the untimed warmup change and the unresolved earlier timeouts.
+Production remains at `9a7c2c4`. This campaign performs no push or deployment.

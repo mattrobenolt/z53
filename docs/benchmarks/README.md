@@ -452,3 +452,125 @@ The transport scheduler and repeated pipeline stages remain unchanged.
 Production remains at source `9a7c2c4`. The Linux service retains PID 782149 and zero automatic restarts after these checks.
 These measurements do not establish a saturation limit or tail latency.
 They do not establish native Mac execution or deployment acceptance.
+
+## Runtime work elimination — 2026-09-08
+
+[Raw trials, controls, profiles, and helpers](2026-09-08-runtime.txt). Issue #1.
+
+The baseline is the final scratch package from the preceding section.
+Retained production code ends at `a4871df`. Reverts through `135b510` restore that source exactly.
+Both z53 packages use ReleaseSafe and the baseline CPU target. Dependency pins remain unchanged.
+
+### Retained changes
+
+| Change | Source | Paired primary gain |
+|---|---|---:|
+| Enumerate configured health candidates instead of all 1024 slots | `9e37d3a` | 56.52% |
+| Retain the synchronous logger buffer | `9ff8b6c` | 17.00% |
+| Index stable cache slots and bound tombstone debt | `42a760f` + `a4871df` | 10.55% |
+
+These percentages come from separate paired runs. The final comparison below measures their combined effect.
+The health list preserves sparse endpoint identities and probe policy.
+The logger exposes only the current line. Its synchronous sink can still block the event thread.
+The cache keeps full-key collision checks, stable slots, and its existing packet ownership rules.
+
+### Final paired comparison
+
+The fixture uses 4096 warm names. It has 32 clients and permits at most 32 outstanding queries.
+Each median covers three three-second trials. Resolver order rotates between trials.
+Resolver CPU 2, generator CPUs 0/3, and upstream CPU 1 remain unchanged.
+The host retains normal workloads. No CPU isolation or frequency control applies.
+
+The primary case enables health and configures one owned upstream.
+Completion logs remain enabled, with output to `/dev/null`.
+The fixture excludes hosts and TLS. It does not persist service logs.
+
+| Resolver | UDP QPS | TCP QPS | UDP CPU µs/query | TCP CPU µs/query |
+|---|---:|---:|---:|---:|
+| Final scratch package | 93018 | 71873 | 9.262 | 11.926 |
+| Retained runtime package | 191142 | 143936 | 4.253 | 5.244 |
+| CoreDNS 1.14.6 | 89361 | 108664 | 9.776 | 7.177 |
+
+The runtime package delivers 2.03 times the scratch package's primary geometric mean.
+UDP throughput reaches 2.05 times the baseline. TCP throughput reaches 2.00 times the baseline.
+z53 delivers 2.14 times CoreDNS UDP throughput and 1.32 times CoreDNS TCP throughput.
+These are observed fixture results, not maximum sustainable capacity or production latency.
+
+| Secondary case | Scratch UDP/TCP QPS | Runtime UDP/TCP QPS |
+|---|---:|---:|
+| Health disabled, one upstream | 96639 / 72781 | 194280 / 143665 |
+| Health enabled, sixteen upstream members | 94930 / 71786 | 187872 / 139235 |
+
+All 42 final timed trials complete 15358431 queries, with zero losses and only NOERROR responses.
+No timed trial increases the owned upstream log. No query reaches production or a public upstream.
+Median sampled RSS rises from 60436 KiB to 60600 KiB between the z53 packages. CoreDNS records 60216 KiB.
+These resident measurements do not replace allocated storage bounds.
+
+### Cache maintenance and memory
+
+The first index improved warm hits but accumulated tombstones until no free bucket remained.
+The longer aged fixture performs 320000 replacements before 10000 timed operations.
+Each result below is the median of three trials. All report zero bytes and allocations per operation.
+
+| Index | Miss, ns/op | Insert/evict, ns/op |
+|---|---:|---:|
+| Previous linear scan | 2659 | 5359 |
+| Index without maintenance | 33905 | 71832 |
+| Index with bounded removal debt | 36.09 | 164.1 |
+
+The timed churn interval includes periodic rehashes. These index-only results exclude DNS and packet-pool work.
+Separate clock-instrumented trials record p99 values of 240–243 ns and three rehashes per 10000 operations.
+Rehash maxima range from 116906 to 119126 ns. The occasional 119 µs stall is a real tail cost.
+Collision-dependent probes prevent a strict linear worst-case claim. These measurements do not establish DNS response percentiles.
+
+An enabled cache now makes five startup allocations instead of three.
+Default metadata rises from 6320000 to 6483888 bytes across both banks.
+The allocated metadata bound rises from 320 to 384 bytes per configured entry, with index headers included.
+The `Entry` size limit remains 320 bytes. Packet budgets and fixed runtime caps remain unchanged.
+
+### Rejected candidates and warmup
+
+Three later candidates miss the five-percent throughput gate:
+
+- Question-name output reuse: 0.54%.
+- UTC prefix cache: 5.13% initially, then 3.11% in an independent confirmation.
+- Compile-time RFC 6761 names: 2.24%.
+
+Targeted reverts remove all three changes. The campaign stops at this measured plateau.
+
+Three earlier comparisons stop during untimed dnsperf warmup. Their partial captures remain in the evidence.
+One CoreDNS-only trial takes 4.344 seconds for 4096 replies, with 28 µs average DNS latency and zero loss.
+The exact timeout mechanism remains unknown.
+
+Final warmup uses a sequential UDP client with the same names and one outstanding request.
+It permits no retry and applies a one-second deadline to each exchange.
+Eight controls reject incorrect responses or a timeout. A disabled flag check makes the control suite fail.
+Timed dnsperf commands remain unchanged. Every timed trial still requires zero loss and only NOERROR replies.
+The owned upstream log must remain unchanged during each timed trial.
+The raw capture embeds both warmup implementations and their controls.
+
+### Checks and limits
+
+The final source passes these native ReleaseSafe checks:
+
+- 42 wire tests and 62 resolver tests.
+- 60 forwarding tests.
+- 21 health tests.
+- 13 logger tests.
+- 16 configuration tests and four foundation tests.
+- The benchmark smoke.
+- Source style and whitespace checks.
+
+The executable and all test roots pass semantic compilation for x86_64 Linux and aarch64 macOS.
+Those checks do not establish native execution on either target.
+Negative controls cover sparse endpoint IDs and retained logger bytes.
+Cache controls reject fingerprint-only matches and missing index retirement.
+A reserve test fails before tombstone maintenance, then passes with the fix.
+Read-only reviews approve the retained source changes. The parent executes the tests and measurements.
+
+The final userspace profile contains 582 samples, with none lost.
+Name decode accounts for 8.49% of samples. Timestamp formatting accounts for 6.84%, and packet parsing accounts for 4.46%.
+The remaining costs span several functions. Unresolved samples account for 14.57%.
+Sample shares do not measure request-latency attribution.
+
+Production remains at source `9a7c2c4`. This campaign performs no push or deployment.
