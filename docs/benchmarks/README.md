@@ -574,3 +574,27 @@ The remaining costs span several functions. Unresolved samples account for 14.57
 Sample shares do not measure request-latency attribution.
 
 Production remains at source `9a7c2c4`. This campaign performs no push or deployment.
+
+## Per-dispatch scheduler clock (#1)
+
+[The capture](2026-09-08-clock.txt) compares `1609241` with `9f85150` under ReleaseSafe and the baseline CPU target.
+An owned trace records nine → three monotonic calls across three idle wakes.
+Twenty local UDP queries issue 140 → 80 calls. Query-duration endpoints remain fresh.
+Each receive or send dispatch retains its own scheduler sample.
+
+The table pools six trials per cell from two complete matrices, with no discarded rows.
+The primary fixture uses 4096 warm names with 32 outstanding requests. Health is enabled with one upstream.
+
+| Transport | Before QPS | Shared tick QPS | Change |
+|---|---:|---:|---:|
+| UDP | 186090.1 | 199027.8 | +6.95% |
+| TCP | 138427.0 | 148118.0 | +7.00% |
+
+All 72 trials complete 32446201 queries with zero loss. All replies are NOERROR, and no timed trial grows the upstream log.
+
+The initial matrix contains severe slowdowns in both binaries. Its health-disabled TCP median regresses 30.76%.
+That median improves 6.20% in the repeat. All six pooled medians improve, but the initial slowdown remains undiagnosed.
+These are shared-host fixture results, not a fixed production gain.
+
+Native Linux checks pass. macOS receives semantic compilation, not native execution.
+The implementation and evidence are pushed. This slice performs no production restart or deployment.

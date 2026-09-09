@@ -1470,14 +1470,17 @@ This fix includes no production restart or deployment and does not diagnose the 
 ## One scheduler timestamp per dispatch — 2026-09-08 (#1)
 
 Each runtime stores `tick_ns` after event retrieval, before dispatch. A queued event receives a fresh timestamp too.
-The cache, hosts reload, and forward scheduler share this value. Direct-driver test fixtures supply an explicit timestamp.
+The cache and hosts reload share this value. The forward scheduler uses the same snapshot.
+Direct-driver test fixtures supply an explicit timestamp.
 
 Time inside the tick consumes absolute timeout budgets. It does not renew them.
 Query-duration endpoints remain fresh. Darwin also samples fresh time for relative kernel timers.
 Linux teardown does not read the scheduler timestamp or add a clock failure to its independent drain.
 
-Native regressions check shared client/probe deadlines, refresh on real dispatch, and an independent completion timestamp.
+Native regressions check shared client/probe deadlines and refresh on real dispatch.
+A separate regression checks an independent completion timestamp.
 Each failed under its targeted mutation, then passed after restoration.
+
 The Darwin timer regression uses a bounded poll and excludes other timer registrations.
 It received semantic compilation here, not native execution or a mutation result.
 Existing cache and hosts tests exercise their runtime paths, but do not isolate the timestamp source at each seconds call site.
