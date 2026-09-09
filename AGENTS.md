@@ -1,179 +1,186 @@
-# AGENTS.md
+# Contributor instructions
 
-This is z53: a DNS caching forwarder in Zig, on io_uring and kqueue, with ztls
-for DoT. Read `SPEC.md` before writing any code. `SPEC.md` is the contract.
+z53 is a loopback DNS caching forwarder in Zig 0.16.
+It uses io_uring on Linux, kqueue on macOS, and ztls for DNS-over-TLS.
+Runtime dependencies are ztls and one libcrypto backend, with OpenSSL as the default.
+The supported targets are aarch64-linux, x86_64-linux, and aarch64-darwin.
 
----
+## Scope and specification
 
-## What This Is
+Read `SPEC.md` before code changes.
+Use `docs/decisions.md` for implementation rationale.
+Keep changes within the feature scope of the specification.
+Update `SPEC.md` in the same commit as any change to its promised behavior.
 
-A loopback caching resolver that replaces CoreDNS on two machines. Targets:
-aarch64-linux, x86_64-linux, aarch64-darwin. Zig 0.16. Runtime dependencies:
-ztls (pinned commit) and one libcrypto backend (OpenSSL default, via
-pkg-config). Everything else comes from Zig std. No event-loop dependency:
-io_uring and kqueue through std, hand-rolled proctor.
+Treat the CoreDNS 1.14.6 parity values in section 7 as requirements.
+If an implementation choice conflicts with a parity value, file an issue before a deviation.
+Search existing issues before a new issue.
+Keep issue closure tied to the acceptance criteria in `SPEC.md` section 9.
 
-Not a general-purpose resolver. Not a library. One binary, one config file,
-two deployments. If a feature is not in `SPEC.md`, it does not exist here.
+## Development workflow
 
-## Spec Discipline
+Use the Nix development shell.
+Add required tools to the flake rather than rely on global installations.
+Run commands directly inside the shell.
 
-- `SPEC.md` fixes behavior. Section 7 pins parity numbers from the CoreDNS
-  1.14.6 source tree. Treat those numbers as requirements, not suggestions.
-- A conflict between an implementation choice and a parity value is an issue,
-  never a silent deviation. File it, then decide.
-- When your work changes what the spec promises, update `SPEC.md` in the same
-  commit. A spec that lags the code is a lie.
-
-## Dev Environment
-
-The Nix flake is the source of truth for tooling. If a check needs a command,
-add it to the flake devshell. Do not suggest global installs. Inside the
-devshell, run commands directly.
-
-## Operating Loop
-
-1. Pick one slice. Verify the current state against the spec before editing.
-2. Implement the smallest honest change.
+1. Check the current behavior against the specification.
+2. Implement one focused change.
 3. Run the relevant checks.
-4. Commit the slice.
-5. Comment on the GitHub issue with evidence and residual scope.
+4. Commit the change.
+5. Record results and remaining work on the GitHub issue.
 
-Do not broaden a slice because nearby work looks tempting. "Closed" means
-proven against the acceptance criteria in `SPEC.md` §9, not "a slice landed."
-Search open issues before filing. Extend the existing issue; do not fork a
-parallel one. Committed files cite GitHub issues (`#NN`), never pi todos.
+Reference GitHub issues in committed files.
+Keep private work notes out of the repository.
+Run `zig fmt` and both ziglint invocations before every commit:
 
-## The Wire Codec Is Hostile Input
+```sh
+zig fmt --check build.zig build.zig.zon src tests
+ziglint
+ziglint build.zig src tests
+```
 
-Every length field on the DNS wire is attacker-controlled: labels, names,
-RDLENGTH, the header counts. Rules:
+## Hostile wire input
 
-- Widen narrow-type arithmetic in bounds checks. `if (remaining < len + N)`
-  in `u8`/`u16` arithmetic overflows before the comparison rejects. Write
-  `if (remaining < @as(usize, len) + N)`. This bit ztls in 14 places
-  (ztls #72) and it is a remote DoS class here too.
-- Hard limits: 63 bytes per label, 255 bytes per name, 65535 bytes per
-  message. Reject early.
-- A malformed message is FORMERR or a drop. It is never a crash, and never an
-  unbounded allocation.
-- Fuzz the decoder. `zig build test` green is not fuzz coverage.
+Treat every DNS length and count as untrusted input.
+Widen narrow integer arithmetic before bounds comparisons:
 
-## Code Style — Tiger Style
+```zig
+if (remaining < @as(usize, len) + N) return error.Truncated;
+```
 
-Safety > performance > developer experience, in that order. The full guide:
-https://github.com/tigerbeetle/tigerbeetle/blob/main/docs/TIGER_STYLE.md.
-The rules that carry the most weight here:
+Enforce these limits before access or allocation:
 
-- No recursion. Hard limit: 70 lines per function. Keep control flow in the
-  parent; push pure logic into helpers.
-- Upper bounds on everything: loops, queues, buffers, allocations.
-- `std.debug.assert` for preconditions, invariants, and postconditions that
-  catch real bugs. Never for input validation — wire input is validation
-  territory. Split compound asserts; ziglint Z016 enforces this.
-- Explicitly-sized types (`u32`, `u16`), not `usize`, unless the value is
-  genuinely pointer-sized.
-- Split compound conditions into nested `if/else`. State invariants
-  positively: `if (index < length)`.
-- Names carry units last, sorted by descending significance
-  (`latency_ms_max`). Paired names get equal character length (`source` and
-  `target`). No abbreviations.
-- Comments are sentences. They say why, not what.
-- Construct large structs in place: `fn init(target: *T) !void`. Pass
-  arguments larger than 16 bytes as `*const`. Never alias state; compute
-  values close to their use.
-- Error sets are explicit. No `anyerror` in public functions.
-- Less code is better code. A 10-line function that is obviously correct
-  beats a 30-line one that might be.
+- 63 bytes per label.
+- 255 bytes per name.
+- 65535 bytes per message.
 
-`zig fmt` and ziglint run in the devshell and in CI. Both must pass before
- every commit. ziglint is the minimum bar, not the ceiling.
+Return FORMERR or drop malformed messages.
+Never use assertions for input validation.
+Fuzz the decoder as well as ordinary unit tests.
+
+## Code style
+
+Follow [Tiger Style](https://github.com/tigerbeetle/tigerbeetle/blob/main/docs/TIGER_STYLE.md).
+Prioritize safety, then performance, then developer convenience.
+
+- Avoid recursion.
+- Keep functions within 70 lines.
+- Bound every loop and allocation.
+- Bound every queue and buffer.
+- Keep control flow in the caller and move pure logic into helpers.
+- Assert preconditions, invariants, and postconditions that detect programming errors.
+- Split compound assertions. ziglint Z016 enforces this rule.
+- Use explicitly sized integers unless a value is pointer-sized.
+- Split compound conditions into nested branches.
+- State invariants positively, such as `if (index < length)`.
+- Put units last in names, such as `latency_ms_max`.
+- Use equal-length paired names, such as `source` and `target`.
+- Avoid abbreviations.
+- Write comments as sentences that explain the reason for the code.
+- Construct large structs in place, such as `fn init(target: *T) !void`.
+- Pass arguments larger than 16 bytes as `*const`.
+- Avoid aliases for mutable state.
+- Compute values close to their use.
+- Use explicit error sets in public functions, not `anyerror`.
+- Prefer direct code over additional abstractions.
 
 ### Reusable buffers
 
-- Use `ArrayBuffer(T, N)` from `src/array_buffer.zig` for fixed append-only collections.
-- Derive capacity and index types from the buffer type.
-- Use `clear()` to reset retained storage. Do not assign `.empty` on the reuse path.
-- Use checked append methods for input-derived lengths.
-- Use `appendAssumeCapacity` only after a capacity proof.
-- Keep stream cursors, sparse maps, and kernel-owned buffers in types that express their different lifetimes.
+Use `ArrayBuffer(T, N)` from `src/array_buffer.zig` for fixed append-only collections.
+Derive capacity and index types from the buffer type.
+Use `clear()` to reset retained storage, not assignment of `.empty`.
+Use checked append methods for input-derived lengths.
+Use `appendAssumeCapacity` only after a capacity proof.
 
-### Booleans are a code smell
+Keep specialized lifetime models for these structures:
 
-Every `bool` must survive scrutiny. Before writing one, check in order:
+- Stream cursors.
+- Sparse maps.
+- Kernel-owned buffers.
 
-1. Does it encode anything? If every call site passes the same literal,
-   delete it and comment the invariant.
-2. Do two bools describe one thing with a meaningless combination? Use one
-   `enum` so the illegal state is unrepresentable.
-3. Several independent flags on a struct? Use `std.EnumSet`.
-   `flags.contains(.rotate)` reads, and the whole group packs into one byte.
-4. Presence of a thing? `?T`, not `has_thing: bool`.
-5. A two-valued parameter? A named `enum`, so call sites read `.udp`
-   instead of `false`.
+### State representation
 
-A function that takes two bools is a design error.
+Review each `bool` before addition.
 
-## Performance Is a First-Class Goal
+1. Remove parameters that receive the same literal at every call site.
+2. Replace related booleans with an enum when some combinations are invalid.
+3. Use `std.EnumSet` for independent flags on a struct.
+4. Represent presence with `?T`, not a separate boolean.
+5. Use a named enum for two-valued parameters, so call sites express their meaning.
 
-This is a loopback resolver and the load is trivial. The systems work is
-still the point of the project. Correctness first — then speed, with
-evidence.
+Do not add functions with two boolean parameters.
 
-- Allocation budget: zero heap allocations on the steady-state query path.
-  Static buffers, pools, or an arena per query. The cache and the hosts
-  table may allocate, on insert and on load. Both are bounded. No ad-hoc
-  heap use anywhere else. Bounded libcrypto allocations for connection setup
-  and infrequent key updates are exceptions. Established exchanges allocate
-  nothing.
-- io_uring: the kernel floor is 7.2.0 — no epoll fallback, no feature
-  probing, everything below exists on every supported kernel. An
-  `io_uring_setup` failure is a startup error. Use what the kernel gives,
-  or say why not in the design notes:
-  provided buffer rings (`io_uring_register_buf_ring`) with multishot
-  `RECVMSG` on unconnected UDP listeners, to retain source addresses;
-  connected UDP upstreams can use `RECV`; multishot `ACCEPT` on TCP listeners;
-  registered files where they pay; linked SQEs with `LINK_TIMEOUT` for
-  upstream read deadlines; `SINGLE_ISSUER` + `DEFER_TASKRUN` over
-  thread-pool shapes; zero-copy send for UDP responses when a measurement
-  says it pays. Where the std wrapper lacks a feature, use the raw
-  io_uring syscalls through `std.os.linux`. A plain submit/complete loop
-  that ignores provided buffers and multishot is a design failure, not a
-  simplification. macOS has no equivalent: plain `kevent`, no penalty.
-- Memory: every long-lived structure is bounded and pre-sized. Struct
-  layout is a deliberate choice — packing, padding, cache lines. The cache
-  entry is the hottest structure in the program; treat its size as a
-  budget.
-- Measurement: profile with `perf` or Instruments, disassemble with
-  `objdump -d` or `llvm-objdump`, benchmark with zig-benchmark. No
-  performance claim without a capture. Gut feelings are wrong until
-  measured.
-- SIMD: probably nowhere. std already vectorizes memcpy and memchr. The
-  honest candidates are case-insensitive name matching and label scanning.
-  Only with measured evidence — a forced `@Vector` is worse than none.
-- Tracy zones are optional. If they appear, vendor the zero-cost wrapper
-  that TigerBeetle uses. perf and disassembly are the required floor.
+## Performance and memory
+
+Keep the steady-state query path free of heap allocations.
+Use preallocated storage for query work:
+
+- Static buffers.
+- Fixed pools.
+- Bounded per-query arenas.
+
+Preallocate cache storage at startup.
+Keep hosts-load allocations bounded.
+Allow libcrypto allocations only for connection setup and infrequent key updates.
+Keep established exchanges allocation-free.
+
+Account for layout, padding, and alignment in long-lived structures.
+Keep cache entry size within the specification's budget.
+Measure performance changes before retention.
+Record a capture for every performance claim.
+
+Use the project tools:
+
+- zig-benchmark for benchmarks.
+- `perf` or Instruments for profiles.
+- `objdump -d` or `llvm-objdump` for disassembly.
+
+Prefer removal of unnecessary work over faster primitives.
+Add explicit SIMD only with measured evidence.
+Use the existing standard-library copy and search operations by default.
+If Tracy instrumentation is added, use the zero-cost wrapper from TigerBeetle.
+Keep perf and disassembly as the baseline measurement tools.
+
+### Linux I/O
+
+Require Linux 7.2.0 or newer.
+Treat `io_uring_setup` failure as a startup error.
+Do not add feature probes or an epoll fallback.
+Use raw `std.os.linux` syscalls where standard wrappers lack required features.
+
+Use the kernel features specified in `SPEC.md`:
+
+- Provided buffer rings with multishot RECVMSG for unconnected UDP listeners.
+- RECV for connected UDP upstreams where appropriate.
+- Multishot ACCEPT for TCP listeners.
+- Registered files where they reduce work.
+- Linked SQEs with LINK_TIMEOUT for upstream deadlines.
+- SINGLE_ISSUER and DEFER_TASKRUN rather than a thread pool.
+
+Retain source addresses from unconnected UDP receives.
+Add zero-copy sends only when measurements justify them.
+Record the reason for any deviation from these I/O choices in the design notes.
+Use ordinary kevent operations on macOS.
 
 ## Tests
 
-Every test cites the RFC section or the `SPEC.md` section it validates:
+Cite the relevant RFC or specification section for every test:
 
 ```zig
 // RFC 1035 §4.1.4 — name compression points backwards only
 test "compression pointer decode" { ... }
 ```
 
-Error path tests are not optional. A test is evidence only after you have
-seen it fail for the right reason: reproduce before fixing, or run a mutation
-check (revert the fix, confirm red, restore). Record the result in the commit
-or issue comment.
-
-Use the project helpers: ztest for readable test output (one line per test in
-CI logs), zig-benchmark for benchmarks. Both are lazy test-only dependencies
-in `build.zig.zon`.
+Cover error paths.
+Reproduce a defect before the fix, or use a mutation that makes the regression fail at its intended assertion.
+Restore the source and rerun the test after a mutation.
+Record the result in the commit or issue comment.
+Use ztest for unit-test output and zig-benchmark for benchmarks.
+Keep both dependencies lazy and test-only in `build.zig.zon`.
 
 ## Nix
 
-Format with nixfmt. Module changes must eval on all three systems. Deployment
-config lives in github.com/mattrobenolt/nix-darwin — this repo ships the
-package and the modules, not host configs.
+Format Nix files with nixfmt.
+Evaluate module changes on all three supported systems.
+Keep host configurations outside this repository.
+This repository supplies the package and reusable modules.

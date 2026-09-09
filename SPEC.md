@@ -1,35 +1,12 @@
-# z53 — Feature Specification
+# z53 specification
 
-**Stage: UDP, TCP, and DNS-over-TLS forwarding POC (#1).**
-Linux and macOS select io_uring and kqueue respectively for UDP and TCP clients.
-Literal upstreams support UDP, TCP, and authenticated TLS 1.3, including session reuse.
-A later unsupported hostname member does not disable an earlier supported upstream.
-Selection of that unsupported member returns uncached local SERVFAIL without a silent skip.
-Native Linux and macOS tests exercise UDP, TCP, verified TLS, health recovery, and caching.
-Manual Linux queries also exercise the packaged binary.
-Linux IPv6 execution and live macOS deployment checks remain pending.
-The earlier Linux restart bind failures remain unexplained. Full SPEC acceptance remains incomplete.
-These features remain incomplete:
+This document defines z53 behavior, resource limits, and acceptance criteria.
+[Design notes](docs/decisions.md) explain the implementation.
+Section 6 contains example configurations. Section 9 defines test requirements.
 
-- Listener hostname bootstrap
-
-This document is the contract for the first implementation.
-
-z53 is a DNS caching forwarder in Zig. It replaces CoreDNS on two machines.
-This document fixes behavior. The implementer owns every internal decision
-that this document does not fix. Section 9 lists the open decisions.
-
-Two reference deployments define the complete feature set:
-
-- **launchpad** — AWS Graviton, NixOS, aarch64-linux. The root zone forwards
-  to the EC2 VPC resolver. Cloudflare DoT is the fallback. A `ts.net.` zone
-  forwards to Tailscale MagicDNS.
-- **Matts-MacBook-Pro** — macOS, aarch64-darwin. The root zone forwards to a
-  home LAN resolver first. Cloudflare DoT is the fallback. The `ts.net.` zone
-  forwards to MagicDNS. A `svc.cluster.local.` zone forwards to a kubernetes
-  resolver over TCP.
-
-Section 6 contains both reference configs as ZON.
+z53 is experimental. Listener hostname resolution remains incomplete, and intermittent Linux restart bind failures remain under investigation in [#1](https://github.com/mattrobenolt/z53/issues/1).
+Use literal IP addresses for listeners and upstreams.
+TLS `server_name` supplies certificate verification and SNI, not address resolution.
 
 ---
 
@@ -114,8 +91,6 @@ These failures exit the process without storage-release unwinding:
 
 Reserved-only owners require no fabricated completion.
 This contract covers the current ordinary socket operations and sole submitter, not future SOCKET or zero-copy operations.
-The submitted-receive regression and its observation controls remain a separate proof from full-capacity and delayed-worker behavior.
-Overall candidate acceptance remains BLOCKED.
 
 UDP response-slot exhaustion drops the datagram and returns its provided buffer.
 An empty provided ring terminates multishot receive with ENOBUFS.
@@ -156,13 +131,11 @@ A relative one-second kqueue timer schedules the same hosts reload policy as Lin
 EV_DELETE synchronously cancels readiness; the kernel never borrows query buffers.
 Closing kqueue and sockets releases all interests and descriptors on teardown or startup failure.
 Runtime.stop is an explicit API; daemon signals still rely on process teardown.
-PR #2 records native local-runtime tests and assertion-specific mutation evidence.
-The forwarding candidate adds nonblocking connect completion through SO_ERROR and nanosecond deadlines.
+Forwarding uses nonblocking connect completion through SO_ERROR and nanosecond deadlines.
 The nearest upstream deadline replaces the dedicated timer through an EV_DELETE barrier.
 The separate one-second timer retains the existing hosts and admission policy.
-Full upstream transport and deployment acceptance remain incomplete.
 
-### 1.3 Candidate forwarding bounds
+### 1.3 Forwarding bounds
 
 Both backends retain these fixed limits:
 
@@ -285,12 +258,12 @@ Answers:
   The echoed question retains the original class.
 - No covered query reaches the cache, the hosts file, or any upstream.
 
-The legacy `localhost.<domain>` prefix form is out. RFC 6761 names only.
+The legacy `localhost.<domain>` prefix form is unsupported. Coverage follows RFC 6761.
 
 ### 3.4 NODATA rules (per zone)
 
-- A zone lists query types that get an empty NOERROR answer. The reference
-  configs use AAAA on the root zones, because launchpad has no IPv6.
+- A zone lists query types that get an empty NOERROR answer.
+  The reference configs use AAAA on the root zones to suppress IPv6 answers.
 - The rule matches any query class. This mirrors `template ANY AAAA`.
 - The answer echoes the question, carries zero answer records, sets AA, and
   clears RA.
@@ -541,7 +514,7 @@ A failed or short write loses all or part of the line, without a DNS error or re
 
 Config errors print the file, position, and reason, then exit with status 1.
 
-Nothing else. No HTTP, no metrics, no health port.
+There is no HTTP endpoint, metrics exporter, or separate health port.
 
 ## 5. Configuration (ZON)
 
@@ -557,8 +530,7 @@ Validation rules:
 - Normalize suffixes: accept `ts.net` and `ts.net.`. Store the canonical
   form with the trailing dot.
 
-The schema below fixes the required expressiveness. The implementer finalizes
-exact field names, types, and ergonomics.
+The schema defines these settings:
 
 | Setting | Scope | Default | Notes |
 |---|---|---|---|
@@ -592,7 +564,6 @@ Capacity applies separately to positive and denial entries.
 `cache.packet_bytes_max` applies to both banks together and uses `u32` bytes.
 Its default is 8388608 bytes. Valid values range from 65536 through 268435456 bytes, inclusive.
 Enabled zones together reserve at most 536870912 packet bytes.
-These product budgets do not establish a performance result.
 
 `nodata` accepts symbolic types, such as `.AAAA` and `.HTTPS`.
 It also accepts `.{ .number = 65280 }` for any numeric `u16` query type.
@@ -650,21 +621,24 @@ Only the first error is reported, with a bounded 512-byte reason.
 Process reload remains unsupported.
 The runtime serves local responses on literal listener addresses.
 Listener hostnames remain valid configuration, but startup returns `UnresolvedListener` until bootstrap exists.
-The POC supports literal upstreams over UDP, TCP, or authenticated TLS 1.3.
+The runtime supports literal upstreams over UDP, TCP, or authenticated TLS 1.3.
 It tries configured members in order. A later unsupported member does not prevent an earlier supported member from a successful exchange.
 Selection of an unsupported hostname member returns uncached SERVFAIL, without stale fallback, health effects, or further attempts.
 Supported endpoints implement health exclusion, bounded probes, and transition logs.
-The POC does not change the final transport, health, or logging requirements.
 
 ## 6. Reference configs
 
-These two configs are the acceptance fixtures. Ship them as
-`examples/launchpad.zon` and `examples/darwin.zon`. A test must parse and
-validate both.
+The example files also serve as configuration test fixtures:
 
-### 6.1 launchpad (EC2, NixOS, aarch64-linux)
+- `examples/launchpad.zon`: NixOS on EC2.
+- `examples/darwin.zon`: macOS with split DNS.
 
-Replaces `hosts/nixos/launchpad/files/Corefile` in mattrobenolt/nix-darwin.
+Tests must parse and validate both files.
+
+### 6.1 NixOS on EC2
+
+The root zone uses the EC2 VPC resolver with Cloudflare DoT fallback.
+The `ts.net.` zone uses Tailscale MagicDNS.
 
 ```zon
 .{
@@ -696,11 +670,12 @@ Replaces `hosts/nixos/launchpad/files/Corefile` in mattrobenolt/nix-darwin.
 }
 ```
 
-### 6.2 Matts-MacBook-Pro (macOS, aarch64-darwin)
+### 6.2 macOS with split DNS
 
-Replaces `hosts/darwin/files/Corefile` in mattrobenolt/nix-darwin. The root
-zone blocks AAAA. The `ts.net.` zone does not: the Mac has IPv6. The
-`svc.cluster.local.` zone forces TCP toward the kubernetes resolver.
+The root zone uses a LAN resolver with Cloudflare DoT fallback and suppresses AAAA answers.
+The `ts.net.` zone retains IPv6 answers. The `svc.cluster.local.` zone forces TCP to a Kubernetes resolver.
+
+Replace the LAN and Kubernetes addresses with the resolvers for your network.
 
 ```zon
 .{
@@ -741,7 +716,7 @@ zone blocks AAAA. The `ts.net.` zone does not: the Mac has IPv6. The
 
 ## 7. Parity reference — CoreDNS 1.14.6
 
-The numbers below come from the CoreDNS 1.14.6 source tree, not from memory.
+These values come from the CoreDNS 1.14.6 source tree:
 
 | Value | Number | Source |
 |---|---|---|
@@ -766,15 +741,15 @@ The numbers below come from the CoreDNS 1.14.6 source tree, not from memory.
 
 | Deviation | Reason |
 |---|---|
-| NODATA and hosts answers bypass the cache | Regeneration is free. The cache adds nothing. |
-| hosts always falls through | The NXDOMAIN mode is unused in both Corefiles. |
+| NODATA and hosts answers bypass the cache | These answers come from local configuration or the active hosts table. |
+| hosts always falls through | A hosts miss does not establish that a name is absent from upstream DNS. |
 | hosts serves IN queries only | DNS address data is IN. Non-IN hosts queries fall through. CoreDNS hosts has no class guard. |
-| Sequential policy only | Both Corefiles use one upstream or sequential. |
-| NOTIMP for non-QUERY opcodes | RFC-conservative. Unused by real clients here. |
-| serve_stale added, default off | Requested feature. RFC 8767. |
-| Legacy `localhost.<domain>` dropped | Deprecated upstream. Matt's decision. |
-| hosts TTL default 30, not 3600 | Both Corefiles set 30. |
-| Log line adds source and upstream fields | Free observability. |
+| Sequential policy only | Upstream order defines fallback preference. |
+| NOTIMP for non-QUERY opcodes | Only QUERY operations are supported. |
+| serve_stale added, default off | Optional stale service under RFC 8767. |
+| Legacy `localhost.<domain>` dropped | Coverage follows the RFC 6761 name set. |
+| hosts TTL default 30, not 3600 | The reference configurations use 30 seconds. |
+| Log line adds source and upstream fields | Logs distinguish local answers from upstream exchanges. |
 
 ## 8. Packaging and deployment
 
@@ -798,7 +773,7 @@ The numbers below come from the CoreDNS 1.14.6 source tree, not from memory.
   Default `test-unit` and `test` remain unfiltered. Host checks must separately run the system-root test.
   The full native runtime/restart suite remains a separate acceptance gate. No check suppresses its failures.
 - The pinned Nix-only nix-darwin input supplies module evaluation and follows the root nixpkgs input.
-- Formatter: nixfmt. Match the mattrobenolt/nix-darwin repo.
+- Formatter: nixfmt.
 
 ### 8.2 NixOS module
 
@@ -815,9 +790,7 @@ Options: `services.z53.enable`, `services.z53.config` (text, required),
 
 ### 8.3 nix-darwin module
 
-Options: `services.z53.enable`, `services.z53.config`, `services.z53.package`.
-Define a root launchd daemon. Mirror the existing coredns daemon block in
-mattrobenolt/nix-darwin:
+The module provides the same three options as the NixOS module and configures a root launchd daemon:
 
 - `RunAtLoad = true`, `KeepAlive = true`
 - `StandardOutPath` and `StandardErrorPath` at `/var/log/z53.log`
@@ -833,17 +806,13 @@ mattrobenolt/nix-darwin:
 
 ### 8.4 Integration
 
-Deployment config lives in github.com/mattrobenolt/nix-darwin. That repo adds
-z53 as a flake input, imports the modules on launchpad and
-Matts-MacBook-Pro, and swaps `services.coredns` for `services.z53` with the
-translated configs. The `enforce-dns` daemon on the Mac needs no change: it
-points at `127.0.0.1`, not at coredns by name.
+Host configurations select the package and import the appropriate module.
+Modules do not disable other resolvers or change host DNS settings.
+Resolvers can coexist on distinct ports. Config text enters the Nix store and must not contain secrets.
 
-Modules do not disable CoreDNS or change host DNS configuration.
-Both resolvers can coexist on distinct configured ports. Config text enters the Nix store and must not contain secrets.
-Package and module acceptance does not authorize a port-53 cutover or establish native execution on another platform.
-The deployment owner controls cutover and retains the previous service configuration and system generation for rollback.
-A rollback must release the replacement listener before the previous resolver reclaims its port.
+Before a switch to port 53, stop the resolver that already binds the address.
+Retain its configuration and the previous system generation for rollback.
+If rollback is necessary, stop z53 before the previous resolver reclaims the port.
 
 ## 9. Acceptance criteria
 
@@ -909,12 +878,11 @@ CI runs a short benchmark smoke run. In-process timings do not establish end-to-
 - CI runs on all three targets: `zig build test`, `zig fmt --check`, lint,
   and the nix build.
 
-## 10. What the implementer owns
+## 10. Implementation choices
 
 - Proctor design over io_uring and kqueue, thread model, and buffer
   layout, inside the constraints of section 1.
-- Exact ZON field names, types, and defaults syntax. The expressiveness in
-  section 5 is fixed.
+- Configuration parser internals, within the schema and bounds in section 5.
 - Internal module layout and file organization.
 - Log line layout. The field list in section 4 is fixed.
 - Cache data structure and eviction internals.

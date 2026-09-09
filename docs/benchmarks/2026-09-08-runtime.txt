@@ -2,7 +2,7 @@
 
 [Raw trials, controls, profiles, and helpers](2026-09-08-runtime.txt). Issue #1.
 
-The baseline is the final scratch package from the preceding section.
+The baseline is the scratch-refactor package described in 2026-09-08-scratch.txt.
 Retained production code ends at `a4871df`. Reverts through `135b510` restore that source exactly.
 Both z53 packages use ReleaseSafe and the baseline CPU target. Dependency pins remain unchanged.
 
@@ -111,16 +111,16 @@ Those checks do not establish native execution on either target.
 Negative controls cover sparse endpoint IDs and retained logger bytes.
 Cache controls reject fingerprint-only matches and missing index retirement.
 A reserve test fails before tombstone maintenance, then passes with the fix.
-Read-only reviews approve the retained source changes. The parent executes the tests and measurements.
 
 The final userspace profile contains 582 samples, with none lost.
 Name decode accounts for 8.49% of samples. Timestamp formatting accounts for 6.84%, and packet parsing accounts for 4.46%.
 The remaining costs span several functions. Unresolved samples account for 14.57%.
 Sample shares do not measure request-latency attribution.
 
-Production remains at source `9a7c2c4`. This campaign performs no push or deployment.
 
 Capture notes
+
+Personal planning notes are omitted. Measured data and retained artifact hashes are unchanged.
 
 The capture indents diagnostic separators to avoid Git conflict-marker checks. It removes trailing whitespace. Original local artifacts remain unchanged. Hashes identify the original artifacts.
 
@@ -20493,31 +20493,3 @@ zig build-exe -OReleaseSafe -mcpu=baseline --dep cache --dep benchmark \
   -OReleaseSafe -mcpu=baseline --dep benchmark_filter -Mbenchmark="$benchmark/benchmark.zig" \
   -OReleaseSafe -mcpu=baseline -Mbenchmark_filter="$benchmark/filter.zig" \
   -lc -femit-bin="$2"
-
-
---- .lab/runtime/config.md ---
-SHA256 cff145792a622b27f785b17e27dcde2ce14e9806558405c03fb6bac97491c80e
-
-# Runtime optimization, continued from 69a83d6
-
-Matt authorized continued autonomous optimization on 2026-09-08.
-The earlier scratch ledger remains unchanged. This directory owns the new measurements.
-
-The primary metric is the geometric mean of median UDP32 and TCP32 QPS.
-The fixture uses 4096 warm names, one upstream, health enabled, and completion logs at /dev/null.
-The noise threshold is five percent. A secondary regression above five percent requires investigation before retention.
-Secondary cases disable health or configure sixteen upstreams. Process CPU/query and RSS accompany QPS.
-All timed cases require no losses, all NOERROR responses, and no timed upstream traffic.
-The fixture tests cache delivery, not TLS setup, mixed production queries, or journald backpressure.
-
-Nix packages use ReleaseSafe and baseline CPU. Dependencies and linker settings remain unchanged.
-Resolver CPU 2, generator CPUs 0/3, owned upstream CPU 1. Three three-second trials rotate variants.
-No benchmark targets production or public upstreams. No host isolation or fixed-frequency claim applies.
-
-SPEC behavior and resource limits are co-gates. Native health/forward/logging and wire/resolver tests cover relevant changes.
-Wire changes also require bounded fuzz. Error controls must fail before restored tests pass.
-Source changes receive independent review before the final evidence commit.
-
-Keep the existing main checkout and one writer. Preserve the owner's flake.nix formatter edit.
-Commit experiments after correctness/style checks, before measurement. Use targeted reversal for discarded changes.
-Continue until measured candidates plateau or need a new architectural decision. Production and deployment remain untouched.

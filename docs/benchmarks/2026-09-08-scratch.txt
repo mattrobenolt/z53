@@ -1,11 +1,11 @@
 DNS scratch reuse and CPU-target comparison — 2026-09-08
 
-Issue: #1. This capture omits trailing whitespace and indents the fuzz report header for git diff --check.
+Issue: #1. Personal work notes are omitted. Measured data is unchanged.
+This capture omits trailing whitespace and indents the fuzz report header for git diff --check.
 Full package matrix: before source 9a7c2c4, after source be029b3. All z53 variants use ReleaseSafe.
 ArrayBuffer source ef97a67 follows the matrix. Its cache/wire microbenchmarks remain within 1% of 05ece77.
 Final smoke label safe: ef97a67 production code, ReleaseSafe/baseline. Label fast: be029b3, ReleaseSafe/neoverse_v3.
 The final package also contains documentation and a ScratchSet field comment. No ReleaseFast variant runs here.
-Production remains at source 9a7c2c4. No service restart or deployment accompanies this capture.
 
 Microbenchmarks use CPU 2, ReleaseSafe, baseline CPU, and three trials per case.
 Pipeline workloads include fingerprint computation. Packet backing uses the earlier 64 MiB benchmark fixture.
@@ -49,64 +49,6 @@ Median results; QPS range in brackets, mean latency in microseconds:
 4096 coredns tcp q=32: 105587.3 [104435.8, 108419.1] QPS; 283.0 us latency; 7.260 us process CPU/query
 
 Timed rows=90, completed=12628129, lost=0, upstream bytes=0
-
-===== log.md =====
-# Scratch optimization log
-
-## Baseline
-
-Source a08b14b matches the deployed production code. ReleaseSafe, baseline CPU, CPU 2.
-Median 10000-entry pipeline latency: 40624 ns. Median wire decode latency: 3207 ns.
-
-## 1 — Lazy word validity
-
-028f64c retains dirty dictionaries and bitmap words behind small validity maps.
-Pipeline: 5145 ns. Wire: 103.8 ns. Keep.
-The first-write-clear mutation fails five wire tests, including stale provenance.
-
-## 2 — Immutable inspection
-
-44ad350 removes the private Boundaries copy from Packet.name.
-Pipeline: 4380 ns. Wire: 90.8 ns. Keep.
-A mutable-shared-map mutation fails the provenance-preservation test.
-
-## 3 — Rewrite scratch
-
-2f52957 retains the permutation bitmap inside Workspace.
-Pipeline: 3892 ns. Wire: 91.76 ns. Keep.
-
-## 4 — Generated-code correction
-
-The package disassembly exposed by-value ArrayBitSet membership copies after experiment 2.
-This concrete finding extends the original three-slice budget.
-05ece77 reads one word through IntegerBitSet instead.
-Pipeline: 3315 ns. Wire: 49.03 ns. Keep.
-The packaged Packet.name stack frame falls to 384 bytes. Its bulk bitmap copies disappear.
-
-## CPU-target comparison
-
-Matt requested a target comparison. The package defaults remain unchanged.
-Nix packages use explicit baseline or neoverse_v3 targets, always ReleaseSafe.
-The five-variant comparison uses an owned upstream and owned loopback listeners.
-All 90 timed trials complete 12628129 queries without loss or upstream log growth.
-The full matrix predates the following ArrayBuffer-only refactor.
-
-## Shared buffers
-
-Matt requested a systemic buffer pattern after a review of his existing ArrayBuffer design.
-ef97a67 adds a std-only ArrayBuffer and migrates RDATA parts and rewrite order.
-Pipeline: 3322 ns. Wire: 49.38 ns. Keep for the requested structural improvement, not a speed claim.
-Pipeline variation is +0.21% against experiment 4.
-Whole-value clear fails retained-storage coverage. Overflow-success mutation fails the expected-error assertion.
-
-## Remaining work
-
-Repeated logging parses and two-stage response encoding remain unchanged.
-A merged encoder must retain full-size response checks before UDP truncation.
-Opaque RDATA ranges can replace byte membership in a future measured slice.
-The cache index and transport scheduling remain separate profile-guided candidates.
-No production service, deployment configuration, compiler runtime, or dependency pin changes.
-
 
 ===== results.tsv =====
 experiment	commit	primary_ns	wire_ns	status	description

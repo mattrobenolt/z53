@@ -43,33 +43,6 @@ It makes no host-isolation or fixed-frequency claim.
 An initial slowdown affected both variants. The unchanged matrix was repeated, with host counters sampled once per second.
 The capture retains both matrices and all low trials. No cause is assigned to the initial slowdown.
 
-## Correctness
-
-Linux forward tests passed 63 cases with one Darwin skip. Logging passed 14 cases and health passed 21.
-The focused clock selection passed five cases with one Darwin skip. Counts include root-import tests.
-The interruption and hosts-reload selections each passed three cases.
-The portable checks passed:
-
-- Config: 16 tests.
-- Wire: 42 tests.
-- Resolver: 62 tests.
-- Foundation: four tests.
-- Benchmark smoke.
-- Formatting and both ziglint commands.
-
-Both x86_64-linux and aarch64-macos passed ten semantic build steps. These are not native foreign runs.
-
-Three native controls failed at their intended assertions, then passed after restoration.
-A fresh scheduler read mixed clock domains and skipped the synthetic due probe.
-An omitted refresh retained zero. A cached completion timestamp reported the synthetic sixty-second duration.
-The Darwin timer regression received semantic compilation only, without a native or mutation result.
-Cache and hosts tests do not isolate each seconds call site. Admission clock calls remain unchanged.
-
-Failed fixture preparation remains in the capture and does not count as regression evidence.
-The first shared-clock control used a private method and failed compilation.
-The first completion fixture expected admission for an unsupported first member and dereferenced null.
-The corrected fixture models a terminal local failure without an upstream operation. It does not prove real client delivery.
-
 ## Throughput
 
 The table pools both complete matrices, with six trials per cell and no discarded rows.
@@ -102,44 +75,15 @@ Disassembly of `Driver.drive` removes both direct clock syscall sites and their 
 The first disassembly request targeted an absent `Runtime.step` symbol. The corrected capture targets the emitted `Driver.drive` symbol.
 Clock measurements remain present in other functions by design. No vDSO redesign accompanies this change.
 
-The change remains retained. The primary clock-count target passes, and the repeat finds no throughput regression above five percent.
-Both matrices remain visible. No production tracing, restart, or deployment occurred.
 
 ## Raw artifacts
 
 The headers identify the original files and their SHA-256 hashes.
+Personal planning and review notes are omitted. Measurements and retained artifacts are unchanged.
 Trailing whitespace is removed. Separator prefixes replace lines that resemble conflict markers.
 The clock helper and comparison helper run from the source root inside `nix develop`.
 The comparison helper imports tracked `scripts/compare-coredns.py` from the stated source revision.
 
---- ARTIFACT .lab/clock/config.md sha256=f80699aeebb0042fa5213351563250bea7bc5349393da8b57eef8c1fb87d3d5a ---
-# Tick clock reuse, 2026-09-08
-
-The owner requested one shared monotonic scheduler timestamp per event tick.
-This is one bounded source change, not a continuation of the completed optimization campaign.
-
-The primary check counts monotonic syscalls in an owned strace fixture.
-The baseline is main@1609241456b22e174981792e1fa9b5f0c743a2c2.
-Three idle waits issue nine monotonic clock calls. Twenty local UDP answers issue 140 calls.
-The target is one scheduler sample per dispatch, plus fresh query-duration measurements.
-Darwin relative timer conversion and teardown keep independent clock samples.
-
-The secondary comparison uses the existing runtime helper, including its sequential untimed warmup.
-Both Nix packages use ReleaseSafe and baseline CPU settings.
-Three rotating three-second trials cover UDP32 and TCP32 over 4096 warm names.
-Health/member cases are 2/1, 0/1, and 2/16.
-Resolver CPU 2, generator CPUs 0/3, and owned upstream CPU 1 remain unchanged.
-A throughput regression above five percent requires investigation.
-No gain threshold governs this owner-requested reduction in redundant clock work.
-All timed rows require zero loss, NOERROR, and no upstream traffic.
-The fixture excludes production, public upstreams, TLS, hosts, and stderr backpressure.
-
-Native tests and existing deadline semantics are correctness gates.
-Fresh duration samples prevent zero durations from a frozen scheduler clock.
-Time inside a tick consumes absolute timeout budgets. No cached relative timeout can renew them.
-Two read-only reviewers inspect both backends. Foreign compilation is not native execution.
-Verified commits are pushed by default. Production deployment remains separate.
---- END ARTIFACT .lab/clock/config.md ---
 
 --- ARTIFACT .lab/clock/source.txt sha256=dd3198ef8d18be425c006e392701a66d7c46eb628f883b634912d6bdd7d82621 ---
 9f851500227bc39e08b95a5737325d93905e3e96
@@ -1125,39 +1069,6 @@ a2838fe424b2248137d7b71ed257926c06395cc3b774765170649d5a1f77fd87  /tmp/z53-clock
 }
 --- END ARTIFACT .lab/clock/host-endpoints.json ---
 
---- ARTIFACT .lab/clock/review-resolution.txt sha256=a79800075b1ea27538e52bb2aa86cbf12390e08e21c1708569389455d9d89c2c ---
-Parent review resolution
-
-Both reviewers found no production deadline-renewal defect.
-The Darwin reviewer requested regression coverage for fresh clock exceptions.
-A Linux completion test now rejects the cached-timestamp mutation.
-A Darwin timer test now observes a bounded, isolated queue.
-Darwin received semantic compilation only. Its native result and mutation result remain unproved.
-Admission clock calls remain unchanged. The source and forthcoming trace provide separate evidence.
-No injected clock framework or pure subtraction-only seam was added.
-
-The specification now distinguishes event retrieval from an actual wait.
-The Linux drain guard now explains why teardown does not acquire a scheduler sample.
-The decisions file records the lack of isolated tests for every cache-facing seconds call site.
-
-The proposed default tick_ns = 0 does not initialize allocator.create(Runtime) storage.
-The explicit init assignments therefore remain required. No misleading default was added.
-Division by ns_per_s stays explicit. A two-backend helper does not remove meaningful complexity here.
-The runtime.now() facade remains necessary at tests/runtime_forward.zig:778,1012,1352,3673.
-
-The shared-clock mutation changes Driver.drive's initial timestamp, not merely its probe loop.
-With the synthetic future tick, mixed timestamp domains expire the client and skip the due probe.
-The failure is expected false, found true at the absent probe.
-The refresh mutation retains zero and fails expected false, found true.
-The completion mutation reports the synthetic 60-second duration and fails expected true, found false.
-
-Failed preparation is retained, not counted as a regression result.
-The first shared mutation failed compilation after a test called private probesActive.
-The corrected public-field assertion passed before the valid mutation run.
-The first completion fixture selected an unsupported first member and got null admission.
-The corrected Linux fixture publishes a modeled terminal local failure without an upstream operation.
-It does not assert a real client delivery or new admission sample.
---- END ARTIFACT .lab/clock/review-resolution.txt ---
 
 --- ARTIFACT .lab/clock/mutation-shared.txt sha256=82a666bd7c6aa74843ef4ab349096ea1ec3612cc9571520a16871ed0609caea4 ---
 test-runtime
