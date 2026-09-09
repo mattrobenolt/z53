@@ -83,7 +83,7 @@ const Harness = struct {
         var length: usize = 0;
         var target: usize = 2;
         for (0..64) |_| {
-            // later frames must stay queued because this reader retains no trailing bytes.
+            // Later frames stay queued because this reader retains no trailing bytes.
             const received = try self.receive(descriptor, output[length..target]);
             if (received == 0) return error.UnexpectedEof;
             length += received;
@@ -602,7 +602,7 @@ test "Darwin native UDP response pool exhaustion and recovery" {
     var input: [512]u8 = undefined;
     var output: [512]u8 = undefined;
     const request = try query(&input);
-    // this isolates pool exhaustion, not EAGAIN or write-filter ownership.
+    // Claiming every response slot isolates pool exhaustion from EAGAIN and write-filter ownership.
     for (&harness.service.responses) |*response| response.listener = 0;
     try send(descriptor, request);
     const generation = harness.service.proctor.ownership[0].generation;
@@ -854,7 +854,8 @@ fn deliverRetained(
     try testing.expectEqual(null, harness.service.proctor.registrations[162]);
     var output: [512]u8 = undefined;
     for (saved, 0..) |*snapshot, index| {
-        // Slot release precedes client readiness. Expiry still proves absent intended delivery.
+        // The slot is released before client readiness, so this bounded wait
+        // proves each retained answer arrived.
         const readiness = try socketReady(sockets[index % 2], system.POLL.IN, 1000);
         const received = system.recv(sockets[index % 2], &output, output.len, system.MSG.DONTWAIT);
         const failure = std.posix.errno(received);

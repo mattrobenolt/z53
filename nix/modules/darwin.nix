@@ -1,4 +1,4 @@
-# SPEC §8.3: root launchd service and an hourly, finite logrotate job (#1).
+# SPEC §8.3: root launchd service and an hourly, finite logrotate job.
 { self }:
 {
   config,

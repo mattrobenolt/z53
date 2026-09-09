@@ -461,7 +461,7 @@ test "forward native large UDP truncation and full TCP" {
     try harness.stop();
 }
 
-// SPEC §§1, 3.6: session and endpoint metadata fit the reviewed budgets on each target.
+// SPEC §§1, 3.6: session and endpoint metadata fit the declared storage budget on each target.
 test "forward storage and nanosecond duration bounds" {
     try testing.expect(@sizeOf(runtime.forward.Forward) <= runtime.forward.storage_bytes_max);
     try testing.expectEqual(32, runtime.forward.transactions_max);
@@ -563,7 +563,7 @@ fn checkCookie(packet: *wire.Packet, cookie: u8, text: []const u8) !void {
     try testing.expect(actual.eql(&expected));
 }
 
-// SPEC §3.6: rejected responses neither publish nor renew the absolute response deadline.
+// SPEC §3.6: a rejected response leaves the cache empty and keeps the original response deadline.
 test "forward native ID question QR opcode malformed admission and partial framing" {
     var harness: Harness = undefined;
     try harness.init();
@@ -829,8 +829,8 @@ test "forward native configured idle expiry closes reused socket" {
     try harness.stop();
 }
 
-// SPEC §1: active sessions, original requests,.
-// reserved responses survive stop barriers in every phase.
+// SPEC §1: active sessions, original requests, and reserved responses survive
+// stop barriers in every phase.
 test "forward native cancellation in each upstream phase" {
     for ([_]@FieldType(runtime.forward.Session, "state"){
         .connecting, .writing, .read_prefix, .read_body,
@@ -1148,8 +1148,8 @@ test "forward linked pair permutations late completions and wide indices" {
     }
 }
 
-// SPEC §3.6: TCP peer association refers to a configured endpoint.
-// connection lifetime, not an injected datagram.
+// SPEC §3.6: TCP peer association refers to a configured endpoint connection
+// lifetime, not an injected datagram.
 test "forward peer association and unsupported membership" {
     const forward = try testing.allocator.create(runtime.forward.Forward);
     defer testing.allocator.destroy(forward);
@@ -1287,10 +1287,9 @@ test {
     if (builtin.os.tag == .linux) _ = LinuxSubmittedTeardown;
 }
 
-// this Linux host disables IPv6. Native Linux IPv6 exchange coverage remains unproved.
 const Darwin = struct {
     // SPEC §§1.2, 3.6: fixture peer traffic cannot wait for an unrelated runtime timer.
-    test "health forward Darwin fixture peer readiness precedes runtime progress" {
+    test "forward Darwin fixture peer readiness precedes runtime progress" {
         for ([_]enum { peer, both }{ .peer, .both }) |ready| {
             var harness: Harness = undefined;
             try harness.init();
@@ -1528,7 +1527,8 @@ test "forward fixture pre-start error releases owned storage and listener" {
     defer harness.deinit();
     const service = harness.service;
     const listener = harness.listener.?;
-    // A control can omit release. This independent defer prevents a leak as the control signal.
+    // This defer destroys the runtime if release left it allocated, so the byte
+    // comparison is the failure signal.
     defer {
         if (harness.state == .released) {
             if (harness.allocator.allocated_bytes != harness.allocator.freed_bytes)
@@ -2439,7 +2439,8 @@ const LinuxSubmittedTeardown = struct {
             const self: *Observation = @ptrCast(@alignCast(context));
             self.calls += 1;
             self.cancellation_result = self.observer.cancellation_result;
-            // Later real cleanup cannot repair a premature observation in either control.
+            // Copying the live transcript freezes it, so later cleanup cannot
+            // repair a premature observation.
             self.frozen = self.live;
             for (self.peers, 0..) |descriptor, index| {
                 var byte: [1]u8 = undefined;
@@ -2452,7 +2453,6 @@ const LinuxSubmittedTeardown = struct {
 
         fn check(self: *const Observation, tokens: *const [2]u64) !void {
             try testing.expectEqual(1, self.calls);
-            // These named assertions distinguish safe observation-order controls.
             var terminal_cancellations: [2]u32 = .{ 0, 0 };
             for (self.frozen.completions[0..self.frozen.count]) |completion| {
                 for (tokens, 0..) |token, index| {
@@ -2588,7 +2588,7 @@ const LinuxSubmittedTeardown = struct {
         }
 
         fn release(self: *Fixture) void {
-            // Unconditional direct teardown retains all production barriers, including in controls.
+            // Teardown runs unconditionally so every production barrier executes.
             self.service.deinit();
             self.trace.allocator().destroy(self.service);
             for (self.observation.peers) |descriptor| _ = linux.close(descriptor);
@@ -2813,7 +2813,7 @@ const DatagramPeer = struct {
     }
 };
 
-// SPEC §§3.6, 3.7, 4: a UDP answer and cache hit never imply an unused TLS exchange.
+// SPEC §§3.6, 3.7, 4: a UDP answer and a cache hit never contact the configured TLS member.
 test "forward UDP native answer with unused TLS fallback and cache hit logging" {
     var harness: Harness = undefined;
     try harness.init();

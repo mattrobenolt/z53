@@ -58,7 +58,8 @@ pub const Proctor = struct {
         self.registrations[index] = .{ .ident = ident, .filter = filter };
     }
 
-    /// Nanosecond timers preserve the configured one-millisecond minimum.
+    /// Arms a one-shot NOTE_NSECONDS timer, floored at one nanosecond so a
+    /// past-due deadline still fires.
     pub fn deadline(self: *Proctor, index: u32, remaining_ns: u64) Error!void {
         try self.remove(index);
         const token = try self.ownership[index].arm(index);
@@ -115,7 +116,7 @@ pub const Proctor = struct {
         self.registrations[index] = null;
     }
 
-    /// EV_DELETE is the cancellation barrier, unlike io_uring's two completion barrier.
+    /// Removes every registered interest; EV_DELETE releases ownership synchronously.
     pub fn stop(self: *Proctor) Error!void {
         for (0..operations_max) |index| try self.remove(@intCast(index));
     }

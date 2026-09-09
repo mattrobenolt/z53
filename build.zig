@@ -35,7 +35,7 @@ pub fn build(b: *std.Build) void {
     b.installArtifact(executable);
     const run = b.addRunArtifact(executable);
     if (b.args) |args| run.addArgs(args);
-    b.step("run", "Run z53 (local responses only)").dependOn(&run.step);
+    b.step("run", "Run z53 with a configuration file").dependOn(&run.step);
     b.step("check", "Check compilation without linking").dependOn(
         &b.addExecutable(executable_options).step,
     );
@@ -43,13 +43,13 @@ pub fn build(b: *std.Build) void {
 }
 
 fn addTests(b: *std.Build, executable: *std.Build.Step.Compile, tls: *std.Build.Module) void {
-    const test_step = b.step("test", "Run foundation tests with ztest");
+    const test_step = b.step("test", "Run every ztest suite");
     const test_compile = b.step("test-compile", "Check unit test compilation without linking");
     const ztest = b.lazyDependency("ztest", .{}) orelse return;
     const target = executable.root_module.resolved_target.?;
     const unit_step = b.step("test-unit", "Run dependency API and startup tests");
     test_step.dependOn(unit_step);
-    // SPEC §9.5: sandbox checks select TLS APIs without a host trust-store dependency.
+    // SPEC §8.1: sandbox checks select TLS APIs without a host trust-store dependency.
     const filter = b.option([]const u8, "unit-filter", "Select a foundation test");
     const options: std.Build.TestOptions = .{
         .filters = if (filter) |value| &.{value} else &.{},

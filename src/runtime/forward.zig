@@ -1,4 +1,5 @@
-//! Bounded literal UDP and TCP exchanges. Backends own socket and cancellation barriers.
+//! Bounded upstream exchanges over UDP, TCP, and DNS-over-TLS.
+//! Backends own sockets and cancellation.
 const std = @import("std");
 const Io = std.Io;
 const IpAddress = Io.net.IpAddress;
@@ -239,7 +240,7 @@ pub const Forward = struct {
         }
         const endpoint = transaction.zone * @as(u16, config.upstreams_max) + transaction.cursor;
         const configured = self.protocols[endpoint] orelse {
-            // An unavailable transport stops here, without a silent skip past this member.
+            // An unavailable transport stops here with a local failure; this member is not skipped.
             transaction.completion = .local_failure;
             transaction.state = .deliver;
             return null;
@@ -632,7 +633,7 @@ comptime {
     assert(@sizeOf(Forward) <= storage_bytes_max);
 }
 
-/// The pair retains both linked completions and both explicit cancellation barriers.
+/// A pair is retired when both slots are idle: targets and cancellations completed.
 pub fn retired(
     first: *const ownership.Ownership,
     second: *const ownership.Ownership,

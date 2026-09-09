@@ -71,7 +71,7 @@ pub const Tls = struct {
 pub const Upstream = struct {
     address: []const u8,
     tls: ?Tls = null,
-    // These independent schema switches preserve the reference ZON syntax.
+    // Queries this upstream over TCP regardless of client transport.
     force_tcp: bool = false,
 
     pub fn endpoint(self: *const Upstream, target: *Endpoint) void {

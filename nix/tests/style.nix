@@ -1,4 +1,4 @@
-# SPEC §9.5: both Zig lint entry points and both formatters are gates (#1).
+# SPEC §9.5: both Zig lint entry points and both formatters are gates.
 { pkgs }:
 let
   source = pkgs.lib.fileset.toSource {

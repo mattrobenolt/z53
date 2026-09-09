@@ -59,7 +59,7 @@ pub const Table = struct {
         return self.list.items;
     }
 
-    /// Failure invalidates this candidate, never the Store's active snapshot.
+    /// A failed parse invalidates this table only; the Store's active snapshot stays valid.
     fn parse(self: *Table, source: []const u8) Error!void {
         assert(self.list.capacity <= entries_max);
         // Retain entry storage instead of poisoning it before the next parse.
@@ -422,7 +422,7 @@ const ResolverTestsHosts = struct {
         try testing.expectError(error.RewriteTooLarge, fixture.after(&zone, store.table()));
     }
 
-    // SPEC §3.5: deployment-sized files retain every alias beyond the old 4096-entry limit.
+    // SPEC §3.5: deployment-sized files retain every alias up to entries_max.
     test "hosts large deployment file retains fourteen thousand names and aliases" {
         const first = try testing.allocator.alloc(hosts.Entry, hosts.entries_max);
         defer testing.allocator.free(first);

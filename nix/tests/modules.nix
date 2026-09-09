@@ -1,4 +1,4 @@
-# SPEC §8.2–8.4 and §9.5: evaluation only, without activation or listener creation (#1).
+# SPEC §8.2–8.4 and §9.5: evaluation only, without activation or listener creation.
 {
   inputs,
   self,

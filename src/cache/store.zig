@@ -40,8 +40,7 @@ pub const Key = struct {
         std.mem.writeInt(u16, canonical[length..][0..2], @intFromEnum(self.kind), .little);
         std.mem.writeInt(u16, canonical[length + 2 ..][0..2], self.class, .little);
         canonical[length + 4] = @intFromEnum(self.dnssec);
-        // Zero denotes an empty slot, never a valid fingerprint. Equality resolves collisions.
-        // Zero marks vacant columns. The hash index needs entropy in the low bits.
+        // Zero marks a vacant slot, so a hashed zero becomes one. Key equality resolves collisions.
         const value = Wyhash.hash(0, canonical[0 .. length + metadata_bytes]);
         return if (value == 0) 1 else value;
     }
@@ -132,7 +131,7 @@ pub const Bank = struct {
         return self.index.getKeyAdapted(key, LookupContext{ .bank = self });
     }
 
-    /// Publish into an empty stable slot. Fixtures use this same metadata path.
+    /// Publish into an empty stable slot.
     pub fn put(self: *Bank, index: u32, entry: *const Entry) void {
         assert(self.entries.items(.bytes)[index] == null);
         assert(entry.bytes != null);

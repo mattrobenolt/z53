@@ -1,4 +1,5 @@
-//! Caller-owned TLS records survive the same retirement barriers as DNS buffers.
+//! DNS-over-TLS client state: trust bundle, handshakes, and session-owned record buffers
+//! released through the same completion retirement as DNS buffers.
 const std = @import("std");
 const Io = std.Io;
 const assert = std.debug.assert;

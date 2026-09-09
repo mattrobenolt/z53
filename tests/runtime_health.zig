@@ -115,7 +115,7 @@ test "health thresholds one two zero maximum and isolated endpoint counters" {
 }
 
 // SPEC §§3.6, 3.7: an all-down sequence exhausts without a random known-down retry.
-test "health all down selection and local cancellation non penalties" {
+test "health all down selection and local cancellation without penalties" {
     var fixture: Fixture = undefined;
     try fixture.init(1);
     defer fixture.deinit();

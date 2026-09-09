@@ -1,4 +1,4 @@
-//! Linux 7.0.0 is a contract, not a capability negotiation.
+//! io_uring setup, submission, and checked teardown for the Linux runtime. Requires Linux 7.0.0.
 const std = @import("std");
 pub const linux = std.os.linux;
 const Ring = linux.IoUring;
@@ -81,7 +81,7 @@ pub const Proctor = struct {
         Ring.buf_ring_advance(self.provided, buffers_max);
     }
 
-    /// Retain kernel-visible storage until request retirement and both resource barriers succeed.
+    /// Teardown must succeed before the mappings are released; on failure the process exits.
     pub fn deinit(self: *Proctor) void {
         self.teardown() catch |err| {
             print("z53: io_uring teardown: {s}\n", .{@errorName(err)});
@@ -212,7 +212,7 @@ pub const Proctor = struct {
             .pad = 0,
             .ts = @intFromPtr(&deadline),
         };
-        // v7.2.3 UAPI defines ABS_TIMER at bit 5. Pinned std lacks this constant.
+        // IORING_ENTER_ABS_TIMER is bit 5 in the io_uring UAPI; the pinned std lacks the constant.
         const absolute_timer = 1 << 5;
         // The std wrapper fixes argsz to NSIG/8 instead of sizeof(getevents_arg).
         const result = linux.syscall6(
@@ -318,9 +318,10 @@ pub const Proctor = struct {
     }
 };
 
-// low token bits cannot alias any normal or cancellation owner index.
+// The teardown token's low 32 bits exceed operations_max, so it matches no owner slot.
 const teardown_token: u64 = std.math.maxInt(u64);
-// 1024 published + 290 terminals + 290 acknowledgements + 64 UDP shots + 256 accepts + marker.
+// The worst case produces 1925 CQEs: 1024 published, 290 terminals, 290 cancellations,
+// 64 UDP shots, 256 accepts, and the marker. The cap keeps headroom above that count.
 const teardown_completions_max = 2048;
 const TeardownError = error{
     TeardownClockFailed,

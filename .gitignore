@@ -4,5 +4,6 @@ zig-pkg/
 .zig/
 .tmp/
 result
-result-
+result-*
 .direnv/
+.lab/

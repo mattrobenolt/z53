@@ -1,4 +1,4 @@
-# SPEC §8.2: the module does not change another resolver or host DNS policy (#1).
+# SPEC §8.2: the module does not change another resolver or host DNS policy.
 { self }:
 {
   config,

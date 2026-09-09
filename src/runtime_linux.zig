@@ -64,7 +64,7 @@ pub const Runtime = struct {
     state: enum { running, stopping } = .running,
     interval: linux.kernel_timespec = .{ .sec = 1, .nsec = 0 },
     io: Io,
-    // Scheduler time stays fixed from event dispatch until the next completed wait.
+    // Each dispatched event resamples monotonic time; the tick reuses that sample.
     tick_ns: u64,
 
     /// The caller owns stable startup storage until deinit completes.
@@ -482,7 +482,8 @@ pub const Runtime = struct {
                     try self.lookupPeer(index);
                 } else client_value.state = .vacant;
                 for (0..self.listener_count) |listener| {
-                    if (self.proctor.ownership[16 + listener].state != .idle) continue;
+                    if (self.proctor.ownership[config.listeners_max + listener].state != .idle)
+                        continue;
                     try self.accept(@intCast(listener));
                 }
                 return;
@@ -608,8 +609,8 @@ pub fn nowNs() error{ClockFailed}!u64 {
 }
 
 comptime {
-    // SPEC §1.3 excludes cache entry arrays and packets.
-    // Hosts tables and configuration also retain separate bounds.
+    // The 40 MiB fixed-storage cap excludes cache entries and packets; hosts tables
+    // and configuration are bounded separately.
     assert(
         @sizeOf(Runtime) + pipeline.zone_storage_bytes_max + proctor.mapping_bytes_max <=
             40 * 1024 * 1024,

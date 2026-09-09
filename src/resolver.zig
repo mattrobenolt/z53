@@ -1,4 +1,4 @@
-//! Synchronous pipeline seams. The runtime routes first, then calls beforeCache;
+//! Synchronous pipeline stages. The runtime routes first, then calls beforeCache;
 //! only its miss permits cache lookup, and only a cache miss permits afterCache.
 //! Output must not overlap the borrowed request packet or encoder workspace.
 const std = @import("std");
@@ -19,7 +19,7 @@ pub const Request = struct {
     kind: wire.RecordType,
     class: u16,
 
-    /// Accept only packets already admitted by wire.query.
+    /// Accept only packets already accepted by wire.query.
     pub fn init(self: *Request, packet: *wire.Packet) wire.Error!void {
         assert(packet.header.counts[0] == 1);
         assert(packet.header.opcode() == 0);
@@ -276,7 +276,7 @@ const ResolverTestsSynthetic = struct {
         }
     }
 
-    // SPEC §3.3: suffix matching is label-aware, never a legacy localhost prefix.
+    // SPEC §3.3: suffix matching starts at a label boundary, so "notlocalhost." is uncovered.
     test "near misses and binary label dots are not covered" {
         var fixture: test_fixture.Fixture = undefined;
         for ([_][]const u8{
@@ -325,7 +325,7 @@ const ResolverTestsSynthetic = struct {
     }
 
     // SPEC §3.2–3.5: RFC6761 wins over AAAA suppression; numeric NODATA is supported.
-    test "pipeline exposes cache seam and RFC6761 outranks NODATA" {
+    test "pipeline falls through to the cache and RFC6761 outranks NODATA" {
         var fixture: test_fixture.Fixture = undefined;
         try fixture.init("localhost.", 28, 3);
         const local = (try fixture.local()).?;

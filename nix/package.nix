@@ -1,4 +1,4 @@
-# SPEC §8.1 and §9.5: sandbox builds fetch only the manifest-pinned dependencies (#1).
+# SPEC §8.1 and §9.5: sandbox builds fetch only the manifest-pinned dependencies.
 { pkgs }:
 let
   inherit (pkgs) lib;

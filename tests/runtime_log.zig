@@ -179,7 +179,8 @@ test "logging retained workspace preserves dirty tail across event kinds and sin
     try capture.contains("src=cache");
 }
 
-// SPEC §§3.9, 4: malformed packets use placeholders and sink failure cannot escape publication.
+// SPEC §§3.9, 4: malformed packets log placeholders and a failing sink returns
+// no error to the caller.
 test "logging malformed query reply and failed capture sink" {
     const packet = try testing.allocator.create(wire.Packet);
     defer testing.allocator.destroy(packet);

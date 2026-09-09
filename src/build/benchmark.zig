@@ -8,7 +8,7 @@ pub fn addSmoke(
     test_compile: *std.Build.Step,
 ) void {
     const smoke = b.step("bench-smoke", "Run eight iterations of each DNS benchmark");
-    // ReleaseSafe is the reference candidate, independently of daemon build options.
+    // Benchmarks always build ReleaseSafe, independently of the daemon build options.
     const dependency = b.lazyDependency("benchmark", .{
         .target = target.*,
         .optimize = .ReleaseSafe,

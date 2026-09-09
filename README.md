@@ -136,7 +136,6 @@ Each supported target runs `nix flake check`, the host trust tests, and compilat
 Both wire fuzz targets receive at least 20000 iterations.
 Each target also runs its native socket suite.
 The Linux jobs use Ubuntu 26.04 preview runners and record their kernel versions.
-Both Linux architectures passed the native socket suite on `7.0.0-1012-azure`.
 
 Successful pushes to `main` publish the package output and its runtime closure to [mattrobenolt.cachix.org](https://mattrobenolt.cachix.org).
 Pull requests cannot publish packages.

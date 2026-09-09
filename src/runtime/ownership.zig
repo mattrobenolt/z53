@@ -1,4 +1,4 @@
-//! A slot cannot rearm until both the target and its cancellation acknowledge completion.
+//! Per-slot completion generations. A slot rearms once its target and cancellation both complete.
 const builtin = @import("builtin");
 const runtime = @import("../runtime.zig");
 const std = @import("std");

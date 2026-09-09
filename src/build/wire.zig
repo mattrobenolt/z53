@@ -57,7 +57,7 @@ fn addFuzz(
             .link_libc = true,
         }),
     });
-    // SPEC §9.3: Zig's default runner supplies the fuzz server protocol.
+    // Zig's default runner supplies the fuzz server protocol.
     const fuzz_run = b.addRunArtifact(fuzz);
     fuzz_run.has_side_effects = true;
     step.dependOn(&fuzz_run.step);

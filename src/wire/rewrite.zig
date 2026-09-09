@@ -229,7 +229,7 @@ pub fn writeOpt(encoder: *wire.Encoder, value: *const Edns) wire.Error!void {
     encoder.endRecord(offset);
 }
 
-/// Responses retain only COOKIE; upstream queries retain every validated option.
+/// Copies the client COOKIE option into target, or returns an empty slice.
 pub fn responseOptions(packet: *const wire.Packet, target: []u8) wire.Error![]const u8 {
     const index = packet.opt orelse return target[0..0];
     const record = &packet.records[index];

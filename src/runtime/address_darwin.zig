@@ -6,7 +6,7 @@ const mem = std.mem;
 const config = @import("../config.zig");
 
 // Zig's bundled libc/include/any-darwin-any/netinet6/in6.h defines IPV6_V6ONLY.
-// std.c.IPV6 is void on Darwin in Zig 0.16, so name the verified ABI constant here.
+// std.c.IPV6 is void on Darwin in Zig 0.16, so define the ABI constant here.
 const IPV6_V6ONLY = 27; // ziglint-ignore: Z006
 pub const Error = error{ UnresolvedListener, SocketFailed, BindFailed, ListenFailed };
 

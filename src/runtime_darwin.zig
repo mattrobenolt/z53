@@ -63,9 +63,9 @@ pub const Runtime = struct {
     listener_count: u16,
     state: enum { running, stopping },
     io: Io,
-    // Scheduler time stays fixed from event dispatch until the next completed wait.
+    // Each dispatched event resamples monotonic time; the tick reuses that sample.
     tick_ns: u64,
-    // injected errno tests retain real Runtime dispatch and kqueue readiness.
+    // Test-only sendto failure injection: the errno to report and the attempt count.
     test_send_errno: if (builtin.is_test) ?system.E else void,
     test_send_attempts: if (builtin.is_test) u32 else void,
     pub const test_datagram = if (builtin.is_test) datagram else void;
@@ -139,7 +139,7 @@ pub const Runtime = struct {
         assert(self.state == .running);
         self.state = .stopping;
         try self.proctor.stop();
-        // No asynchronous socket I/O survives EV_DELETE. Pending datagrams can be discarded.
+        // EV_DELETE removes every readiness interest, so pending responses can be dropped here.
         for (&self.responses) |*response| response.listener = null;
     }
 
@@ -561,8 +561,8 @@ pub fn nowNs() error{ClockFailed}!u64 {
 }
 
 comptime {
-    // SPEC §1.3 excludes cache entry arrays and packets.
-    // Hosts tables and configuration also retain separate bounds.
+    // The 40 MiB fixed-storage cap excludes cache entries and packets; hosts tables
+    // and configuration are bounded separately.
     assert(
         @sizeOf(Runtime) + pipeline.zone_storage_bytes_max <=
             40 * 1024 * 1024,

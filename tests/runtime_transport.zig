@@ -405,7 +405,7 @@ test "native TCP pool exhaustion and recovery" {
 }
 
 // SPEC §1.1: stop batches cancellations against queued SQEs, including indices above 255.
-test "forward native stop batches a full operation table" {
+test "native stop batches a full operation table" {
     const proctor = try testing.allocator.create(runtime.proctor.Proctor);
     defer testing.allocator.destroy(proctor);
     try proctor.init();

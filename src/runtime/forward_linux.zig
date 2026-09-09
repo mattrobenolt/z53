@@ -1,4 +1,4 @@
-//! Each linked pair retains both completions and both explicit cancellation barriers.
+//! Upstream exchanges through io_uring: linked operations with LINK_TIMEOUT deadlines.
 const std = @import("std");
 const linux = std.os.linux;
 const assert = std.debug.assert;

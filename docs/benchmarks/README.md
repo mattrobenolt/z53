@@ -100,7 +100,6 @@ Median RSS was 60436 KiB for the baseline and 60600 KiB for `a4871df`. CoreDNS u
 
 The host retained normal workloads without CPU isolation or frequency control.
 The fixture excludes TLS and hosts. Logs are formatted but not persisted.
-These results do not establish maximum capacity or production latency.
 
 ## Scheduler clock reuse
 
@@ -139,7 +138,6 @@ The [aged-index capture](2026-09-08-runtime.txt) performs 320000 replacements be
 Values are medians of three trials, with zero general allocations per operation.
 The timed interval includes rehashes but excludes DNS packet work.
 Separate clock-instrumented trials record rehash maxima from 116906 to 119126 ns.
-That occasional 119 µs stall is not a DNS latency percentile or a worst-case guarantee.
 
 Default metadata rises from 6320000 to 6483888 bytes across both banks, including the indexes.
 The allocated metadata limit is 384 bytes per configured entry. Packet backing has a separate budget.
@@ -149,7 +147,6 @@ The allocated metadata limit is 384 bytes per configured entry. Packet backing h
 
 The captures retain measured regressions and failed trials as well as improvements.
 Raw logs preserve their original commands and environment paths.
-Personal planning notes are omitted. Benchmark data and retained artifact hashes are unchanged.
 
 | Capture | Contents |
 |---|---|

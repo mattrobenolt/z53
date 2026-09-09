@@ -114,7 +114,7 @@ pub fn decode(
     return decodeWith(.record, target, packet, start, end, boundaries, compression);
 }
 
-/// Parsed names need no new provenance and no private copy of the boundary maps.
+/// Reads a name against boundaries already recorded by decode, leaving them unchanged.
 pub fn read(
     target: *Name,
     packet: []const u8,

@@ -1,6 +1,6 @@
 //! One cache per routed zone. All methods are synchronous on one event thread.
-//! Output, request bytes and workspace must be disjoint. Delivery is full-size TCP;
-//! the runtime applies rotation and client UDP limits afterward, never before insertion.
+//! Output, request bytes and workspace must be disjoint. Delivery is full size, as for TCP.
+//! The stored copy keeps that form; rotation and client UDP limits apply only to the client copy.
 const std = @import("std");
 const assert = std.debug.assert;
 const builtin = @import("builtin");
@@ -85,7 +85,7 @@ pub const Cache = struct {
         return null;
     }
 
-    /// Only accepted upstream responses use this seam. Synthetic/local encoding errors
+    /// Only accepted upstream responses use this entry point. Synthetic/local encoding errors
     /// have no insertion API. A rewrite error leaves both banks unchanged.
     pub fn forward(
         self: *Cache,
@@ -386,7 +386,7 @@ const ResolverTestsCacheErrors = struct {
     }
 
     // SPEC §3.9: local encoding failure never publishes an entry or becomes transport failure.
-    test "cache malformed input and short encoding failure leave stale candidate unchanged" {
+    test "cache malformed input and short encoding failure leave stale entry unchanged" {
         var fixture: test_fixture.Fixture = undefined;
         try fixture.init(testing.allocator, &test_fixture.zone);
         defer fixture.cache.deinit();
@@ -418,8 +418,7 @@ const ResolverTestsCacheErrors = struct {
         try testing.expectEqual(.stale, (try fixture.failure(5)).answer.source);
     }
 
-    // SPEC §3.9; RFC 2782: 300 compressed SRV targets expand beyond 65535, never
-    // cache local SERVFAIL.
+    // SPEC §3.9; RFC 2782: 300 compressed SRV targets expand beyond 65535 and insert nothing.
     test "cache rejects RewriteTooLarge before insertion" {
         var fixture: test_fixture.Fixture = undefined;
         try fixture.init(testing.allocator, &test_fixture.zone);
@@ -436,7 +435,7 @@ const ResolverTestsCacheErrors = struct {
         name.bytes[cursor] = 0;
         fixture.client.request.name = name;
         try fixture.response(0x8500);
-        // Encode the legacy compressed receive layout directly; the normal encoder forbids it.
+        // Write the compressed SRV target directly; the encoder never emits compressed targets.
         for (0..300) |_| {
             try fixture.encoder.bytes(&.{ 0xc0, 0x0c });
             try fixture.encoder.number(u16, 33);
@@ -611,7 +610,7 @@ const ResolverTestsCache = struct {
 
     // SPEC §3.7; RFC 8767 §5: only exhausted transports unlock stale, with an
     // exclusive grace end.
-    test "stale precedes terminal SERVFAIL without replacing or extending its candidate" {
+    test "stale precedes terminal SERVFAIL without replacing or extending its entry" {
         var fixture: test_fixture.Fixture = undefined;
         try fixture.init(testing.allocator, &test_fixture.zone);
         defer fixture.cache.deinit();
@@ -774,7 +773,7 @@ const ResolverTestsCacheRcode = struct {
     }
 
     // SPEC §3.7, §3.9: local failure neither replaces existing data nor selects stale data.
-    test "cache unrepresentable extended errors preserve fresh and stale candidates" {
+    test "cache unrepresentable extended errors preserve fresh and stale entries" {
         for ([_]u16{ 0, 3 }) |rcode| {
             var fixture: test_fixture.Fixture = undefined;
             try fixture.init(testing.allocator, &test_fixture.zone);
@@ -850,8 +849,8 @@ const ResolverTestsCacheRcode = struct {
         }
     }
 
-    // SPEC §3.9: short local SERVFAIL output leaves the stale candidate intact.
-    test "cache extended error local encoding failure preserves stale candidate" {
+    // SPEC §3.9: short local SERVFAIL output leaves the stale entry intact.
+    test "cache extended error local encoding failure preserves stale entry" {
         var fixture: test_fixture.Fixture = undefined;
         try fixture.init(testing.allocator, &test_fixture.zone);
         defer fixture.cache.deinit();

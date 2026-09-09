@@ -184,7 +184,7 @@ pub const Pipeline = struct {
             index,
             &result.answer,
         ) catch return self.failure(&request, output, .servfail);
-        // final rotation can expand compression. Publication follows its successful rewrite.
+        // Final rotation can expand compression, so publish only after the rewrite succeeds.
         _ = zone.cache.publish(&request, now_s, &self.cache_workspace);
         return answer_value;
     }
@@ -242,7 +242,7 @@ pub const Pipeline = struct {
         now_s: u64,
     ) wire.Error!?resolver.Answer {
         const encoder = &self.cache_workspace.rewrite.encoder;
-        // SPEC §3.1: no matching zone is REFUSED, including special names.
+        // A query with no matching zone answers REFUSED, including special names.
         const index = selected orelse
             return try self.failure(request, &self.intermediate, .refused);
         if (try resolver.beforeCache(request, encoder, &self.intermediate)) |hit| return hit;
@@ -347,15 +347,6 @@ const RuntimeUnitTests = struct {
             try testing.expectEqual(@as(usize, 1), zone.hosts.?.table().entries().len);
         }
     }
-};
-
-comptime {
-    if (builtin.is_test) _ = RuntimeUnitTestsLegacy;
-}
-
-const RuntimeUnitTestsLegacy = struct {
-    const testing = std.testing;
-    const linux = std.os.linux;
 
     // SPEC §3.5: enabled hosts loads initially even when its periodic check is disabled.
     test "initial hosts failure and startup allocation rollback" {
@@ -384,7 +375,7 @@ const RuntimeUnitTestsLegacy = struct {
         }
     }
 
-    // SPEC §3.2: unresolved forwarding is a local failure, never a stale/cache insertion.
+    // SPEC §3.2: unresolved forwarding answers a local failure without cache or stale insertion.
     test "local pipeline and explicit unresolved forwarding" {
         const pipeline = try testing.allocator.create(runtime.pipeline.Pipeline);
         defer testing.allocator.destroy(pipeline);

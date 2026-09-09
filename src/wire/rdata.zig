@@ -32,7 +32,7 @@ pub const Parts = struct {
     items: ArrayBuffer(Part, parts_max),
 
     fn add(self: *Parts, part: Part) void {
-        // The largest supported RDATA layout has seven parts, independent of wire lengths.
+        // Every supported layout fits within parts_max; NAPTR is the largest at five parts.
         self.items.appendAssumeCapacity(part);
     }
 };

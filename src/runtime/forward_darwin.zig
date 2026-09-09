@@ -25,7 +25,7 @@ const ConnectError = union(enum) {
 pub const Driver = struct {
     operations: [forward.sessions_max]Operation,
     timer_deadline_ns: ?u64,
-    // This one-shot fixture replaces SO_ERROR, not kqueue readiness or dispatch.
+    // Test-only override of the SO_ERROR result for one connect completion.
     test_connect_error: if (builtin.is_test) ?ConnectError else void,
 
     pub fn init(self: *Driver) void {

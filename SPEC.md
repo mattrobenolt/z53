@@ -111,6 +111,7 @@ The macOS event thread owns one kqueue with 210 one-shot operation slots:
 - One hosts/admission timer and 128 TCP clients
 - 16 UDP writes and 32 upstream socket interests
 - One precise upstream deadline timer
+
 It receives one readiness event per step, so no userspace event batch survives descriptor reuse.
 Each rearm advances a non-wrapping completion generation.
 
@@ -457,7 +458,7 @@ Connections:
 
   This local failure causes no failover or upstream health penalty.
   Neither the upstream response nor the local failure enters the cache.
-  Existing cache entries remain unchanged. This path never serves stale data.
+  Existing cache entries remain unchanged, and this path never serves stale data.
 
 ## 4. Observability
 
@@ -716,6 +717,8 @@ Replace the LAN and Kubernetes addresses with the resolvers for your network.
 
 ## 7. Parity reference — CoreDNS 1.14.6
 
+### 7.1 Parity values
+
 These values come from the CoreDNS 1.14.6 source tree:
 
 | Value | Number | Source |
@@ -771,7 +774,7 @@ These values come from the CoreDNS 1.14.6 source tree:
   It requires the runner to report all three tests; an empty or changed selection fails the check.
   Check and devshell inputs provide the platform's `ps` for fuzz-gate process checks.
   Default `test-unit` and `test` remain unfiltered. Host checks must separately run the system-root test.
-  The full native runtime/restart suite remains a separate acceptance gate. No check suppresses its failures.
+  The full native runtime/restart suite remains outside these checks.
 - The pinned Nix-only nix-darwin input supplies module evaluation and follows the root nixpkgs input.
 - Formatter: nixfmt.
 
@@ -801,7 +804,7 @@ The module provides the same three options as the NixOS module and configures a 
 - An hourly one-shot logrotate job retains seven compressed archives, with daily rotation and a 10 MiB size threshold.
   Its config resides at `/etc/z53/logrotate.conf`. Its state resides at `/var/log/z53-logrotate.status`.
   `copytruncate` preserves launchd's inherited file descriptors without a resolver restart.
-  Correct post-truncation logging requires append-mode descriptors. Native Mac acceptance must verify continued output without a sparse-file gap across rotation.
+  Correct post-truncation logging requires append-mode descriptors, leaving no sparse-file gap across rotation.
   Writes between the copy and truncation can disappear. Retention is best-effort, not lossless or a hard byte cap between checks.
 
 ### 8.4 Integration
@@ -868,21 +871,20 @@ zig-benchmark supplies the in-process harness. Commit a capture for any performa
 End-to-end comparisons use dnsperf against owned loopback resolvers and an owned upstream.
 These comparisons record build flags, CPU affinity, cache occupancy, query concurrency, and log destinations.
 The production resolver and public upstreams receive no benchmark traffic.
-CI runs a short benchmark smoke run. In-process timings do not establish end-to-end throughput or production soak acceptance.
+CI runs a short benchmark smoke run. In-process timings do not establish end-to-end throughput.
 
 ### 9.5 Nix and CI
 
 - `nix build .#z53` succeeds on all three systems.
 - Both modules eval on their platforms.
 - Both example configs parse and validate in a test.
-- CI runs on all three targets: `zig build test`, `zig fmt --check`, lint,
-  and the nix build.
+- CI runs on all three targets: the nix flake checks, host trust and test
+  compilation, the native socket suite, and both fuzz targets.
 
 Hosted CI currently runs the flake checks and both fuzz targets on all three systems.
 It also checks host trust and compiles the integration suites.
 All three jobs execute their native socket suites.
 Ubuntu 26.04 preview runners execute the Linux suites and record their kernel versions.
-Both Linux architectures passed the native socket suite on `7.0.0-1012-azure`.
 
 Successful pushes to `main` publish package outputs and their runtime closures to `mattrobenolt.cachix.org`.
 Publication requires the repository's `CACHIX_AUTH_TOKEN` secret.
@@ -891,7 +893,7 @@ Workflow checks enforce action SHA pins and run zizmor without GitHub Advanced S
 
 ## 10. Implementation choices
 
-- Proctor design over io_uring and kqueue, thread model, and buffer
+- Event-loop design over io_uring and kqueue, thread model, and buffer
   layout, inside the constraints of section 1.
 - Configuration parser internals, within the schema and bounds in section 5.
 - Internal module layout and file organization.

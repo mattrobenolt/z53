@@ -1,4 +1,4 @@
-//! Reorder views, never raw compressed records. Rewriting relocates every known name.
+//! Reorder record indices, then rewrite. The rewrite re-encodes every name in a known layout.
 const builtin = @import("builtin");
 const test_fixture = @import("testing/resolver.zig");
 const std = @import("std");
@@ -39,7 +39,8 @@ pub const Workspace = struct {
     order: [wire.records_max]u16,
     rewrite: wire.rewrite.Workspace,
 
-    /// Original packet and client options remain immutable; output must not alias them.
+    /// finish temporarily sets packet.header.bits for the rewrite and restores it on return;
+    /// output must not alias the packet or client options.
     /// This stage owns record order and replaces settings.order, even in fixed mode.
     pub fn finish(
         self: *Workspace,
