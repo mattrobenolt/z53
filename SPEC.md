@@ -68,6 +68,14 @@ Section 6 contains both reference configs as ZON.
 Reusable wire workspaces retain their backing storage between requests.
 Validity metadata prevents reads of stale scratch entries. Append-only work lists reset their active lengths without a backing-buffer clear.
 
+While the runtime runs, each dispatch samples monotonic time after event retrieval.
+A queued event receives a new sample without an additional wait.
+The cache and scheduler reuse that timestamp within the tick. Time spent inside the tick consumes timeout budgets without renewal.
+
+Query-duration measurements retain fresh admission and completion samples.
+The macOS backend also samples fresh time for conversion of absolute deadlines into relative kernel timers.
+Teardown retains its independent clock and deadline.
+
 ### 1.1 Linux client runtime bounds
 
 The Linux event thread owns these fixed resources:

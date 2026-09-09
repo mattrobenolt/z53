@@ -1781,6 +1781,7 @@ const LinuxPair = struct {
             const service = self.service;
             service.state = .running;
             service.io = testing.io;
+            service.tick_ns = try runtime.nowNs();
             service.listener_count = 0;
             self.zones = .{.{
                 .suffix = ".",
@@ -2541,6 +2542,7 @@ const LinuxSubmittedTeardown = struct {
             const service = self.service;
             service.state = .running;
             service.io = testing.io;
+            service.tick_ns = try runtime.nowNs();
             service.listener_count = 0;
             service.interval = .{ .sec = 1, .nsec = 0 };
             for (&service.listeners) |*listener| {
@@ -3840,4 +3842,131 @@ fn fillStressCache(
         try testing.expectEqual(1, logs.count("src=forward"));
         try testing.expectEqual(1, logs.count("upstream_proto=tcp"));
     }
+}
+
+// SPEC §1: one dispatch timestamp supplies client and probe deadlines within the same tick.
+test "forward clock snapshot shares client and probe scheduling time" {
+    var harness: Harness = undefined;
+    try harness.init();
+    defer harness.deinit();
+    harness.settings.zones = &harness.zones;
+    harness.zones[0].max_fails = 1;
+    try harness.start();
+    const service = harness.service;
+    const tick_ns = try runtime.nowNs() + 60 * std.time.ns_per_s;
+    service.tick_ns = tick_ns;
+    service.forward.health[0] = .{ .failures = 1, .due_ns = tick_ns };
+    service.clients[0].reset();
+    service.clients[0].phase = .waiting;
+    var input: [512]u8 = undefined;
+    const transaction = service.forward.admit(try query(&input, 91, "clock.example."), 1, &.{
+        .index = 0,
+        .generation = service.clients[0].generation,
+        .transport = .tcp,
+    }).?;
+    try service.upstreams.drive(service);
+    try testing.expectEqual(.active, service.forward.transactions[transaction].state);
+    try testing.expectEqual(false, service.forward.health[0].probe == null);
+    var active: u16 = 0;
+    for (&service.forward.sessions) |*session| {
+        if (session.transaction == null) continue;
+        active += 1;
+        try testing.expectEqual(tick_ns + 2 * std.time.ns_per_s, session.deadline_ns);
+    }
+    try testing.expectEqual(2, active);
+    try testing.expectEqual(tick_ns, service.tick_ns);
+}
+
+// SPEC §1 and §4: a real dispatch replaces old scheduler time and retains completion logs.
+test "forward clock snapshot refreshes on real event dispatch" {
+    var harness: Harness = undefined;
+    try harness.init();
+    defer harness.deinit();
+    try harness.start();
+    const service = harness.service;
+    const client = try harness.client(system.SOCK.DGRAM);
+    defer _ = system.close(client);
+    var input: [512]u8 = undefined;
+    var output: [512]u8 = undefined;
+    var logs: logging.Capture = .{};
+    service.forward.logger.sink = logs.sink();
+    service.tick_ns = 0;
+    const before_ns = try runtime.nowNs();
+    try send(client, try query(&input, 92, "localhost."));
+    const length = try harness.receive(client, &output);
+    try testing.expectEqual(1, (try wire.Header.decode(output[0..length])).counts[1]);
+    try testing.expectEqual(false, service.tick_ns == 0);
+    try testing.expect(service.tick_ns >= before_ns);
+    try testing.expect(service.tick_ns <= try runtime.nowNs());
+    try testing.expectEqual(1, logs.count("event=query"));
+    try logs.contains("duration_ms=");
+}
+
+// SPEC §4: the completion duration uses fresh time, not a frozen scheduler timestamp.
+test "logging clock snapshot does not replace completion time" {
+    if (builtin.os.tag != .linux) return error.SkipZigTest;
+    var harness: Harness = undefined;
+    try harness.init();
+    defer harness.deinit();
+    try harness.start();
+    const service = harness.service;
+    const started_ns = try runtime.nowNs();
+    service.tick_ns = started_ns + 60 * std.time.ns_per_s;
+    service.clients[0].reset();
+    service.clients[0].phase = .waiting;
+    service.clients[0].observation = .{
+        .client = null,
+        .protocol = .tcp,
+        .started_ns = started_ns,
+    };
+    var logs: logging.Capture = .{};
+    service.forward.logger.sink = logs.sink();
+    var input: [512]u8 = undefined;
+    const transaction = service.forward.admit(try query(&input, 93, "clock.invalid."), 0, &.{
+        .index = 0,
+        .generation = service.clients[0].generation,
+        .transport = .tcp,
+    }).?;
+    // This fixture publishes a terminal local failure without an upstream operation.
+    service.forward.transactions[transaction].state = .deliver;
+    service.forward.transactions[transaction].completion = .local_failure;
+    try service.deliverForwards();
+    try testing.expectEqual(1, logs.count("event=query"));
+    const marker = "duration_ms=";
+    const offset = (std.mem.indexOf(u8, logs.bytes(), marker) orelse
+        return error.DurationMissing) + marker.len;
+    const duration = std.mem.sliceTo(logs.bytes()[offset..], ' ');
+    const elapsed_ms = try std.fmt.parseFloat(f64, duration);
+    try testing.expectEqual(true, elapsed_ms < 60000);
+    try testing.expectEqual(started_ns + 60 * std.time.ns_per_s, service.tick_ns);
+}
+
+// SPEC §1: elapsed tick time cannot extend a relative kqueue deadline.
+test "forward Darwin clock snapshot does not extend relative timers" {
+    if (builtin.os.tag != .macos) return error.SkipZigTest;
+    var harness: Harness = undefined;
+    try harness.init();
+    defer harness.deinit();
+    harness.zones[0].max_fails = 1;
+    try harness.start();
+    const service = harness.service;
+    // Only the upstream timer can wake this queue during the bounded observation.
+    try service.proctor.stop();
+    const now_ns = try runtime.nowNs();
+    service.tick_ns = now_ns -| 60 * std.time.ns_per_s;
+    const due_ns = now_ns + 50 * std.time.ns_per_ms;
+    service.forward.health[0] = .{ .failures = 1, .due_ns = due_ns };
+    try service.upstreams.drive(service);
+    try testing.expectEqual(due_ns, service.upstreams.timer_deadline_ns.?);
+    var descriptor: system.pollfd = .{
+        .fd = service.proctor.descriptor,
+        .events = system.POLL.IN,
+        .revents = 0,
+    };
+    try testing.expectEqual(1, system.poll(@ptrCast(&descriptor), 1, 1000));
+    try testing.expectEqual(system.POLL.IN, descriptor.revents);
+    try testing.expectEqual(
+        @as(?u32, runtime.proctor.operations_max - 1),
+        try service.proctor.next(),
+    );
 }

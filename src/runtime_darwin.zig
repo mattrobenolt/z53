@@ -48,6 +48,8 @@ pub const Runtime = struct {
     listener_count: u16,
     state: enum { running, stopping },
     io: std.Io,
+    // Scheduler time stays fixed from event dispatch until the next completed wait.
+    tick_ns: u64,
     // #1: injected errno tests retain real Runtime dispatch and kqueue readiness.
     test_send_errno: if (builtin.is_test) ?system.E else void,
     test_send_attempts: if (builtin.is_test) u32 else void,
@@ -93,7 +95,8 @@ pub const Runtime = struct {
             try self.receive(@intCast(index));
             try self.accept(@intCast(index));
         }
-        const now_s = try now();
+        self.tick_ns = try nowNs();
+        const now_s = self.tick_ns / std.time.ns_per_s;
         for (self.pipeline.zones) |*zone| zone.check_s = now_s;
         try self.proctor.arm(timer_slot, timer_slot, system.EVFILT.TIMER);
     }
@@ -131,13 +134,14 @@ pub const Runtime = struct {
             return false;
         }
         const slot = (try self.proctor.next()) orelse return true;
+        self.tick_ns = try nowNs();
         if (slot < 16) {
             try self.datagramReady(@intCast(slot));
             try self.receive(@intCast(slot));
         } else if (slot < timer_slot) {
             try self.accepted(@intCast(slot - 16));
         } else if (slot == timer_slot) {
-            self.pipeline.reload(self.io, try now());
+            self.pipeline.reload(self.io, self.tick_ns / std.time.ns_per_s);
             try self.resumeAccepts();
             try self.proctor.arm(timer_slot, timer_slot, system.EVFILT.TIMER);
         } else if (slot < send_start) {
@@ -205,7 +209,7 @@ pub const Runtime = struct {
                 input,
                 &response.output,
                 .{ .udp = family },
-                try now(),
+                self.tick_ns / std.time.ns_per_s,
             ) catch {
                 response.listener = null;
                 return;
@@ -335,7 +339,7 @@ pub const Runtime = struct {
                 transaction.input[0..transaction.length],
                 output,
                 destination.transport,
-                try now(),
+                self.tick_ns / std.time.ns_per_s,
                 &completion,
             ) catch return error.TransportFailed;
             const selected: ?log.Upstream = if (transaction.completion == .response)
@@ -456,8 +460,12 @@ pub const Runtime = struct {
         const client = &self.clients[index];
         client.observation.protocol = .tcp;
         client.observation.started_ns = nowNs() catch 0;
-        const admission = self.pipeline.begin(bytes, client.output[2..], .tcp, try now()) catch
-            return self.closeClient(index);
+        const admission = self.pipeline.begin(
+            bytes,
+            client.output[2..],
+            .tcp,
+            self.tick_ns / std.time.ns_per_s,
+        ) catch return self.closeClient(index);
         switch (admission) {
             .drop => return self.closeClient(index),
             .answer => |answer| self.publishClient(index, bytes, &answer, null),

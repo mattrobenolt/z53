@@ -52,6 +52,8 @@ pub const Runtime = struct {
     state: enum { running, stopping } = .running,
     interval: linux.kernel_timespec = .{ .sec = 1, .nsec = 0 },
     io: std.Io,
+    // Scheduler time stays fixed from event dispatch until the next completed wait.
+    tick_ns: u64,
 
     /// The caller owns stable startup storage until deinit completes.
     pub fn init(
@@ -92,7 +94,8 @@ pub const Runtime = struct {
             try self.receive(@intCast(index));
             try self.accept(@intCast(index));
         }
-        const now_s = try now();
+        self.tick_ns = try nowNs();
+        const now_s = self.tick_ns / std.time.ns_per_s;
         for (self.pipeline.zones) |*zone| zone.check_s = now_s;
         try self.timer();
     }
@@ -175,6 +178,8 @@ pub const Runtime = struct {
             if (!self.proctor.pending()) return false;
         }
         const completion = (try self.proctor.next()) orelse return true;
+        // A scheduler clock failure must not abort teardown's independent drain.
+        if (self.state == .running) self.tick_ns = try nowNs();
         const slot: u32 = @truncate(completion.user_data);
         if (slot >= upstream.operation_start) {
             if (slot == upstream.timer_slot) {
@@ -191,7 +196,7 @@ pub const Runtime = struct {
         } else if (slot == timer_slot) {
             if (self.state == .running) {
                 if (completion.err() != .TIME) return error.TransportFailed;
-                self.pipeline.reload(self.io, try now());
+                self.pipeline.reload(self.io, self.tick_ns / std.time.ns_per_s);
                 try self.timer();
             }
         } else if (slot < response_start) {
@@ -242,7 +247,7 @@ pub const Runtime = struct {
                 datagram_value.payload,
                 &response.output,
                 .{ .udp = datagram_value.family },
-                try now(),
+                self.tick_ns / std.time.ns_per_s,
             ) catch {
                 response.state = .free;
                 return;
@@ -341,7 +346,7 @@ pub const Runtime = struct {
                 transaction.input[0..transaction.length],
                 output,
                 destination.transport,
-                try now(),
+                self.tick_ns / std.time.ns_per_s,
                 &completion,
             ) catch return error.TransportFailed;
             const selected: ?log.Upstream = if (transaction.completion == .response)
@@ -498,7 +503,12 @@ pub const Runtime = struct {
         const client = &self.clients[index];
         client.observation.protocol = .tcp;
         client.observation.started_ns = nowNs() catch 0;
-        const admission = self.pipeline.begin(bytes, client.output[2..], .tcp, try now()) catch {
+        const admission = self.pipeline.begin(
+            bytes,
+            client.output[2..],
+            .tcp,
+            self.tick_ns / std.time.ns_per_s,
+        ) catch {
             client.state = .closing;
             return;
         };

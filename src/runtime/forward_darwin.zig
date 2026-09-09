@@ -40,17 +40,17 @@ pub const Driver = struct {
         for (0..16) |_| {
             for (&service.forward.transactions, 0..) |*transaction, index| {
                 if (transaction.state != .ready) continue;
-                try self.start(service, @intCast(index), try runtime.nowNs());
+                try self.start(service, @intCast(index), service.tick_ns);
             }
         }
         // The final synchronous failure can exhaust the last entry without another socket event.
         for (&service.forward.transactions, 0..) |*transaction, index| {
             if (transaction.state == .ready)
-                _ = service.forward.select(@intCast(index), try runtime.nowNs());
+                _ = service.forward.select(@intCast(index), service.tick_ns);
         }
         try service.deliverForwards();
         for (0..forward.probes_max) |_| {
-            const now_ns = try runtime.nowNs();
+            const now_ns = service.tick_ns;
             const index = service.forward.probe(now_ns) orelse break;
             try self.start(service, index, now_ns);
         }
@@ -122,13 +122,13 @@ pub const Driver = struct {
         _ = self;
         service.forward.failed(index, "local_resource");
         const session = &service.forward.sessions[index];
-        service.forward.localCompletion(index, .immediate, try runtime.nowNs());
+        service.forward.localCompletion(index, .immediate, service.tick_ns);
         session.state = .vacant;
     }
 
     fn arm(self: *Driver, service: *runtime.Runtime, index: u16) runtime.Error!void {
         const session = &service.forward.sessions[index];
-        if (try runtime.nowNs() >= session.deadline_ns) return self.close(service, index, .retry);
+        if (service.tick_ns >= session.deadline_ns) return self.close(service, index, .retry);
         const filter: i16 = switch (session.state) {
             .connecting, .writing, .tls_write => system.EVFILT.WRITE,
             .read_prefix, .read_body, .read_datagram, .tls_read => system.EVFILT.READ,
@@ -144,7 +144,7 @@ pub const Driver = struct {
     pub fn ready(self: *Driver, service: *runtime.Runtime, index: u16) runtime.Error!void {
         const session = &service.forward.sessions[index];
         const descriptor = self.operations[index].descriptor.?;
-        const now_ns = try runtime.nowNs();
+        const now_ns = service.tick_ns;
         if (now_ns >= session.deadline_ns) return self.close(service, index, .retry);
         if (session.state == .connecting) {
             switch (self.connected(descriptor)) {
@@ -183,7 +183,7 @@ pub const Driver = struct {
             }
         }
         if (session.state == .writing) {
-            if (service.forward.sent(index, @intCast(count), try runtime.nowNs()) == .failed)
+            if (service.forward.sent(index, @intCast(count), service.tick_ns) == .failed)
                 return self.close(service, index, .retry);
         } else switch (session.received(@intCast(count))) {
             .failed => return self.close(service, index, .retry),
@@ -230,7 +230,7 @@ pub const Driver = struct {
     }
 
     fn pumpTls(self: *Driver, service: *runtime.Runtime, index: u16) runtime.Error!void {
-        service.forward.pumpTls(index, try runtime.nowNs(), &service.pipeline) catch |err|
+        service.forward.pumpTls(index, service.tick_ns, &service.pipeline) catch |err|
             return self.tlsFailed(service, index, err);
         if (service.forward.sessions[index].state != .idle) try self.arm(service, index);
     }
@@ -251,7 +251,7 @@ pub const Driver = struct {
 
     fn abortLocal(self: *Driver, service: *runtime.Runtime, index: u16) runtime.Error!void {
         service.forward.failed(index, service.forward.sessions[index].failure_reason);
-        service.forward.localCompletion(index, .close, try runtime.nowNs());
+        service.forward.localCompletion(index, .close, service.tick_ns);
         try self.close(service, index, .retire);
     }
 
@@ -263,7 +263,7 @@ pub const Driver = struct {
     ) runtime.Error!void {
         if (disposition == .retry) {
             const session = &service.forward.sessions[index];
-            const now_ns = runtime.nowNs() catch 0;
+            const now_ns = service.tick_ns;
             var reason = session.failure_reason;
             if (std.mem.eql(u8, reason, "transport_failure")) {
                 if (now_ns >= session.deadline_ns) reason = "timeout";
@@ -275,12 +275,12 @@ pub const Driver = struct {
         self.operations[index].descriptor = null;
         service.forward.sessions[index].state = .cancelling;
         service.forward.sessions[index].disposition = disposition;
-        service.forward.closed(index, try runtime.nowNs());
+        service.forward.closed(index, service.tick_ns);
     }
 
     pub fn expired(self: *Driver, service: *runtime.Runtime) runtime.Error!void {
         self.timer_deadline_ns = null;
-        const now_ns = try runtime.nowNs();
+        const now_ns = service.tick_ns;
         for (&service.forward.sessions, 0..) |*session, index| {
             switch (session.state) {
                 .vacant, .cancelling => continue,
@@ -307,6 +307,7 @@ pub const Driver = struct {
         if (nearest == self.timer_deadline_ns) return;
         self.timer_deadline_ns = nearest;
         if (nearest) |deadline_ns| {
+            // A relative kernel timer must exclude time spent inside this tick.
             try service.proctor.deadline(timer_slot, deadline_ns -| try runtime.nowNs());
         } else try service.proctor.remove(timer_slot);
     }
