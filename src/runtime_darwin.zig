@@ -1,19 +1,25 @@
 //! Single event-thread macOS runtime. All socket calls are nonblocking beneath kqueue.
 const std = @import("std");
-const builtin = @import("builtin");
 const system = std.c;
-pub const proctor = @import("runtime/kqueue.zig");
+const Allocator = std.mem.Allocator;
+const Io = std.Io;
+const assert = std.debug.assert;
+const builtin = @import("builtin");
+
 pub const address = @import("runtime/address_darwin.zig");
-const datagram = @import("runtime/udp_darwin.zig");
 pub const forwarding = @import("runtime/forward.zig");
-const log = @import("runtime/log.zig");
 const upstream = @import("runtime/forward_darwin.zig");
-const tcp = @import("runtime/tcp.zig");
+pub const proctor = @import("runtime/kqueue.zig");
+const log = @import("runtime/log.zig");
 const pipeline = @import("runtime/pipeline.zig");
 const config = pipeline.resolver.config;
+const tcp = @import("runtime/tcp.zig");
+const datagram = @import("runtime/udp_darwin.zig");
+
 const timer_slot = 32;
 const client_start = 33;
 const send_start = client_start + tcp.clients_max;
+
 pub const Error = error{
     SetupFailed,
     RegistrationFailed,
@@ -33,7 +39,11 @@ pub const Error = error{
     TrustStoreLoadFailed,
     TransportFailed,
 };
-const Listener = struct { udp: ?system.fd_t = null, tcp: ?system.fd_t = null };
+
+const Listener = struct {
+    udp: ?system.fd_t = null,
+    tcp: ?system.fd_t = null,
+};
 
 pub const Runtime = struct {
     proctor: proctor.Proctor,
@@ -47,7 +57,7 @@ pub const Runtime = struct {
     input: [65535]u8,
     listener_count: u16,
     state: enum { running, stopping },
-    io: std.Io,
+    io: Io,
     // Scheduler time stays fixed from event dispatch until the next completed wait.
     tick_ns: u64,
     // #1: injected errno tests retain real Runtime dispatch and kqueue readiness.
@@ -57,8 +67,8 @@ pub const Runtime = struct {
 
     pub fn init(
         self: *Runtime,
-        allocator: std.mem.Allocator,
-        io: std.Io,
+        allocator: Allocator,
+        io: Io,
         settings: *const config.Config,
     ) Error!void {
         self.io = io;
@@ -121,7 +131,7 @@ pub const Runtime = struct {
     }
 
     pub fn stop(self: *Runtime) Error!void {
-        std.debug.assert(self.state == .running);
+        assert(self.state == .running);
         self.state = .stopping;
         try self.proctor.stop();
         // No asynchronous socket I/O survives EV_DELETE. Pending datagrams can be discarded.
@@ -130,7 +140,7 @@ pub const Runtime = struct {
 
     pub fn step(self: *Runtime) Error!bool {
         if (self.state == .stopping) {
-            std.debug.assert(!self.proctor.pending());
+            assert(!self.proctor.pending());
             return false;
         }
         const slot = (try self.proctor.next()) orelse return true;
@@ -519,7 +529,7 @@ pub const Runtime = struct {
 
     fn closeClient(self: *Runtime, index: u16) Error!void {
         // Called only after consuming the one-shot event. No queued event refers to this fd.
-        std.debug.assert(self.proctor.registrations[client_start + @as(u32, index)] == null);
+        assert(self.proctor.registrations[client_start + @as(u32, index)] == null);
         _ = system.close(self.descriptors[index].?);
         self.descriptors[index] = null;
         self.clients[index].state = .vacant;
@@ -548,11 +558,11 @@ pub fn nowNs() error{ClockFailed}!u64 {
 comptime {
     // SPEC §1.3 excludes cache entry arrays and packets.
     // Hosts tables and configuration also retain separate bounds.
-    std.debug.assert(
+    assert(
         @sizeOf(Runtime) + pipeline.zone_storage_bytes_max <=
             40 * 1024 * 1024,
     );
-    std.debug.assert(
+    assert(
         @sizeOf(forwarding.Forward) + @sizeOf(upstream.Driver) <= forwarding.storage_bytes_max,
     );
 }

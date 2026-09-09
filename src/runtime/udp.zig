@@ -1,9 +1,17 @@
 const std = @import("std");
-const log = @import("log.zig");
 const linux = std.os.linux;
+const assert = std.debug.assert;
+
 const wire = @import("../wire.zig");
+const log = @import("log.zig");
+
 pub const Family = enum { ipv4, ipv6 };
-pub const Datagram = struct { address: []const u8, payload: []const u8, family: Family };
+
+pub const Datagram = struct {
+    address: []const u8,
+    payload: []const u8,
+    family: Family,
+};
 
 /// Ordinary datagrams have fixed IP headers and no IPv6 jumbogram option.
 pub fn limit(client_bytes: u16, family: Family) u16 {
@@ -24,7 +32,7 @@ pub const Response = struct {
     output: [wire.message_bytes_max]u8,
 
     pub fn prepare(self: *Response, datagram: *const Datagram, length: usize) void {
-        std.debug.assert(self.state == .reserved);
+        assert(self.state == .reserved);
         @memcpy(std.mem.asBytes(&self.address)[0..datagram.address.len], datagram.address);
         self.vector = .{ .base = &self.output, .len = length };
         self.message = .{

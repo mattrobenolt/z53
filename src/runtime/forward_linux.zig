@@ -1,12 +1,17 @@
 //! #1: each linked pair retains both completions and both explicit cancellation barriers.
 const std = @import("std");
+const linux = std.os.linux;
+const assert = std.debug.assert;
+const time = std.time;
+
 const runtime = @import("../runtime_linux.zig");
 const forward = @import("forward.zig");
 const retired = forward.retired;
-const linux = std.os.linux;
+
 pub const operation_start = 225;
 pub const timer_slot = 289;
 pub const file_start = 160;
+
 const Operation = struct {
     kind: enum { none, pair, close } = .none,
     result: ?i32 = null,
@@ -15,6 +20,7 @@ const Operation = struct {
     address: runtime.address.Address,
     peer: struct { endpoint: u16, generation: u31 },
 };
+
 pub const Driver = struct {
     operations: [forward.sessions_max]Operation,
     interval: linux.kernel_timespec,
@@ -108,7 +114,7 @@ pub const Driver = struct {
         const now_ns = service.tick_ns;
         if (now_ns >= session.deadline_ns) return self.close(service, index, .retry);
         const operation = &self.operations[index];
-        std.debug.assert(operation.kind == .none);
+        assert(operation.kind == .none);
         try service.proctor.reserve(2);
         const slot = operation_start + @as(u32, index) * 2;
         const token = try service.proctor.arm(slot);
@@ -150,8 +156,8 @@ pub const Driver = struct {
         entry.flags |= linux.IOSQE_FIXED_FILE | linux.IOSQE_IO_LINK;
         // An SQE can wait before submission. Absolute time prevents renewal of its budget.
         operation.timeout = .{
-            .sec = @intCast(session.deadline_ns / std.time.ns_per_s),
-            .nsec = @intCast(session.deadline_ns % std.time.ns_per_s),
+            .sec = @intCast(session.deadline_ns / time.ns_per_s),
+            .nsec = @intCast(session.deadline_ns % time.ns_per_s),
         };
         _ = service.proctor.ring.link_timeout(
             timeout_token,
@@ -205,11 +211,11 @@ pub const Driver = struct {
         }
         if (count < 0) {
             service.forward.sessions[index].failure_reason = @tagName(completionError(count));
-            switch (completionError(count)) {
-                .CANCELED => return self.abortLocal(service, index),
-                .MFILE, .NFILE, .NOBUFS, .NOMEM => return self.abortLocal(service, index),
-                else => return self.close(service, index, .retry),
-            }
+            return switch (completionError(count)) {
+                .CANCELED => self.abortLocal(service, index),
+                .MFILE, .NFILE, .NOBUFS, .NOMEM => self.abortLocal(service, index),
+                else => self.close(service, index, .retry),
+            };
         }
         try self.advance(service, index, count);
     }
@@ -304,12 +310,12 @@ pub const Driver = struct {
             service.forward.failed(index, reason);
         }
         const slot = operation_start + @as(u32, index) * 2;
-        std.debug.assert(retired(
+        assert(retired(
             &service.proctor.ownership[slot],
             &service.proctor.ownership[slot + 1],
         ));
         const operation = &self.operations[index];
-        std.debug.assert(operation.kind == .none);
+        assert(operation.kind == .none);
         try service.proctor.reserve(1);
         const token = try service.proctor.arm(slot);
         _ = service.proctor.ring.close_direct(token, file_start + @as(u32, index)) catch
@@ -357,8 +363,8 @@ pub const Driver = struct {
         const deadline_ns = nearest orelse return;
         self.timer_deadline_ns = deadline_ns;
         self.interval = .{
-            .sec = @intCast(deadline_ns / std.time.ns_per_s),
-            .nsec = @intCast(deadline_ns % std.time.ns_per_s),
+            .sec = @intCast(deadline_ns / time.ns_per_s),
+            .nsec = @intCast(deadline_ns % time.ns_per_s),
         };
         try service.proctor.reserve(1);
         const token = try service.proctor.arm(timer_slot);
@@ -372,6 +378,6 @@ pub const Driver = struct {
 };
 
 fn completionError(result: i32) linux.E {
-    std.debug.assert(result < 0);
+    assert(result < 0);
     return @enumFromInt(-result);
 }

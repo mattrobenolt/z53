@@ -1,15 +1,33 @@
 //! Synchronous admission and continuation. No packet view survives asynchronous work.
 const std = @import("std");
+const Allocator = std.mem.Allocator;
+
 pub const resolver = @import("../resolver.zig");
 pub const wire = resolver.wire;
 const config = resolver.config;
 const hosts = resolver.hosts;
 const cache = resolver.cache;
 const udp = @import("udp.zig");
-pub const Transport = union(enum) { udp: udp.Family, tcp };
+
+pub const Transport = union(enum) {
+    udp: udp.Family,
+    tcp,
+};
+
 pub const Error = error{ OutOfMemory, HostsLoadFailed };
-pub const Admission = union(enum) { drop, answer: resolver.Answer, forward: u16 };
-pub const Completion = union(enum) { response: []const u8, exhausted, local_failure };
+
+pub const Admission = union(enum) {
+    drop,
+    answer: resolver.Answer,
+    forward: u16,
+};
+
+pub const Completion = union(enum) {
+    response: []const u8,
+    exhausted,
+    local_failure,
+};
+
 const Zone = struct {
     cache: cache.Cache,
     hosts: ?hosts.Store = null,
@@ -19,7 +37,7 @@ const Zone = struct {
 pub const zone_storage_bytes_max = config.zones_max * @sizeOf(Zone);
 
 pub const Pipeline = struct {
-    allocator: std.mem.Allocator,
+    allocator: Allocator,
     config: *const config.Config,
     zones: []Zone,
     request_packet: wire.Packet,
@@ -32,7 +50,7 @@ pub const Pipeline = struct {
 
     pub fn init(
         self: *Pipeline,
-        allocator: std.mem.Allocator,
+        allocator: Allocator,
         io: std.Io,
         settings: *const config.Config,
     ) Error!void {

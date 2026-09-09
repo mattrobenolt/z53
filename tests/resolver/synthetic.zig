@@ -43,7 +43,7 @@ test "reverse localhost and covered empty answers" {
         try fixture.response.name(&name, record.data_start);
         var expected: wire.Name = undefined;
         try expected.fromText("localhost.");
-        try testing.expect(name.equal(&expected));
+        try testing.expect(name.eql(&expected));
         try testing.expectEqual(@as(u16, 1), record.class);
         try testing.expectEqual(@as(u32, 30), record.ttl_s);
     }

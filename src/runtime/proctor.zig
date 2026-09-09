@@ -1,15 +1,24 @@
 //! Linux 7.2 is a contract, not a capability negotiation.
 const std = @import("std");
-const builtin = @import("builtin");
 pub const linux = std.os.linux;
 const Ring = linux.IoUring;
+const assert = std.debug.assert;
+const posix = std.posix;
+const print = std.debug.print;
+const page_size_max = std.heap.page_size_max;
+const page_size_min = std.heap.page_size_min;
+const alignForward = std.mem.alignForward;
+const builtin = @import("builtin");
+
 const ownership = @import("ownership.zig");
 pub const Ownership = ownership.Ownership;
+
 pub const operations_max = 290;
 pub const mapping_bytes_max = 256 * 1024;
 pub const buffers_max = 64;
 pub const buffer_bytes = 65535 + 16 + @sizeOf(linux.sockaddr.storage);
 pub const cancel_bit: u64 = 1 << 63;
+
 pub const Error = error{
     SetupFailed,
     SubmissionFailed,
@@ -34,21 +43,20 @@ pub const Proctor = struct {
         if (builtin.is_test) null else {},
     ownership: [operations_max]Ownership = @splat(.{}),
     buffers: [buffers_max][buffer_bytes]u8,
-    provided: *align(std.heap.page_size_min) linux.io_uring_buf_ring,
+    provided: *align(page_size_min) linux.io_uring_buf_ring,
 
     pub fn init(self: *Proctor) Error!void {
         if (builtin.is_test) self.teardown_observer = null;
         self.ownership = @splat(.{});
         const flags = linux.IORING_SETUP_SINGLE_ISSUER | linux.IORING_SETUP_DEFER_TASKRUN;
         self.ring = Ring.init(512, flags) catch |err| {
-            std.debug.print("z53: io_uring setup: {s}\n", .{@errorName(err)});
+            print("z53: io_uring setup: {s}\n", .{@errorName(err)});
             return error.SetupFailed;
         };
         errdefer self.ring.deinit();
-        const page = std.heap.page_size_max;
-        const mapping_bytes = std.mem.alignForward(usize, self.ring.sq.mmap.len, page) +
-            std.mem.alignForward(usize, self.ring.sq.mmap_sqes.len, page) +
-            std.mem.alignForward(usize, buffers_max * @sizeOf(linux.io_uring_buf), page);
+        const mapping_bytes = alignForward(usize, self.ring.sq.mmap.len, page_size_max) +
+            alignForward(usize, self.ring.sq.mmap_sqes.len, page_size_max) +
+            alignForward(usize, buffers_max * @sizeOf(linux.io_uring_buf), page_size_max);
         if (mapping_bytes > mapping_bytes_max) return error.SetupFailed;
         // Non-incremental rings have one explicit ownership transfer per datagram.
         // The std helper's retry branch only applies to incremental rings.
@@ -70,12 +78,12 @@ pub const Proctor = struct {
     /// Retain kernel-visible storage until request retirement and both resource barriers succeed.
     pub fn deinit(self: *Proctor) void {
         self.teardown() catch |err| {
-            std.debug.print("z53: io_uring teardown: {s}\n", .{@errorName(err)});
+            print("z53: io_uring teardown: {s}\n", .{@errorName(err)});
             // Process exit does not unwind Runtime or Pipeline storage.
             std.process.exit(1);
         };
-        const metadata: [*]align(std.heap.page_size_min) u8 = @ptrCast(self.provided);
-        std.posix.munmap(metadata[0 .. buffers_max * @sizeOf(linux.io_uring_buf)]);
+        const metadata: [*]align(page_size_min) u8 = @ptrCast(self.provided);
+        posix.munmap(metadata[0 .. buffers_max * @sizeOf(linux.io_uring_buf)]);
         self.ring.deinit();
         self.* = undefined;
     }
@@ -233,13 +241,13 @@ pub const Proctor = struct {
     }
 
     pub fn recycle(self: *Proctor, index: u16) void {
-        std.debug.assert(index < buffers_max);
+        assert(index < buffers_max);
         Ring.buf_ring_add(self.provided, &self.buffers[index], index, buffers_max - 1, 0);
         Ring.buf_ring_advance(self.provided, 1);
     }
 
     pub fn arm(self: *Proctor, index: u32) Error!u64 {
-        std.debug.assert(index < operations_max);
+        assert(index < operations_max);
         return self.ownership[index].arm(index);
     }
 
@@ -284,7 +292,7 @@ pub const Proctor = struct {
 
     /// Account for unpublished SQEs too, including work queued before stop.
     pub fn reserve(self: *Proctor, count: u32) Error!void {
-        std.debug.assert(count <= self.ring.sq.sqes.len);
+        assert(count <= self.ring.sq.sqes.len);
         if (self.ring.sq_ready() + count > self.ring.sq.sqes.len) {
             _ = self.ring.submit() catch return error.SubmissionFailed;
         }

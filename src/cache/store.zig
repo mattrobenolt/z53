@@ -1,8 +1,12 @@
 //! Fixed stdlib columns retain stable slots and intrusive LRU links (#1).
 //! Packet ownership belongs to the cache's bounded size-class storage.
 const std = @import("std");
-const wire = @import("../wire.zig");
+const Wyhash = std.hash.Wyhash;
+const assert = std.debug.assert;
+const Allocator = std.mem.Allocator;
+
 const resolver = @import("../resolver.zig");
+const wire = @import("../wire.zig");
 const packets = @import("packets.zig");
 
 pub const Key = struct {
@@ -23,6 +27,7 @@ pub const Key = struct {
 
     pub fn fingerprint(self: *const Key) u64 {
         var canonical: [260]u8 = undefined;
+        // The metadata suffix extends a maximum-length name beyond u8.
         const length: usize = self.name.length;
         // Label lengths are below ASCII letters. Fold data only through the initialized name.
         for (self.name.wire(), canonical[0..length]) |byte, *target| {
@@ -33,15 +38,15 @@ pub const Key = struct {
         canonical[length + 4] = @intFromEnum(self.dnssec);
         // Zero denotes an empty slot, never a valid fingerprint. Equality resolves collisions.
         // Zero marks vacant columns. The hash index needs entropy in the low bits.
-        const value = std.hash.Wyhash.hash(0, canonical[0 .. length + 5]);
+        const value = Wyhash.hash(0, canonical[0 .. length + 5]);
         return if (value == 0) 1 else value;
     }
 
-    fn equal(self: *const Key, other: *const Key) bool {
+    fn eql(self: *const Key, other: *const Key) bool {
         if (self.kind != other.kind) return false;
         if (self.class != other.class) return false;
         if (self.dnssec != other.dnssec) return false;
-        return self.name.equal(&other.name);
+        return self.name.eql(&other.name);
     }
 };
 
@@ -58,7 +63,7 @@ pub const Entry = struct {
 
     pub fn age(self: *const Entry, now_s: u64) u64 {
         // The event thread supplies monotonic whole seconds, not wall-clock time.
-        std.debug.assert(now_s >= self.inserted_s);
+        assert(now_s >= self.inserted_s);
         return now_s - self.inserted_s;
     }
 
@@ -91,7 +96,7 @@ pub const LookupContext = struct {
     }
 
     pub fn eql(self: LookupContext, key: *const Key, index: u32) bool {
-        return self.bank.entries.items(.key)[index].equal(key);
+        return self.bank.entries.items(.key)[index].eql(key);
     }
 };
 
@@ -104,7 +109,7 @@ pub const Bank = struct {
     first: ?u32 = null,
     last: ?u32 = null,
 
-    pub fn init(self: *Bank, allocator: std.mem.Allocator, capacity: u32) error{OutOfMemory}!void {
+    pub fn init(self: *Bank, allocator: Allocator, capacity: u32) error{OutOfMemory}!void {
         self.* = .{};
         try self.entries.setCapacity(allocator, capacity);
         errdefer self.entries.deinit(allocator);
@@ -113,7 +118,7 @@ pub const Bank = struct {
         try self.index.ensureTotalCapacityContext(allocator, capacity, self.indexContext());
     }
 
-    pub fn deinit(self: *Bank, allocator: std.mem.Allocator) void {
+    pub fn deinit(self: *Bank, allocator: Allocator) void {
         self.index.deinit(allocator);
         self.entries.deinit(allocator);
         self.* = undefined;
@@ -125,8 +130,8 @@ pub const Bank = struct {
 
     /// Publish into an empty stable slot. Fixtures use this same metadata path.
     pub fn put(self: *Bank, index: u32, entry: *const Entry) void {
-        std.debug.assert(self.entries.items(.bytes)[index] == null);
-        std.debug.assert(entry.bytes != null);
+        assert(self.entries.items(.bytes)[index] == null);
+        assert(entry.bytes != null);
         self.entries.set(index, entry.*);
         self.entries.items(.fingerprint)[index] = entry.key.fingerprint();
         // Each occupied slot owns one map key. Replacement removes its old key first.
@@ -169,7 +174,7 @@ pub const Bank = struct {
 
     fn removeIndex(self: *Bank, index: u32) void {
         const removed = self.index.removeContext(index, self.indexContext());
-        std.debug.assert(removed);
+        assert(removed);
         self.index_removals += 1;
         // A subsequent insertion can consume a free bucket instead of the new tombstone.
         // Rehash before half the reserved spare buckets become tombstones.
@@ -184,9 +189,9 @@ pub const Bank = struct {
     }
 
     fn prepend(self: *Bank, index: u32) void {
-        std.debug.assert(index < self.entries.len);
+        assert(index < self.entries.len);
         const columns = self.entries.slice();
-        std.debug.assert(columns.items(.bytes)[index] != null);
+        assert(columns.items(.bytes)[index] != null);
         columns.items(.previous)[index] = null;
         columns.items(.next)[index] = self.first;
         if (self.first) |first| columns.items(.previous)[first] = index else self.last = index;
@@ -194,11 +199,11 @@ pub const Bank = struct {
     }
 
     fn unlink(self: *Bank, index: u32) void {
-        std.debug.assert(index < self.entries.len);
-        std.debug.assert(self.first != null);
-        std.debug.assert(self.last != null);
+        assert(index < self.entries.len);
+        assert(self.first != null);
+        assert(self.last != null);
         const columns = self.entries.slice();
-        std.debug.assert(columns.items(.bytes)[index] != null);
+        assert(columns.items(.bytes)[index] != null);
         const previous = columns.items(.previous)[index];
         const next = columns.items(.next)[index];
         if (previous) |value| {

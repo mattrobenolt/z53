@@ -1,16 +1,21 @@
 //! #1: caller-owned TLS records survive the same retirement barriers as DNS buffers.
 const std = @import("std");
+const Io = std.Io;
+const assert = std.debug.assert;
+
 pub const engine = @import("ztls");
+
 pub const Error = error{ TransportFailure, LocalFailure };
 pub const TrustError = error{ TrustStoreTooLarge, TrustStoreLoadFailed };
+
 pub const Trust = struct {
     bundle: std.crypto.Certificate.Bundle,
     storage: [1536 * 1024]u8,
 
-    pub fn init(self: *Trust, io: std.Io) TrustError!void {
+    pub fn init(self: *Trust, io: Io) TrustError!void {
         self.bundle = .empty;
         var allocator: std.heap.FixedBufferAllocator = .init(&self.storage);
-        self.bundle.rescan(allocator.allocator(), io, std.Io.Timestamp.now(io, .real)) catch |err| {
+        self.bundle.rescan(allocator.allocator(), io, Io.Timestamp.now(io, .real)) catch |err| {
             self.bundle = .empty;
             return switch (err) {
                 error.OutOfMemory => error.TrustStoreTooLarge,
@@ -35,10 +40,15 @@ pub const Connection = struct {
     plaintext: []const u8 = &.{},
     failure_reason: ?[]const u8 = null,
 
-    pub const Action = union(enum) { read, write, data: []const u8, request_sent };
+    pub const Action = union(enum) {
+        read,
+        write,
+        data: []const u8,
+        request_sent,
+    };
 
-    pub fn init(self: *Connection, io: std.Io, name: []const u8, trust: *const Trust) Error!void {
-        std.debug.assert(self.handshake == null);
+    pub fn init(self: *Connection, io: Io, name: []const u8, trust: *const Trust) Error!void {
+        assert(self.handshake == null);
         self.failure_reason = null;
         var entropy: [96]u8 = undefined;
         defer std.crypto.secureZero(u8, &entropy);
@@ -52,7 +62,7 @@ pub const Connection = struct {
         self.handshake = .init(.{
             .keypairs = .initWithP256(x25519, p256),
             .host_name = name,
-            .now_sec = std.Io.Timestamp.now(io, .real).toSeconds(),
+            .now_sec = Io.Timestamp.now(io, .real).toSeconds(),
             .random = .init(entropy[64..96].*),
             .bundle = &trust.bundle,
             .reassembly = &self.reassembly,
@@ -83,7 +93,7 @@ pub const Connection = struct {
     }
 
     fn queue(self: *Connection, bytes: []const u8) void {
-        std.debug.assert(bytes.ptr == &self.output);
+        assert(bytes.ptr == &self.output);
         self.write_offset = 0;
         self.write_length = @intCast(bytes.len);
     }

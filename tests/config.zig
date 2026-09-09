@@ -1,8 +1,11 @@
 const std = @import("std");
+const testing = std.testing;
+const expect = testing.expect;
+const equal = testing.expectEqual;
+const strings = testing.expectEqualStrings;
+
 const config = @import("config");
-const expect = std.testing.expect;
-const equal = std.testing.expectEqual;
-const strings = std.testing.expectEqualStrings;
+
 const upstream = ".{ .address = \"127.0.0.1:1053\" }";
 const zone_start = ".{ .zones = .{ .{ .suffix = \".\", .upstreams = .{" ++ upstream ++ "}, ";
 const zone_end = " } } }";
@@ -14,11 +17,11 @@ const Harness = struct {
     diagnostic: config.Diagnostic = .{ .path = "test.zon" },
 
     fn init(self: *Harness) !void {
-        self.* = .{ .workspace = try std.testing.allocator.alloc(u8, config.workspace_bytes_max) };
+        self.* = .{ .workspace = try testing.allocator.alloc(u8, config.workspace_bytes_max) };
     }
 
     fn deinit(self: *Harness) void {
-        std.testing.allocator.free(self.workspace);
+        testing.allocator.free(self.workspace);
         self.* = undefined;
     }
 
@@ -27,7 +30,7 @@ const Harness = struct {
     }
 
     fn rejects(self: *Harness, source: [:0]const u8, reason: []const u8) !void {
-        try std.testing.expectError(error.InvalidConfig, self.parse(source));
+        try testing.expectError(error.InvalidConfig, self.parse(source));
         if (std.mem.indexOf(u8, self.diagnostic.message(), reason) == null) {
             std.debug.print("expected reason containing '{s}', got: {f}", .{
                 reason, &self.diagnostic,
@@ -58,7 +61,7 @@ test "typed configuration defaults" {
     try equal(false, zone.rotate);
     try equal(false, zone.upstreams[0].force_tcp);
     try equal(null, zone.upstreams[0].tls);
-    try std.testing.expectEqualDeep(config.Cache{}, zone.cache.?);
+    try testing.expectEqualDeep(config.Cache{}, zone.cache.?);
 }
 
 // SPEC §6: parse actual shipped files, preserving the deployment differences.
@@ -72,7 +75,7 @@ test "both reference configuration files parse and validate" {
         harness.diagnostic.path = path;
         try config.load(
             &harness.parsed,
-            std.testing.io,
+            testing.io,
             &source,
             harness.workspace,
             &harness.diagnostic,
@@ -94,7 +97,7 @@ test "both reference configuration files parse and validate" {
             item.endpoint(&endpoint);
             try equal(853, endpoint.port);
         }
-        try std.testing.expectEqualDeep(config.Hosts{}, root.hosts.?);
+        try testing.expectEqualDeep(config.Hosts{}, root.hosts.?);
         try equal(28, root.nodata[0].code());
         try equal(1, root.nodata.len);
         try equal(1, root.max_fails);
@@ -108,7 +111,7 @@ test "both reference configuration files parse and validate" {
         try equal(@as(u32, 1) + @as(u32, @intCast(index)), tailscale.max_fails);
         try equal(30, tailscale.cache.?.max_ttl_s);
         try equal(30, tailscale.cache.?.denialMaximum());
-        try std.testing.expectEqualDeep(config.Hosts{}, tailscale.hosts.?);
+        try testing.expectEqualDeep(config.Hosts{}, tailscale.hosts.?);
         if (index == 1) {
             const cluster = &harness.parsed.zones[2];
             try strings("svc.cluster.local.", cluster.suffix);
@@ -239,7 +242,7 @@ test "semantic and typed diagnostics report exact source positions" {
     , "at least one upstream");
     try equal(4, harness.diagnostic.line);
     try equal(19, harness.diagnostic.column);
-    try std.testing.expectFmt(
+    try testing.expectFmt(
         "test.zon:4:19: error: zone requires at least one upstream\n",
         "{f}",
         .{&harness.diagnostic},
@@ -292,13 +295,13 @@ test "canonical suffix routing including binary label boundaries" {
 test "configuration path arguments" {
     try strings("/etc/z53/z53.zon", try config.configPath(&.{}));
     try strings("/tmp/test.zon", try config.configPath(&.{ "-c", "/tmp/test.zon" }));
-    try std.testing.expectError(error.InvalidArguments, config.configPath(&.{"-c"}));
-    try std.testing.expectError(error.InvalidArguments, config.configPath(&.{ "-c", "" }));
-    try std.testing.expectError(
+    try testing.expectError(error.InvalidArguments, config.configPath(&.{"-c"}));
+    try testing.expectError(error.InvalidArguments, config.configPath(&.{ "-c", "" }));
+    try testing.expectError(
         error.InvalidArguments,
         config.configPath(&.{ "--config", "test.zon" }),
     );
-    try std.testing.expectError(
+    try testing.expectError(
         error.InvalidArguments,
         config.configPath(&.{ "-c", "a", "-c", "b" }),
     );
@@ -316,7 +319,7 @@ test "configuration parser resource limits" {
     @memcpy(bytes[0..minimal.len], minimal);
     bytes[config.source_bytes_max] = 0;
     try harness.parse(bytes[0..config.source_bytes_max :0]);
-    try std.testing.expectError(error.InvalidConfig, config.parse(
+    try testing.expectError(error.InvalidConfig, config.parse(
         &harness.parsed,
         minimal,
         &.{},
@@ -480,14 +483,14 @@ test "file loading failure diagnostic" {
     defer harness.deinit();
     var source: [config.source_bytes_max + 2]u8 = undefined;
     harness.diagnostic.path = "tests/no-such-config.zon";
-    try std.testing.expectError(error.InvalidConfig, config.load(
+    try testing.expectError(error.InvalidConfig, config.load(
         &harness.parsed,
-        std.testing.io,
+        testing.io,
         &source,
         harness.workspace,
         &harness.diagnostic,
     ));
-    try std.testing.expectFmt(
+    try testing.expectFmt(
         "tests/no-such-config.zon:1:1: error: FileNotFound\n",
         "{f}",
         .{&harness.diagnostic},

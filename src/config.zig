@@ -1,9 +1,11 @@
 const std = @import("std");
-const names = @import("wire/name.zig");
-const validation = @import("config/validation.zig");
+const Io = std.Io;
+const assert = std.debug.assert;
 
-pub const Name = names.Name;
 pub const Endpoint = @import("config/endpoint.zig").Endpoint;
+const validation = @import("config/validation.zig");
+const names = @import("wire/name.zig");
+pub const Name = names.Name;
 
 pub const default_path = "/etc/z53/z53.zon";
 pub const source_bytes_max = 65536;
@@ -16,7 +18,9 @@ pub const cache_entries_max = 1000000;
 pub const cache_packet_bytes_min = 64 * 1024;
 pub const cache_packet_bytes_max = 256 * 1024 * 1024;
 pub const cache_packet_bytes_total_max = 512 * 1024 * 1024;
+
 pub const Error = error{InvalidConfig};
+
 pub const QueryType = union(enum(u16)) {
     number: u16 = 0,
     A: void = 1,
@@ -46,12 +50,17 @@ pub const QueryType = union(enum(u16)) {
         };
     }
 };
+
 pub const Hosts = struct {
     path: []const u8 = "/etc/hosts",
     ttl: u32 = 30,
     reload_s: u32 = 5,
 };
-pub const Tls = struct { server_name: []const u8 };
+
+pub const Tls = struct {
+    server_name: []const u8,
+};
+
 pub const Upstream = struct {
     address: []const u8,
     tls: ?Tls = null,
@@ -62,6 +71,7 @@ pub const Upstream = struct {
         target.parse(self.address, if (self.tls != null) 853 else 53) catch unreachable;
     }
 };
+
 pub const Cache = struct {
     max_ttl_s: u32 = 3600,
     min_ttl_s: u32 = 5,
@@ -73,6 +83,7 @@ pub const Cache = struct {
         return @min(self.max_ttl_s, self.neg_max_ttl_s);
     }
 };
+
 pub const Zone = struct {
     suffix: []const u8,
     hosts: ?Hosts = null,
@@ -86,6 +97,7 @@ pub const Zone = struct {
     serve_stale_s: u32 = 0,
     rotate: bool = false,
 };
+
 pub const Config = struct {
     listen: []const []const u8 = &.{"127.0.0.1:53"},
     zones: []Zone,
@@ -119,7 +131,7 @@ pub const Diagnostic = struct {
         }
     }
 
-    pub fn format(self: *const Diagnostic, writer: *std.Io.Writer) std.Io.Writer.Error!void {
+    pub fn format(self: *const Diagnostic, writer: *Io.Writer) Io.Writer.Error!void {
         try writer.print("{s}:{d}:{d}: error: {s}\n", .{
             self.path, self.line, self.column, self.message(),
         });
@@ -141,7 +153,7 @@ pub fn parse(
     diagnostic.length = 0;
     try preflight(source, diagnostic);
     const memory = workspace[0..@min(workspace.len, workspace_bytes_max)];
-    var fixed = std.heap.FixedBufferAllocator.init(memory);
+    var fixed: std.heap.FixedBufferAllocator = .init(memory);
     const allocator = fixed.allocator();
     var diagnostics: std.zon.parse.Diagnostics = .{};
     target.* = std.zon.parse.fromSliceAlloc(
@@ -157,10 +169,10 @@ pub fn parse(
             const location = failure.getLocation(&diagnostics);
             diagnostic.line = @intCast(location.line + 1);
             diagnostic.column = @intCast(location.column + 1);
-            var writer: std.Io.Writer = .fixed(&diagnostic.reason);
+            var writer: Io.Writer = .fixed(&diagnostic.reason);
             writer.print("{f}", .{failure.fmtMessage(&diagnostics)}) catch {
                 // The fixed diagnostic retains the available prefix of an oversized message.
-                std.debug.assert(writer.end <= diagnostic.reason.len);
+                assert(writer.end <= diagnostic.reason.len);
             };
             diagnostic.length = @intCast(writer.end);
         }
@@ -173,15 +185,15 @@ pub fn parse(
 /// Caller provides source_bytes_max + 2 bytes for the oversize check and sentinel.
 pub fn load(
     target: *Config,
-    io: std.Io,
+    io: Io,
     source_buffer: []u8,
     workspace: []u8,
     diagnostic: *Diagnostic,
 ) Error!void {
-    std.debug.assert(source_buffer.len >= source_bytes_max + 2);
+    assert(source_buffer.len >= source_bytes_max + 2);
     diagnostic.line = 1;
     diagnostic.column = 1;
-    const source = std.Io.Dir.cwd().readFile(
+    const source = Io.Dir.cwd().readFile(
         io,
         diagnostic.path,
         source_buffer[0 .. source_bytes_max + 1],
@@ -197,7 +209,7 @@ fn preflight(source: [:0]const u8, diagnostic: *Diagnostic) Error!void {
         diagnostic.position(source, source_bytes_max);
         return diagnostic.set("configuration exceeds 65536 bytes");
     }
-    var tokenizer = std.zig.Tokenizer.init(source);
+    var tokenizer: std.zig.Tokenizer = .init(source);
     var depth: u16 = 0;
     var tokens: u32 = 0;
     var previous: std.zig.Token.Tag = .eof;

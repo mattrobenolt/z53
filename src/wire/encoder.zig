@@ -1,4 +1,7 @@
 const std = @import("std");
+const Wyhash = std.hash.Wyhash;
+const assert = std.debug.assert;
+
 const wire = @import("../wire.zig");
 const names = wire.names;
 
@@ -73,7 +76,7 @@ pub const Encoder = struct {
     }
 
     fn lookup(self: *Encoder, suffix: []const u8) ?u16 {
-        const hash = std.hash.Wyhash.hash(0, suffix);
+        const hash = Wyhash.hash(0, suffix);
         for (0..self.dictionary.len) |probe| {
             const slot = (hash +% probe) % self.dictionary.len;
             if (!self.occupied.isSet(slot)) return null;
@@ -93,7 +96,7 @@ pub const Encoder = struct {
     }
 
     fn insert(self: *Encoder, suffix: []const u8, offset: u16) void {
-        const hash = std.hash.Wyhash.hash(0, suffix);
+        const hash = Wyhash.hash(0, suffix);
         for (0..self.dictionary.len) |probe| {
             const slot = (hash +% probe) % self.dictionary.len;
             if (self.occupied.isSet(slot)) continue;
@@ -137,7 +140,7 @@ pub const Encoder = struct {
     }
 
     pub fn endRecord(self: *Encoder, length_offset: usize) void {
-        std.debug.assert(length_offset + 2 <= self.cursor);
+        assert(length_offset + 2 <= self.cursor);
         const length: u16 = @intCast(self.cursor - length_offset - 2);
         wire.put(u16, self.output[length_offset..][0..2], length);
     }

@@ -1,4 +1,5 @@
 const std = @import("std");
+const Io = std.Io;
 
 pub const Endpoint = struct {
     host: []const u8,
@@ -17,7 +18,7 @@ pub const Endpoint = struct {
             const close = std.mem.indexOfScalar(u8, address, ']') orelse
                 return error.InvalidAddress;
             const host = address[1..close];
-            _ = std.Io.net.Ip6Address.parse(host, 0) catch return error.InvalidAddress;
+            _ = Io.net.Ip6Address.parse(host, 0) catch return error.InvalidAddress;
             if (close + 1 == address.len) {
                 target.* = .{ .host = host, .port = port_default };
                 return;

@@ -1,9 +1,14 @@
 //! One-shot readiness registrations. The kernel never borrows query buffers.
 const std = @import("std");
 const system = std.c;
+const posix = std.posix;
+const assert = std.debug.assert;
+
 pub const Ownership = @import("ownership.zig").Ownership;
+
 pub const operations_max = 210;
 pub const buffers_max = 64;
+
 pub const Error = error{
     SetupFailed,
     RegistrationFailed,
@@ -11,6 +16,7 @@ pub const Error = error{
     InvalidCompletion,
     GenerationExhausted,
 };
+
 const Registration = struct { ident: usize, filter: i16 };
 
 pub const Proctor = struct {
@@ -35,8 +41,8 @@ pub const Proctor = struct {
     }
 
     pub fn arm(self: *Proctor, index: u32, ident: usize, filter: i16) Error!void {
-        std.debug.assert(index < operations_max);
-        std.debug.assert(self.registrations[index] == null);
+        assert(index < operations_max);
+        assert(self.registrations[index] == null);
         const token = try self.ownership[index].arm(index);
         errdefer self.ownership[index].complete(token, .terminal) catch unreachable;
         const change: system.Kevent = .{
@@ -75,7 +81,7 @@ pub const Proctor = struct {
         var event: system.Kevent = undefined;
         const count = system.kevent(self.descriptor, &.{}, 0, @ptrCast(&event), 1, null);
         if (count < 0) {
-            if (std.posix.errno(count) == .INTR) return null;
+            if (posix.errno(count) == .INTR) return null;
             return error.CompletionFailed;
         }
         if (count != 1) return error.InvalidCompletion;
@@ -92,7 +98,7 @@ pub const Proctor = struct {
     }
 
     pub fn remove(self: *Proctor, index: u32) Error!void {
-        std.debug.assert(index < operations_max);
+        assert(index < operations_max);
         const registration = self.registrations[index] orelse return;
         const change: system.Kevent = .{
             .ident = registration.ident,

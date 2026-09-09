@@ -1,8 +1,10 @@
 const std = @import("std");
+const Index = std.zig.Zoir.Node.Index;
+const Allocator = std.mem.Allocator;
+
 const config = @import("../config.zig");
 const names = @import("../wire/name.zig");
 const endpoint = @import("endpoint.zig");
-const Index = std.zig.Zoir.Node.Index;
 
 pub const Context = struct {
     diagnostics: *const std.zon.parse.Diagnostics,
@@ -10,7 +12,7 @@ pub const Context = struct {
 
     pub fn validate(
         self: *Context,
-        allocator: std.mem.Allocator,
+        allocator: Allocator,
         target: *config.Config,
     ) config.Error!void {
         const listen_node = self.field(.root, "listen");
@@ -59,7 +61,7 @@ pub const Context = struct {
 
     fn zoneValidate(
         self: *Context,
-        allocator: std.mem.Allocator,
+        allocator: Allocator,
         zone: *config.Zone,
         node: Index,
     ) config.Error!void {

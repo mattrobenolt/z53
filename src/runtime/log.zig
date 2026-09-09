@@ -1,27 +1,32 @@
 //! #1: bounded, synchronous completion logs. Sink failures never change DNS outcomes.
 const std = @import("std");
+const system = std.c;
+const Io = std.Io;
+const IpAddress = Io.net.IpAddress;
+const mem = std.mem;
+
 const resolver = @import("../resolver.zig");
 const wire = resolver.wire;
-const system = std.c;
+
 pub const line_bytes_max = 3072;
 pub const Protocol = enum { udp, tcp, dot };
 pub const Query = struct {
-    client: ?std.Io.net.IpAddress,
+    client: ?IpAddress,
     protocol: Protocol,
     started_ns: u64,
 };
 pub const Upstream = struct {
-    address: std.Io.net.IpAddress,
+    address: IpAddress,
     protocol: Protocol,
     tls_name: ?[]const u8 = null,
 };
 pub const Sink = struct {
     context: ?*anyopaque = null,
-    write: *const fn (std.Io, ?*anyopaque, []const u8) error{WriteFailed}!void = stderr,
+    write: *const fn (Io, ?*anyopaque, []const u8) error{WriteFailed}!void = stderr,
 
-    fn stderr(io: std.Io, _: ?*anyopaque, bytes: []const u8) error{WriteFailed}!void {
+    fn stderr(io: Io, _: ?*anyopaque, bytes: []const u8) error{WriteFailed}!void {
         // One bounded write avoids retry loops. A short write loses the remainder.
-        _ = std.Io.File.stderr().writeStreaming(io, &.{}, &.{bytes}, 1) catch
+        _ = Io.File.stderr().writeStreaming(io, &.{}, &.{bytes}, 1) catch
             return error.WriteFailed;
     }
 };
@@ -36,14 +41,14 @@ pub const Logger = struct {
 pub fn peer(
     storage: *const system.sockaddr.storage,
     length: system.socklen_t,
-) ?std.Io.net.IpAddress {
+) ?IpAddress {
     switch (storage.family) {
         system.AF.INET => {
             if (length != @sizeOf(system.sockaddr.in)) return null;
             const value: *const system.sockaddr.in = @ptrCast(storage);
             return .{ .ip4 = .{
                 .bytes = @bitCast(value.addr),
-                .port = std.mem.bigToNative(u16, value.port),
+                .port = mem.bigToNative(u16, value.port),
             } };
         },
         system.AF.INET6 => {
@@ -51,7 +56,7 @@ pub fn peer(
             const value: *const system.sockaddr.in6 = @ptrCast(storage);
             return .{ .ip6 = .{
                 .bytes = value.addr,
-                .port = std.mem.bigToNative(u16, value.port),
+                .port = mem.bigToNative(u16, value.port),
                 .flow = value.flowinfo,
                 .interface = .{ .index = value.scope_id },
             } };
@@ -71,13 +76,17 @@ pub fn completed(
     finished_ns: u64,
 ) void {
     const bytes = format(&logger.buffer, packet, query, input, answer, upstream, .{
-        .unix_ms = std.Io.Timestamp.now(io, .real).toMilliseconds(),
+        .unix_ms = Io.Timestamp.now(io, .real).toMilliseconds(),
         .finished_ns = finished_ns,
     }) catch return;
     logger.sink.write(io, logger.sink.context, bytes) catch return;
 }
 
-pub const Time = struct { unix_ms: i64, finished_ns: u64 };
+pub const Time = struct {
+    unix_ms: i64,
+    finished_ns: u64,
+};
+
 pub fn format(
     buffer: *[line_bytes_max]u8,
     packet: *wire.Packet,
@@ -86,8 +95,8 @@ pub fn format(
     answer: *const resolver.Answer,
     upstream: ?*const Upstream,
     time: Time,
-) std.Io.Writer.Error![]const u8 {
-    var writer: std.Io.Writer = .fixed(buffer);
+) Io.Writer.Error![]const u8 {
+    var writer: Io.Writer = .fixed(buffer);
     try timestamp(&writer, time.unix_ms);
     try writer.print(" event=query proto={s} client=", .{@tagName(query.protocol)});
     if (query.client) |client| {
@@ -114,10 +123,10 @@ pub fn format(
 }
 
 fn question(
-    writer: *std.Io.Writer,
+    writer: *Io.Writer,
     packet: *wire.Packet,
     input: []const u8,
-) std.Io.Writer.Error!void {
+) Io.Writer.Error!void {
     packet.parse(input) catch return writer.writeAll(" qtype=unknown qname=unknown");
     if (packet.header.counts[0] != 1) return writer.writeAll(" qtype=unknown qname=unknown");
     var cursor: usize = 12;
@@ -142,20 +151,20 @@ fn question(
 }
 
 fn escaped(
-    writer: *std.Io.Writer,
+    writer: *Io.Writer,
     bytes: []const u8,
     mode: enum { label, text },
-) std.Io.Writer.Error!void {
+) Io.Writer.Error!void {
     for (bytes) |byte| {
-        switch (byte) {
-            'a'...'z', 'A'...'Z', '0'...'9', '-', '_' => try writer.writeByte(byte),
-            '.' => if (mode == .text) try writer.writeByte(byte) else try writer.writeAll("\\x2e"),
-            else => try writer.print("\\x{x:0>2}", .{byte}),
-        }
+        try switch (byte) {
+            'a'...'z', 'A'...'Z', '0'...'9', '-', '_' => writer.writeByte(byte),
+            '.' => if (mode == .text) writer.writeByte(byte) else writer.writeAll("\\x2e"),
+            else => writer.print("\\x{x:0>2}", .{byte}),
+        };
     }
 }
 
-fn upstreamFields(writer: *std.Io.Writer, upstream: *const Upstream) std.Io.Writer.Error!void {
+fn upstreamFields(writer: *Io.Writer, upstream: *const Upstream) Io.Writer.Error!void {
     try writer.print(" upstream={f} upstream_proto={s}", .{
         upstream.address,
         @tagName(upstream.protocol),
@@ -168,9 +177,9 @@ fn upstreamFields(writer: *std.Io.Writer, upstream: *const Upstream) std.Io.Writ
     }
 }
 
-pub fn failure(logger: *Logger, io: std.Io, upstream: *const Upstream, reason: []const u8) void {
-    var writer: std.Io.Writer = .fixed(&logger.buffer);
-    timestamp(&writer, std.Io.Timestamp.now(io, .real).toMilliseconds()) catch return;
+pub fn failure(logger: *Logger, io: Io, upstream: *const Upstream, reason: []const u8) void {
+    var writer: Io.Writer = .fixed(&logger.buffer);
+    timestamp(&writer, Io.Timestamp.now(io, .real).toMilliseconds()) catch return;
     writer.writeAll(" event=upstream_failure") catch return;
     upstreamFields(&writer, upstream) catch return;
     writer.writeAll(" reason=\"") catch return;
@@ -181,20 +190,20 @@ pub fn failure(logger: *Logger, io: std.Io, upstream: *const Upstream, reason: [
 
 pub fn health(
     logger: *Logger,
-    io: std.Io,
+    io: Io,
     upstream: *const Upstream,
     state: enum { down, restored },
     failures: u32,
 ) void {
-    var writer: std.Io.Writer = .fixed(&logger.buffer);
-    timestamp(&writer, std.Io.Timestamp.now(io, .real).toMilliseconds()) catch return;
+    var writer: Io.Writer = .fixed(&logger.buffer);
+    timestamp(&writer, Io.Timestamp.now(io, .real).toMilliseconds()) catch return;
     writer.writeAll(" event=upstream_health") catch return;
     upstreamFields(&writer, upstream) catch return;
     writer.print(" state={s} failures={d}\n", .{ @tagName(state), failures }) catch return;
     logger.sink.write(io, logger.sink.context, writer.buffered()) catch return;
 }
 
-fn timestamp(writer: *std.Io.Writer, unix_ms: i64) std.Io.Writer.Error!void {
+fn timestamp(writer: *Io.Writer, unix_ms: i64) Io.Writer.Error!void {
     if (unix_ms < 0) return writer.writeAll("timestamp=unknown");
     if (unix_ms > 253402300799999) return writer.writeAll("timestamp=unknown");
     const seconds: std.time.epoch.EpochSeconds = .{ .secs = @intCast(@divFloor(unix_ms, 1000)) };

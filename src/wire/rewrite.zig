@@ -1,5 +1,5 @@
-const wire = @import("../wire.zig");
 const ArrayBuffer = @import("../array_buffer.zig").ArrayBuffer;
+const wire = @import("../wire.zig");
 
 pub const Edns = struct {
     payload_bytes: u16,
@@ -8,9 +8,24 @@ pub const Edns = struct {
     flags: u16 = 0,
     options: []const u8 = &.{},
 };
-pub const OptPolicy = union(enum) { preserve, omit, replace: *const Edns };
-pub const Limit = union(enum) { tcp, udp: u16 };
-pub const Question = struct { name: *const wire.Name, kind: u16, class: u16 };
+
+pub const OptPolicy = union(enum) {
+    preserve,
+    omit,
+    replace: *const Edns,
+};
+
+pub const Limit = union(enum) {
+    tcp,
+    udp: u16,
+};
+
+pub const Question = struct {
+    name: *const wire.Name,
+    kind: u16,
+    class: u16,
+};
+
 pub const Settings = struct {
     id: ?u16 = null,
     question: ?Question = null,
@@ -155,7 +170,7 @@ fn sameSet(
     var target: wire.Name = undefined;
     try packet.name(&source, left.owner);
     try packet.name(&target, right.owner);
-    return source.equal(&target);
+    return source.eql(&target);
 }
 
 fn edns(packet: *const wire.Packet, policy: *const OptPolicy) wire.Error!?Edns {

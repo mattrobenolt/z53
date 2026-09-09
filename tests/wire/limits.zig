@@ -1,5 +1,8 @@
 const std = @import("std");
+const testing = std.testing;
+
 const wire = @import("wire");
+
 const fixture = @import("fixture.zig");
 
 // SPEC §3.9: only a complete header permits FORMERR; short input is dropped.
@@ -13,13 +16,13 @@ test "malformed classification and all truncated prefixes" {
     for (0..bytes.len) |length| {
         if (packet.parse(bytes[0..length])) |_| return error.AcceptedTruncatedPacket else |_| {}
         switch (wire.malformed(bytes[0..length])) {
-            .drop => try std.testing.expect(length < 12),
+            .drop => try testing.expect(length < 12),
             .formerr => |header| {
-                try std.testing.expect(length >= 12);
-                try std.testing.expectEqual(0xabcd, header.id);
-                try std.testing.expectEqual(1, header.bits & 15);
-                try std.testing.expect(header.has(.response));
-                try std.testing.expectEqual([4]u16{ 0, 0, 0, 0 }, header.counts);
+                try testing.expect(length >= 12);
+                try testing.expectEqual(0xabcd, header.id);
+                try testing.expectEqual(1, header.bits & 15);
+                try testing.expect(header.has(.response));
+                try testing.expectEqual([4]u16{ 0, 0, 0, 0 }, header.counts);
             },
         }
     }
@@ -30,23 +33,23 @@ test "malformed classification and all truncated prefixes" {
 test "hostile counts lengths and trailing bytes reject" {
     var packet: wire.Packet = undefined;
     var header: [12]u8 = @splat(255);
-    try std.testing.expectError(error.InvalidCounts, packet.parse(&header));
+    try testing.expectError(error.InvalidCounts, packet.parse(&header));
     var builder: fixture.Builder = undefined;
     builder.init();
     builder.question("\x01x\x00", 1, 1);
     builder.record("\xc0\x0c", 65400, .answer, &.{});
     const bytes = try builder.finish();
     wire.put(u16, bytes[bytes.len - 2 ..], 65535);
-    try std.testing.expectError(error.Truncated, packet.parse(bytes));
+    try testing.expectError(error.Truncated, packet.parse(bytes));
     var oversized: [65536]u8 = @splat(0);
-    try std.testing.expectError(error.MessageTooLarge, packet.parse(&oversized));
+    try testing.expectError(error.MessageTooLarge, packet.parse(&oversized));
     header = @splat(0);
     try packet.parse(&header);
-    try std.testing.expectError(error.TrailingData, packet.parse(oversized[0..13]));
+    try testing.expectError(error.TrailingData, packet.parse(oversized[0..13]));
     var iterator: wire.Options = .{ .bytes = &.{ 255, 255, 255, 255 } };
-    try std.testing.expectError(error.InvalidOption, iterator.next());
+    try testing.expectError(error.InvalidOption, iterator.next());
     iterator = .{ .bytes = &.{ 0, 1, 0 } };
-    try std.testing.expectError(error.InvalidOption, iterator.next());
+    try testing.expectError(error.InvalidOption, iterator.next());
 }
 
 // RFC 1035 §3.3, §3.4 and RFC 3596 §2.2: typed lengths reject before rewrite.
@@ -66,7 +69,7 @@ test "RDATA bounds include exact names numbers and character strings" {
         builder.init();
         builder.record(&.{0}, case.kind, .answer, case.data);
         var packet: wire.Packet = undefined;
-        try std.testing.expectError(case.err, packet.parse(try builder.finish()));
+        try testing.expectError(case.err, packet.parse(try builder.finish()));
     }
 }
 
@@ -75,17 +78,17 @@ test "TCP split coalesced maximum and malformed frame lengths" {
     var bytes: [65539]u8 = @splat(0);
     try wire.framePrefix(&bytes, 65535);
     for ([_]usize{ 0, 1, 2, 12, 65536 }) |length| {
-        try std.testing.expectEqual(null, try wire.frame(bytes[0..length]));
+        try testing.expectEqual(null, try wire.frame(bytes[0..length]));
     }
     const complete = (try wire.frame(&bytes)).?;
-    try std.testing.expectEqual(65535, complete.message.len);
-    try std.testing.expectEqual(65537, complete.consumed);
-    try std.testing.expectError(error.MessageTooLarge, wire.framePrefix(&bytes, 65536));
-    try std.testing.expectError(error.NoSpace, wire.framePrefix(bytes[0..1], 12));
-    try std.testing.expectError(error.Truncated, wire.framePrefix(&bytes, 11));
+    try testing.expectEqual(65535, complete.message.len);
+    try testing.expectEqual(65537, complete.consumed);
+    try testing.expectError(error.MessageTooLarge, wire.framePrefix(&bytes, 65536));
+    try testing.expectError(error.NoSpace, wire.framePrefix(bytes[0..1], 12));
+    try testing.expectError(error.Truncated, wire.framePrefix(&bytes, 11));
     bytes[0] = 0;
     bytes[1] = 0;
-    try std.testing.expectError(error.Truncated, wire.frame(&bytes));
+    try testing.expectError(error.Truncated, wire.frame(&bytes));
 }
 
 // SPEC §3.9, RFC 3597 §4: legacy SRV expansion must not corrupt or truncate TCP.
@@ -98,16 +101,16 @@ test "unrepresentable compliant SRV rewrite returns RewriteTooLarge" {
     for (0..300) |_| builder.record("\xc0\x0c", 33, .answer, "\x00" ** 6 ++ "\xc0\x0c");
     var packet: wire.Packet = undefined;
     try packet.parse(try builder.finish());
-    try std.testing.expectEqual(6271, packet.bytes.len);
-    try std.testing.expectEqual(82171, 12 + 255 + 4 + 300 * (2 + 10 + 6 + 255));
+    try testing.expectEqual(6271, packet.bytes.len);
+    try testing.expectEqual(82171, 12 + 255 + 4 + 300 * (2 + 10 + 6 + 255));
     var output: [65535]u8 = undefined;
     var workspace: wire.rewrite.Workspace = undefined;
-    try std.testing.expectError(error.RewriteTooLarge, workspace.rewrite(&packet, &output, &.{}));
+    try testing.expectError(error.RewriteTooLarge, workspace.rewrite(&packet, &output, &.{}));
     const truncated = try workspace.rewrite(&packet, &output, &.{ .limit = .{ .udp = 512 } });
     var decoded: wire.Packet = undefined;
     try decoded.parse(truncated);
-    try std.testing.expect(decoded.header.has(.truncated));
-    try std.testing.expectEqual(0, decoded.record_count);
+    try testing.expect(decoded.header.has(.truncated));
+    try testing.expectEqual(0, decoded.record_count);
 }
 
 // RFC 1035 §2.3.4 and SPEC §9.1: full-size packets do not need expanded storage.
@@ -118,10 +121,10 @@ test "maximum message and maximum record counts are lossless" {
     builder.record(&.{0}, 65400, .answer, &data);
     var packet: wire.Packet = undefined;
     try packet.parse(try builder.finish());
-    try std.testing.expectEqual(65535, packet.bytes.len);
+    try testing.expectEqual(65535, packet.bytes.len);
     var workspace: wire.rewrite.Workspace = undefined;
     var output: [65535]u8 = undefined;
-    try std.testing.expectEqualSlices(
+    try testing.expectEqualSlices(
         u8,
         packet.bytes,
         try workspace.rewrite(&packet, &output, &.{}),
@@ -129,8 +132,8 @@ test "maximum message and maximum record counts are lossless" {
     builder.init();
     for (0..wire.records_max) |_| builder.record(&.{0}, 65400, .answer, &.{});
     try packet.parse(try builder.finish());
-    try std.testing.expectEqual(wire.records_max, packet.record_count);
-    try std.testing.expectEqualSlices(
+    try testing.expectEqual(wire.records_max, packet.record_count);
+    try testing.expectEqualSlices(
         u8,
         packet.bytes,
         try workspace.rewrite(&packet, &output, &.{}),

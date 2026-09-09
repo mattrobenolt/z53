@@ -1,7 +1,8 @@
 const std = @import("std");
-const log = @import("log.zig");
 const system = std.c;
+
 const wire = @import("../wire.zig");
+const log = @import("log.zig");
 const udp = @import("udp.zig");
 
 pub const Response = struct {

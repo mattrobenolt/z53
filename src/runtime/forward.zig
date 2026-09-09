@@ -1,39 +1,61 @@
 //! #1: bounded literal UDP and TCP exchanges. Backends own socket and cancellation barriers.
 const std = @import("std");
+const Io = std.Io;
+const IpAddress = Io.net.IpAddress;
+const assert = std.debug.assert;
+const DefaultCsprng = std.Random.DefaultCsprng;
+const time = std.time;
+
+const ArrayBuffer = @import("../array_buffer.zig").ArrayBuffer;
+pub const log = @import("log.zig");
+const ownership = @import("ownership.zig");
 const pipeline = @import("pipeline.zig");
 const config = pipeline.resolver.config;
 const wire = pipeline.wire;
-const udp = @import("udp.zig");
-const ownership = @import("ownership.zig");
-pub const log = @import("log.zig");
 pub const tls = @import("tls.zig");
+const udp = @import("udp.zig");
+
 pub const transactions_max = 32;
 pub const sessions_max = 32;
 pub const endpoints_max = config.zones_max * config.upstreams_max;
-const ProbeEndpoints = wire.ArrayBuffer(u16, endpoints_max);
+pub const probes_max = 2;
 pub const storage_bytes_max = 12 * 1024 * 1024;
+
+const ProbeEndpoints = ArrayBuffer(u16, endpoints_max);
+
 pub const Transport = enum { udp, tcp, tls };
+
 pub const Destination = struct {
     index: u16,
     generation: u31,
     transport: pipeline.Transport,
 };
+
 pub const Failure = enum { transport, local, cancelled };
+
 pub const Health = struct {
     failures: u32 = 0,
     due_ns: u64 = 0,
     probe: ?u16 = null,
 };
-pub const probes_max = 2;
+
 pub const Transaction = struct {
     state: enum { free, ready, active, deliver } = .free,
-    purpose: union(enum) { client: Destination, probe: u16 },
+    purpose: union(enum) {
+        client: Destination,
+        probe: u16,
+    },
     zone: u16,
     cursor: u16,
     length: u32,
-    completion: union(enum) { response: u16, exhausted, local_failure },
+    completion: union(enum) {
+        response: u16,
+        exhausted,
+        local_failure,
+    },
     input: [wire.message_bytes_max]u8,
 };
+
 pub const Session = struct {
     state: enum {
         vacant,
@@ -97,12 +119,16 @@ pub const Session = struct {
         return .progress;
     }
 };
-pub const Selection = struct { session: u16, action: enum { connect, reuse, replace } };
+
+pub const Selection = struct {
+    session: u16,
+    action: enum { connect, reuse, replace },
+};
 
 pub const Forward = struct {
     config: *const config.Config,
     support: [config.zones_max]enum { unsupported, supported },
-    endpoints: [endpoints_max]std.Io.net.IpAddress,
+    endpoints: [endpoints_max]IpAddress,
     protocols: [endpoints_max]?Transport,
     health: [endpoints_max]Health,
     probe_endpoints: ProbeEndpoints,
@@ -110,16 +136,16 @@ pub const Forward = struct {
     probe_retry_ns: u64,
     transactions: [transactions_max]Transaction,
     sessions: [sessions_max]Session,
-    random: std.Random.DefaultCsprng,
+    random: DefaultCsprng,
     trust: tls.Trust,
-    io: std.Io,
+    io: Io,
     logger: log.Logger,
 
     pub fn init(
         self: *Forward,
-        io: std.Io,
+        io: Io,
         settings: *const config.Config,
-    ) (std.Io.RandomSecureError || tls.TrustError)!void {
+    ) (Io.RandomSecureError || tls.TrustError)!void {
         self.config = settings;
         self.io = io;
         self.logger.sink = .{};
@@ -138,7 +164,7 @@ pub const Forward = struct {
             session.generation = 0;
             session.tls.handshake = null;
         }
-        var seed: [std.Random.DefaultCsprng.secret_seed_length]u8 = undefined;
+        var seed: [DefaultCsprng.secret_seed_length]u8 = undefined;
         defer std.crypto.secureZero(u8, &seed);
         try io.randomSecure(&seed);
         self.random = .init(seed);
@@ -150,7 +176,7 @@ pub const Forward = struct {
                 upstream.endpoint(&endpoint);
                 const position = index * config.upstreams_max + cursor;
                 self.endpoints[position] =
-                    std.Io.net.IpAddress.parse(endpoint.host, endpoint.port) catch continue;
+                    IpAddress.parse(endpoint.host, endpoint.port) catch continue;
                 self.protocols[position] = if (upstream.tls != null)
                     .tls
                 else if (upstream.force_tcp) .tcp else .udp;
@@ -178,7 +204,7 @@ pub const Forward = struct {
         zone: u16,
         destination: *const Destination,
     ) ?u16 {
-        std.debug.assert(input.len <= wire.message_bytes_max);
+        assert(input.len <= wire.message_bytes_max);
         if (self.support[zone] == .unsupported) return null;
         for (&self.transactions, 0..) |*transaction, index| {
             if (transaction.state != .free) continue;
@@ -195,7 +221,7 @@ pub const Forward = struct {
 
     pub fn select(self: *Forward, index: u16, now_ns: u64) ?Selection {
         const transaction = &self.transactions[index];
-        std.debug.assert(transaction.state == .ready);
+        assert(transaction.state == .ready);
         if (transaction.purpose == .client) {
             const length = self.config.zones[transaction.zone].upstreams.len;
             while (transaction.cursor < length) : (transaction.cursor += 1) {
@@ -280,7 +306,7 @@ pub const Forward = struct {
         for (self.probe_endpoints.constSlice()) |endpoint| {
             if (self.health[endpoint].probe != null) count += 1;
         }
-        std.debug.assert(count <= probes_max);
+        assert(count <= probes_max);
         return count;
     }
 
@@ -328,7 +354,7 @@ pub const Forward = struct {
                     duration(self.config.zones[transaction.zone].health_check_interval_s);
                 return @intCast(index);
             }
-            self.probe_retry_ns = now_ns + 10 * std.time.ns_per_ms;
+            self.probe_retry_ns = now_ns + 10 * time.ns_per_ms;
             return null;
         }
         return null;
@@ -337,9 +363,9 @@ pub const Forward = struct {
     /// Probe completion never enters the client pipeline or its completion logger.
     pub fn finishProbe(self: *Forward, index: u16) void {
         const transaction = &self.transactions[index];
-        std.debug.assert(transaction.state == .deliver);
+        assert(transaction.state == .deliver);
         const endpoint = transaction.purpose.probe;
-        std.debug.assert(self.health[endpoint].probe == index);
+        assert(self.health[endpoint].probe == index);
         self.health[endpoint].probe = null;
         if (transaction.completion == .response)
             self.sessions[transaction.completion.response].transaction = null;
@@ -425,7 +451,7 @@ pub const Forward = struct {
         if (question.class != request.class) return false;
         var name: wire.Name = undefined;
         response.name(&name, question.name) catch return false;
-        return name.equal(&request.name);
+        return name.eql(&request.name);
     }
 
     pub fn sent(self: *Forward, index: u16, count: i32, now_ns: u64) enum { progress, failed } {
@@ -542,8 +568,8 @@ pub const Forward = struct {
 
     pub fn responseBytes(self: *const Forward, index: u16) []const u8 {
         const session = &self.sessions[index];
-        std.debug.assert(session.state == .idle);
-        std.debug.assert(session.transaction != null);
+        assert(session.state == .idle);
+        assert(session.transaction != null);
         return session.input[2..session.length];
     }
 
@@ -557,7 +583,7 @@ pub const Forward = struct {
         const transaction = &self.transactions[session.transaction.?];
         transaction.completion = .local_failure;
         if (transaction.purpose == .probe)
-            self.probe_retry_ns = now_ns + 10 * std.time.ns_per_ms;
+            self.probe_retry_ns = now_ns + 10 * time.ns_per_ms;
         if (retention == .close) {
             if (transaction.purpose == .probe) return;
         }
@@ -567,7 +593,7 @@ pub const Forward = struct {
 
     pub fn closed(self: *Forward, index: u16, now_ns: u64) void {
         const session = &self.sessions[index];
-        std.debug.assert(session.state == .cancelling);
+        assert(session.state == .cancelling);
         if (session.tls.handshake != null) session.tls.deinit();
         session.state = .vacant;
         if (session.transaction) |transaction| {
@@ -592,16 +618,16 @@ pub const Forward = struct {
 };
 
 pub fn duration(seconds: f64) u64 {
-    std.debug.assert(seconds >= 0.001);
-    std.debug.assert(seconds <= 86400);
-    return @intFromFloat(@ceil(seconds * std.time.ns_per_s));
+    assert(seconds >= 0.001);
+    assert(seconds <= 86400);
+    return @intFromFloat(@ceil(seconds * time.ns_per_s));
 }
 
 comptime {
-    const endpoint_bytes = @sizeOf(std.Io.net.IpAddress) + @sizeOf(?Transport) + @sizeOf(Health);
+    const endpoint_bytes = @sizeOf(IpAddress) + @sizeOf(?Transport) + @sizeOf(Health);
     const candidates_bytes = @sizeOf(ProbeEndpoints);
-    std.debug.assert(endpoint_bytes * endpoints_max + candidates_bytes <= 64 * endpoints_max);
-    std.debug.assert(@sizeOf(Forward) <= storage_bytes_max);
+    assert(endpoint_bytes * endpoints_max + candidates_bytes <= 64 * endpoints_max);
+    assert(@sizeOf(Forward) <= storage_bytes_max);
 }
 
 /// The pair retains both linked completions and both explicit cancellation barriers.

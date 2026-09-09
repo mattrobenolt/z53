@@ -1,13 +1,15 @@
 //! Bounded DNS views. Input storage must remain immutable while a Packet lives.
 const std = @import("std");
-pub const ArrayBuffer = @import("array_buffer.zig").ArrayBuffer;
-pub const names = @import("wire/name.zig");
-pub const rdata = @import("wire/rdata.zig");
+
 pub const Encoder = @import("wire/encoder.zig").Encoder;
-pub const rewrite = @import("wire/rewrite.zig");
+pub const names = @import("wire/name.zig");
 pub const Name = names.Name;
+pub const rdata = @import("wire/rdata.zig");
+pub const rewrite = @import("wire/rewrite.zig");
+
 pub const message_bytes_max = 65535;
 pub const records_max = (message_bytes_max - 12) / 11;
+
 pub const Error = error{
     Truncated,
     LabelTooLong,
@@ -27,7 +29,14 @@ pub const Error = error{
     RewriteTooLarge,
     InvalidOrder,
 };
-pub const Section = enum(u2) { question, answer, authority, additional };
+
+pub const Section = enum(u2) {
+    question,
+    answer,
+    authority,
+    additional,
+};
+
 pub const Flag = enum(u16) {
     response = 0x8000,
     authoritative = 0x0400,
@@ -68,7 +77,12 @@ pub const Header = struct {
     }
 };
 
-pub const Question = struct { name: u16, kind: u16, class: u16 };
+pub const Question = struct {
+    name: u16,
+    kind: u16,
+    class: u16,
+};
+
 pub const Record = struct {
     owner: u16,
     kind: u16,
@@ -182,7 +196,11 @@ pub const Packet = struct {
     }
 };
 
-pub const Option = struct { code: u16, data: []const u8 };
+pub const Option = struct {
+    code: u16,
+    data: []const u8,
+};
+
 pub const Options = struct {
     bytes: []const u8,
     cursor: usize = 0,
@@ -203,8 +221,16 @@ pub fn validateCookie(bytes: []const u8) Error!void {
     if (bytes.len > 40) return error.InvalidCookie;
 }
 
-pub const Malformed = union(enum) { drop, formerr: Header };
-pub const Query = union(enum) { accepted, drop, reply: Header };
+pub const Malformed = union(enum) {
+    drop,
+    formerr: Header,
+};
+
+pub const Query = union(enum) {
+    accepted,
+    drop,
+    reply: Header,
+};
 
 /// Callers use target only for accepted queries. Error replies contain no records.
 pub fn query(target: *Packet, bytes: []const u8) Query {

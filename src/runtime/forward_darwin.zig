@@ -1,18 +1,26 @@
 //! #1: one-shot readiness and a nearest-deadline nanosecond timer own upstream sockets.
 const std = @import("std");
+const system = std.c;
+const posix = std.posix;
 const builtin = @import("builtin");
+
 const runtime = @import("../runtime_darwin.zig");
 const forward = @import("forward.zig");
-const system = std.c;
+
 pub const operation_start = 177;
 pub const timer_slot = 209;
+
 const Operation = struct {
     descriptor: ?system.fd_t = null,
     address: runtime.address.Address,
     peer: struct { endpoint: u16, generation: u31 },
 };
+
 const ConnectResult = enum { success, transport_failure, local_resource, cancelled };
-const ConnectError = union(enum) { socket: system.E, syscall: system.E };
+const ConnectError = union(enum) {
+    socket: system.E,
+    syscall: system.E,
+};
 
 pub const Driver = struct {
     operations: [forward.sessions_max]Operation,
@@ -108,7 +116,7 @@ pub const Driver = struct {
             operation.address.length,
         );
         if (result < 0) {
-            switch (std.posix.errno(result)) {
+            switch (posix.errno(result)) {
                 .INPROGRESS, .INTR => {},
                 .CANCELED => return self.abortLocal(service, index),
                 .MFILE, .NFILE, .NOBUFS, .NOMEM => return self.abortLocal(service, index),
@@ -175,7 +183,7 @@ pub const Driver = struct {
             else => return error.InvalidCompletion,
         };
         if (count < 0) {
-            switch (std.posix.errno(count)) {
+            switch (posix.errno(count)) {
                 .AGAIN, .INTR => return self.arm(service, index),
                 .CANCELED => return self.abortLocal(service, index),
                 .MFILE, .NFILE, .NOBUFS, .NOMEM => return self.abortLocal(service, index),
@@ -214,12 +222,12 @@ pub const Driver = struct {
             break :receive system.recv(descriptor, bytes.ptr, bytes.len, 0);
         };
         if (count < 0) {
-            switch (std.posix.errno(count)) {
-                .AGAIN, .INTR => return self.arm(service, index),
-                .CANCELED => return self.abortLocal(service, index),
-                .MFILE, .NFILE, .NOBUFS, .NOMEM => return self.abortLocal(service, index),
-                else => return self.close(service, index, .retry),
-            }
+            return switch (posix.errno(count)) {
+                .AGAIN, .INTR => self.arm(service, index),
+                .CANCELED => self.abortLocal(service, index),
+                .MFILE, .NFILE, .NOBUFS, .NOMEM => self.abortLocal(service, index),
+                else => self.close(service, index, .retry),
+            };
         }
         const result = if (session.state == .tls_write)
             session.tls.sent(@intCast(count))
@@ -243,10 +251,10 @@ pub const Driver = struct {
     ) runtime.Error!void {
         const session = &service.forward.sessions[index];
         session.failure_reason = session.tls.failure_reason orelse @errorName(err);
-        switch (err) {
-            error.LocalFailure => try self.abortLocal(service, index),
-            error.TransportFailure => try self.close(service, index, .retry),
-        }
+        try switch (err) {
+            error.LocalFailure => self.abortLocal(service, index),
+            error.TransportFailure => self.close(service, index, .retry),
+        };
     }
 
     fn abortLocal(self: *Driver, service: *runtime.Runtime, index: u16) runtime.Error!void {
@@ -339,7 +347,7 @@ pub const Driver = struct {
             &failure,
             &length,
         );
-        if (result < 0) return .{ .syscall = std.posix.errno(result) };
+        if (result < 0) return .{ .syscall = posix.errno(result) };
         if (length != @sizeOf(c_int)) return .{ .syscall = .INVAL };
         return .{ .socket = @enumFromInt(failure) };
     }

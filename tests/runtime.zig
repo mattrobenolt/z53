@@ -1,8 +1,9 @@
 const std = @import("std");
-const runtime = @import("runtime");
 const testing = std.testing;
-const builtin = @import("builtin");
 const linux = std.os.linux;
+const builtin = @import("builtin");
+
+const runtime = @import("runtime");
 const wire = runtime.pipeline.wire;
 
 test {

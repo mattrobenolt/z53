@@ -1,14 +1,17 @@
 const std = @import("std");
+const testing = std.testing;
+
 const wire = @import("wire");
-const fixture = @import("fixture.zig");
+
 const equivalent = @import("equivalent.zig").equivalent;
+const fixture = @import("fixture.zig");
 
 // RFC 1035 §4.1.1–4.1.3: all header bits, questions and sections round trip.
 test "header questions and all record sections round trip" {
     const header: wire.Header = .{ .id = 65535, .bits = 0xffff, .counts = .{ 1, 2, 3, 4 } };
     var bytes: [12]u8 = undefined;
     try header.encode(&bytes);
-    try std.testing.expectEqual(header, try wire.Header.decode(&bytes));
+    try testing.expectEqual(header, try wire.Header.decode(&bytes));
     var builder: fixture.Builder = undefined;
     builder.init();
     builder.question("\x01x\x00", 1, 3);
@@ -20,10 +23,10 @@ test "header questions and all record sections round trip" {
     var output: [65535]u8 = undefined;
     var workspace: wire.rewrite.Workspace = undefined;
     const result = try workspace.rewrite(&packet, &output, &.{});
-    try std.testing.expectEqualSlices(u8, packet.bytes, result);
+    try testing.expectEqualSlices(u8, packet.bytes, result);
     var decoded: wire.Packet = undefined;
     try decoded.parse(result);
-    try std.testing.expectEqual(3, decoded.record_count);
+    try testing.expectEqual(3, decoded.record_count);
 }
 
 // RFC 3597 §4, RFC 1035 §3.3, RFC 1348 §2: relocate every legacy name layout.
@@ -87,7 +90,7 @@ test "unknown and modern opaque records preserve binary RDATA" {
         var output: [65535]u8 = undefined;
         var workspace: wire.rewrite.Workspace = undefined;
         const result = try workspace.rewrite(&packet, &output, &.{});
-        try std.testing.expectEqualSlices(u8, packet.bytes, result);
+        try testing.expectEqualSlices(u8, packet.bytes, result);
     }
 }
 
@@ -104,6 +107,6 @@ test "modern known name restrictions reject pointers" {
         data.append("\xc0\x0c");
         builder.record("\xc0\x0c", kind, .answer, data.bytes[12..data.cursor]);
         var packet: wire.Packet = undefined;
-        try std.testing.expectError(error.CompressionForbidden, packet.parse(try builder.finish()));
+        try testing.expectError(error.CompressionForbidden, packet.parse(try builder.finish()));
     }
 }

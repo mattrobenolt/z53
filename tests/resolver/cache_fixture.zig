@@ -1,9 +1,11 @@
 const std = @import("std");
-const f = @import("fixture.zig");
 pub const testing = std.testing;
+
+const f = @import("fixture.zig");
 pub const resolver = f.resolver;
 pub const wire = f.wire;
 pub const cache = resolver.cache;
+
 pub const Fixture = struct {
     client: f.Fixture,
     upstream: [wire.message_bytes_max]u8,

@@ -1,9 +1,13 @@
 const std = @import("std");
 const system = std.c;
+const IpAddress = std.Io.net.IpAddress;
+const mem = std.mem;
+
 const config = @import("../config.zig");
+
 // Zig's bundled libc/include/any-darwin-any/netinet6/in6.h defines IPV6_V6ONLY.
 // std.c.IPV6 is void on Darwin in Zig 0.16, so name the verified ABI constant here.
-const ipv6_v6only = 27;
+const IPV6_V6ONLY = 27; // ziglint-ignore: Z006
 pub const Error = error{ UnresolvedListener, SocketFailed, BindFailed, ListenFailed };
 
 pub const Address = struct {
@@ -14,18 +18,18 @@ pub const Address = struct {
         var endpoint: config.Endpoint = undefined;
         endpoint.parse(text, 53) catch unreachable;
         // #1: bootstrap must add listener hostname resolution before final acceptance.
-        const ip = std.Io.net.IpAddress.parse(endpoint.host, endpoint.port) catch
+        const ip = IpAddress.parse(endpoint.host, endpoint.port) catch
             return error.UnresolvedListener;
         self.fromIp(&ip);
     }
 
-    pub fn fromIp(self: *Address, ip: *const std.Io.net.IpAddress) void {
-        self.storage = std.mem.zeroes(system.sockaddr.storage);
+    pub fn fromIp(self: *Address, ip: *const IpAddress) void {
+        self.storage = mem.zeroes(system.sockaddr.storage);
         switch (ip.*) {
             .ip4 => |value| {
                 const address: *system.sockaddr.in = @ptrCast(&self.storage);
                 address.* = .{
-                    .port = std.mem.nativeToBig(u16, value.port),
+                    .port = mem.nativeToBig(u16, value.port),
                     .addr = @bitCast(value.bytes),
                 };
                 self.length = @sizeOf(system.sockaddr.in);
@@ -33,7 +37,7 @@ pub const Address = struct {
             .ip6 => |value| {
                 const address: *system.sockaddr.in6 = @ptrCast(&self.storage);
                 address.* = .{
-                    .port = std.mem.nativeToBig(u16, value.port),
+                    .port = mem.nativeToBig(u16, value.port),
                     .addr = value.bytes,
                     .flowinfo = value.flow,
                     .scope_id = value.interface.index,
@@ -49,7 +53,7 @@ pub const Address = struct {
         errdefer _ = system.close(descriptor);
         try prepare(descriptor);
         if (self.storage.family == system.AF.INET6)
-            try option(descriptor, system.IPPROTO.IPV6, ipv6_v6only);
+            try option(descriptor, system.IPPROTO.IPV6, IPV6_V6ONLY);
         if (kind == system.SOCK.STREAM) {
             // Keep the Linux restart policy: address reuse, never port reuse.
             try option(descriptor, system.SOL.SOCKET, system.SO.REUSEADDR);

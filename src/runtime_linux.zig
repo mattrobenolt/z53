@@ -1,18 +1,24 @@
 //! Single event-thread Linux client runtime. All socket data moves through io_uring.
 const std = @import("std");
-pub const proctor = @import("runtime/proctor.zig");
-pub const tcp = @import("runtime/tcp.zig");
-pub const udp = @import("runtime/udp.zig");
-pub const pipeline = @import("runtime/pipeline.zig");
+const assert = std.debug.assert;
+const Io = std.Io;
+const Allocator = std.mem.Allocator;
+
 pub const address = @import("runtime/address.zig");
 pub const forwarding = @import("runtime/forward.zig");
-const log = @import("runtime/log.zig");
 const upstream = @import("runtime/forward_linux.zig");
-const linux = proctor.linux;
+const log = @import("runtime/log.zig");
+pub const pipeline = @import("runtime/pipeline.zig");
 const config = pipeline.resolver.config;
+pub const proctor = @import("runtime/proctor.zig");
+const linux = proctor.linux;
+pub const tcp = @import("runtime/tcp.zig");
+pub const udp = @import("runtime/udp.zig");
+
 const client_start = 33;
 const response_start = client_start + tcp.clients_max;
 const timer_slot = 32;
+
 pub const Error = error{
     ClockFailed,
     TrustStoreTooLarge,
@@ -33,6 +39,7 @@ pub const Error = error{
     BindFailed,
     ListenFailed,
 };
+
 const Listener = struct {
     udp: ?linux.fd_t = null,
     tcp: ?linux.fd_t = null,
@@ -51,15 +58,15 @@ pub const Runtime = struct {
     listener_count: u16,
     state: enum { running, stopping } = .running,
     interval: linux.kernel_timespec = .{ .sec = 1, .nsec = 0 },
-    io: std.Io,
+    io: Io,
     // Scheduler time stays fixed from event dispatch until the next completed wait.
     tick_ns: u64,
 
     /// The caller owns stable startup storage until deinit completes.
     pub fn init(
         self: *Runtime,
-        allocator: std.mem.Allocator,
-        io: std.Io,
+        allocator: Allocator,
+        io: Io,
         settings: *const config.Config,
     ) Error!void {
         self.io = io;
@@ -167,7 +174,7 @@ pub const Runtime = struct {
     }
 
     pub fn stop(self: *Runtime) Error!void {
-        std.debug.assert(self.state == .running);
+        assert(self.state == .running);
         self.state = .stopping;
         try self.proctor.stop();
     }
@@ -296,7 +303,7 @@ pub const Runtime = struct {
         selected: ?*const log.Upstream,
     ) Error!void {
         const response = &self.responses[index];
-        std.debug.assert(response.state == .reserved);
+        assert(response.state == .reserved);
         response.vector.len = answer.bytes.len;
         response.state = .sending;
         const token = try self.proctor.arm(response_start + @as(u32, index));
@@ -595,11 +602,11 @@ pub fn nowNs() error{ClockFailed}!u64 {
 comptime {
     // SPEC §1.3 excludes cache entry arrays and packets.
     // Hosts tables and configuration also retain separate bounds.
-    std.debug.assert(
+    assert(
         @sizeOf(Runtime) + pipeline.zone_storage_bytes_max + proctor.mapping_bytes_max <=
             40 * 1024 * 1024,
     );
-    std.debug.assert(
+    assert(
         @sizeOf(forwarding.Forward) + @sizeOf(upstream.Driver) <= forwarding.storage_bytes_max,
     );
 }

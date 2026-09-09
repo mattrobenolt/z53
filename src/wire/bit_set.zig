@@ -1,4 +1,5 @@
 const std = @import("std");
+const assert = std.debug.assert;
 
 /// Only the small word-validity map resets. Dirty backing words stay unread until their first set.
 pub fn ScratchSet(comptime capacity: usize) type {
@@ -15,13 +16,13 @@ pub fn ScratchSet(comptime capacity: usize) type {
         }
 
         pub fn isSet(self: *const Self, index: usize) bool {
-            std.debug.assert(index < capacity);
+            assert(index < capacity);
             if (!contains(&self.initialized.masks, index / 64)) return false;
             return contains(&self.bits.masks, index);
         }
 
         pub fn set(self: *Self, index: usize) void {
-            std.debug.assert(index < capacity);
+            assert(index < capacity);
             const word = index / 64;
             if (!contains(&self.initialized.masks, word)) {
                 self.bits.masks[word] = 0;

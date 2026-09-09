@@ -1,6 +1,10 @@
 const std = @import("std");
 const linux = std.os.linux;
+const IpAddress = std.Io.net.IpAddress;
+const mem = std.mem;
+
 const config = @import("../config.zig");
+
 pub const Error = error{ UnresolvedListener, SocketFailed, BindFailed, ListenFailed };
 
 pub const Address = struct {
@@ -10,19 +14,19 @@ pub const Address = struct {
     pub fn parse(self: *Address, text: []const u8) Error!void {
         var endpoint: config.Endpoint = undefined;
         endpoint.parse(text, 53) catch unreachable;
-        // #1: bootstrap must add listener hostname resolution before final acceptance.
-        const ip = std.Io.net.IpAddress.parse(endpoint.host, endpoint.port) catch
+        // bootstrap must add listener hostname resolution before final acceptance.
+        const ip = IpAddress.parse(endpoint.host, endpoint.port) catch
             return error.UnresolvedListener;
         self.fromIp(&ip);
     }
 
-    pub fn fromIp(self: *Address, ip: *const std.Io.net.IpAddress) void {
-        self.storage = std.mem.zeroes(linux.sockaddr.storage);
+    pub fn fromIp(self: *Address, ip: *const IpAddress) void {
+        self.storage = mem.zeroes(linux.sockaddr.storage);
         switch (ip.*) {
             .ip4 => |value| {
                 const address: *linux.sockaddr.in = @ptrCast(&self.storage);
                 address.* = .{
-                    .port = std.mem.nativeToBig(u16, value.port),
+                    .port = mem.nativeToBig(u16, value.port),
                     .addr = @bitCast(value.bytes),
                 };
                 self.length = @sizeOf(linux.sockaddr.in);
@@ -30,7 +34,7 @@ pub const Address = struct {
             .ip6 => |value| {
                 const address: *linux.sockaddr.in6 = @ptrCast(&self.storage);
                 address.* = .{
-                    .port = std.mem.nativeToBig(u16, value.port),
+                    .port = mem.nativeToBig(u16, value.port),
                     .addr = value.bytes,
                     .flowinfo = value.flow,
                     .scope_id = value.interface.index,
@@ -52,7 +56,7 @@ pub const Address = struct {
                 descriptor,
                 linux.IPPROTO.IPV6,
                 linux.IPV6.V6ONLY,
-                std.mem.asBytes(&one).ptr,
+                mem.asBytes(&one).ptr,
                 4,
             );
             if (linux.errno(option) != .SUCCESS) return error.SocketFailed;
@@ -64,7 +68,7 @@ pub const Address = struct {
                 descriptor,
                 linux.SOL.SOCKET,
                 linux.SO.REUSEADDR,
-                std.mem.asBytes(&one).ptr,
+                mem.asBytes(&one).ptr,
                 @sizeOf(u32),
             );
             if (linux.errno(option) != .SUCCESS) return error.SocketFailed;

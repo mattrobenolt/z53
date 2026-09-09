@@ -1,10 +1,22 @@
-const wire = @import("../wire.zig");
 const ArrayBuffer = @import("../array_buffer.zig").ArrayBuffer;
+const wire = @import("../wire.zig");
 const names = wire.names;
 
-pub const Range = struct { start: u16, end: u16 };
-pub const NamePart = struct { offset: u16, compression: names.Compression };
-pub const Part = union(enum) { bytes: Range, name: NamePart };
+pub const Range = struct {
+    start: u16,
+    end: u16,
+};
+
+pub const NamePart = struct {
+    offset: u16,
+    compression: names.Compression,
+};
+
+pub const Part = union(enum) {
+    bytes: Range,
+    name: NamePart,
+};
+
 pub const Parts = struct {
     items: ArrayBuffer(Part, 7),
 
@@ -143,11 +155,11 @@ fn opaqueData(
 }
 
 fn unknownLayout(record: *const wire.Record) bool {
-    switch (record.kind) {
-        10, 13, 16, 41, 99 => return false,
-        1, 11, 28 => return record.class != 1,
-        else => return true,
-    }
+    return switch (record.kind) {
+        10, 13, 16, 41, 99 => false,
+        1, 11, 28 => record.class != 1,
+        else => true,
+    };
 }
 
 fn strings(data: []const u8, expected: ?u16) wire.Error!void {

@@ -1,7 +1,10 @@
 const std = @import("std");
+const testing = std.testing;
+
 const wire = @import("wire");
-const fixture = @import("fixture.zig");
+
 const equivalent = @import("equivalent.zig").equivalent;
+const fixture = @import("fixture.zig");
 
 // RFC 3597 §4 and RFC 9460 §2.2: later owners may reference uncompressed SVCB targets.
 test "SVCB target supplies a later compressed owner without changing opaque RDATA" {
@@ -11,7 +14,7 @@ test "SVCB target supplies a later compressed owner without changing opaque RDAT
     builder.record("\xc0\x0c", 64, .answer, "\x00\x01\x06target\x07example\x00");
     builder.record("\xc0\x21", 1, .additional, &.{ 127, 0, 0, 1 });
     const bytes = try builder.finish();
-    try std.testing.expectEqual(65, bytes.len);
+    try testing.expectEqual(65, bytes.len);
     var packet: wire.Packet = undefined;
     try packet.parse(bytes);
     try checkRelocation(&packet, "\x06target\x07example\x00", &.{});
@@ -34,7 +37,7 @@ test "unknown RDATA owner is encoded afresh even when moved before its source" {
 fn checkRelocation(packet: *wire.Packet, expected: []const u8, order: []const u16) !void {
     var name: wire.Name = undefined;
     try packet.name(&name, packet.records[1].owner);
-    try std.testing.expectEqualSlices(u8, expected, name.wire());
+    try testing.expectEqualSlices(u8, expected, name.wire());
     var replacement: wire.Name = undefined;
     try replacement.fromText("changed.example.");
     var workspace: wire.rewrite.Workspace = undefined;
@@ -45,7 +48,7 @@ fn checkRelocation(packet: *wire.Packet, expected: []const u8, order: []const u1
     });
     var decoded: wire.Packet = undefined;
     try decoded.parse(result);
-    try std.testing.expectEqual(packet.record_count, decoded.record_count);
+    try testing.expectEqual(packet.record_count, decoded.record_count);
     for (0..packet.record_count) |position| {
         const source = if (order.len == 0) position else order[position];
         try equivalent(packet, &packet.records[source], &decoded, &decoded.records[position]);
@@ -65,13 +68,13 @@ test "opaque maximum name publishes labels root and prefixed owner boundaries" {
     var packet: wire.Packet = undefined;
     try packet.parse(try builder.finish());
     for ([_]usize{ 23, 87, 151, 215, 277 }) |offset| {
-        try std.testing.expect(packet.boundaries.isSet(offset));
+        try testing.expect(packet.boundaries.isSet(offset));
     }
     try packet.name(&name, packet.records[2].owner);
-    try std.testing.expectEqual(193, name.length);
-    try std.testing.expectEqualSlices(u8, "\x01x", name.wire()[0..2]);
+    try testing.expectEqual(193, name.length);
+    try testing.expectEqualSlices(u8, "\x01x", name.wire()[0..2]);
     try packet.name(&name, packet.records[3].owner);
-    try std.testing.expectEqualSlices(u8, "\x00", name.wire());
+    try testing.expectEqualSlices(u8, "\x00", name.wire());
 }
 
 // RFC 1035 §4.1.4: only the target offset, not the whole referenced name, is 14 bits.
@@ -84,10 +87,10 @@ test "opaque fallback validates name bytes beyond the pointer offset limit" {
     pointerRecord(&builder, 16383);
     var packet: wire.Packet = undefined;
     try packet.parse(try builder.finish());
-    try std.testing.expectEqual(16383, packet.records[1].data_start);
+    try testing.expectEqual(16383, packet.records[1].data_start);
     var name: wire.Name = undefined;
     try packet.name(&name, packet.records[2].owner);
-    try std.testing.expectEqualSlices(u8, "\x01x\x07example\x00", name.wire());
+    try testing.expectEqualSlices(u8, "\x01x\x07example\x00", name.wire());
     var workspace: wire.rewrite.Workspace = undefined;
     var output: [65535]u8 = undefined;
     var decoded: wire.Packet = undefined;
@@ -108,7 +111,7 @@ test "opaque fallback rejects label and terminator region escapes" {
         const offset: u16 = if (data.len == 3) 22 else 23;
         pointerRecord(&builder, offset);
         var packet: wire.Packet = undefined;
-        try std.testing.expectError(error.InvalidPointer, packet.parse(try builder.finish()));
+        try testing.expectError(error.InvalidPointer, packet.parse(try builder.finish()));
     }
 }
 
@@ -120,12 +123,12 @@ test "opaque fallback rejects embedded pointers and publishes no partial boundar
     builder.record("\x00", 65400, .answer, "\x01a\xc0\x0c");
     pointerRecord(&builder, 28);
     var packet: wire.Packet = undefined;
-    try std.testing.expectError(error.InvalidPointer, packet.parse(try builder.finish()));
+    try testing.expectError(error.InvalidPointer, packet.parse(try builder.finish()));
     var boundaries: wire.names.Boundaries = undefined;
     boundaries.init();
     for (28..32) |offset| boundaries.opaque_bytes.set(offset);
     var name: wire.Name = undefined;
-    try std.testing.expectError(error.InvalidPointer, wire.names.decode(
+    try testing.expectError(error.InvalidPointer, wire.names.decode(
         &name,
         builder.bytes[0..builder.cursor],
         32,
@@ -133,8 +136,8 @@ test "opaque fallback rejects embedded pointers and publishes no partial boundar
         &boundaries,
         .allowed,
     ));
-    try std.testing.expect(!boundaries.isSet(28));
-    try std.testing.expect(!boundaries.isSet(30));
+    try testing.expect(!boundaries.isSet(28));
+    try testing.expect(!boundaries.isSet(30));
 }
 
 // RFC 1035 §2.3.4: opaque provenance cannot relax the label or expanded-name bounds.
@@ -144,20 +147,20 @@ test "opaque fallback rejects oversized labels names and prefixed names" {
     builder.init();
     builder.record("\x00", 65400, .answer, "\x40" ++ "a" ** 64 ++ "\x00");
     pointerRecord(&builder, 23);
-    try std.testing.expectError(error.LabelTooLong, packet.parse(try builder.finish()));
+    try testing.expectError(error.LabelTooLong, packet.parse(try builder.finish()));
     var name: wire.Name = undefined;
     try fixture.maxName(&name);
     builder.init();
     builder.record("\x00", 65400, .answer, name.wire());
     builder.record("\x01x\xc0\x17", 1, .additional, &.{ 127, 0, 0, 1 });
-    try std.testing.expectError(error.NameTooLong, packet.parse(try builder.finish()));
+    try testing.expectError(error.NameTooLong, packet.parse(try builder.finish()));
     var oversized: [257]u8 = undefined;
     @memcpy(oversized[0..2], "\x01x");
     @memcpy(oversized[2..], name.wire());
     builder.init();
     builder.record("\x00", 65400, .answer, &oversized);
     pointerRecord(&builder, 23);
-    try std.testing.expectError(error.NameTooLong, packet.parse(try builder.finish()));
+    try testing.expectError(error.NameTooLong, packet.parse(try builder.finish()));
 }
 
 // RFC 1035 §3.3 and RFC 6891 §6.1.2: known scalar/string/option bytes are not opaque.
@@ -179,7 +182,7 @@ test "name shaped known scalar and string fields never supply pointer targets" {
         builder.record("\x00", case.kind, .additional, case.data);
         pointerRecord(&builder, 23 + case.offset);
         var packet: wire.Packet = undefined;
-        try std.testing.expectError(error.InvalidPointer, packet.parse(try builder.finish()));
+        try testing.expectError(error.InvalidPointer, packet.parse(try builder.finish()));
     }
 }
 

@@ -1,26 +1,29 @@
 const std = @import("std");
+const testing = std.testing;
+
 const wire = @import("wire");
-const fixture = @import("wire/fixture.zig");
+
 const equivalent = @import("wire/equivalent.zig").equivalent;
+const fixture = @import("wire/fixture.zig");
 
 // SPEC §9.3: bounded Smith storage follows the pinned ztls fuzz pattern.
 test "fuzz DNS decoder and safe rewrites" {
-    try std.testing.fuzz({}, fuzzOne, .{ .corpus = &.{ "\x00" ** 12, "\xff" ** 32 } });
+    try testing.fuzz({}, fuzzOne, .{ .corpus = &.{ "\x00" ** 12, "\xff" ** 32 } });
 }
 
 // SPEC §9.3 and RFC 3597 §4: mutate structured packets to reach RDATA and movement.
 test "fuzz structured DNS record relocation" {
-    try std.testing.fuzz({}, fuzzStructured, .{ .corpus = &.{ "", "\x00" ** 32 } });
+    try testing.fuzz({}, fuzzStructured, .{ .corpus = &.{ "", "\x00" ** 32 } });
 }
 
 // Unexpected outcomes panic: they remain visible with fuzz error tracing disabled (#1).
-fn fuzzOne(_: void, smith: *std.testing.Smith) error{}!void {
+fn fuzzOne(_: void, smith: *testing.Smith) error{}!void {
     var storage: [65536]u8 = undefined;
     const length = smith.slice(&storage);
     check(storage[0..length]);
 }
 
-fn fuzzStructured(_: void, smith: *std.testing.Smith) error{}!void {
+fn fuzzStructured(_: void, smith: *testing.Smith) error{}!void {
     var mutations: [64]u8 = undefined;
     const length = smith.slice(&mutations);
     var builder: fixture.Builder = undefined;
@@ -69,8 +72,8 @@ fn check(bytes: []const u8) void {
     };
     var decoded: wire.Packet = undefined;
     decoded.parse(result) catch |err| @panic(@errorName(err));
-    std.testing.expectEqual(packet.header, decoded.header) catch @panic("header changed");
-    std.testing.expectEqual(packet.record_count, decoded.record_count) catch
+    testing.expectEqual(packet.header, decoded.header) catch @panic("header changed");
+    testing.expectEqual(packet.record_count, decoded.record_count) catch
         @panic("record count changed");
     var target: usize = 0;
     for (order[0..packet.record_count]) |index| {
@@ -93,9 +96,9 @@ fn checkQuestions(source: *wire.Packet, target: *wire.Packet) void {
         var target_name: wire.Name = undefined;
         source.name(&source_name, left.name) catch @panic("source name invalid");
         target.name(&target_name, right.name) catch @panic("target name invalid");
-        std.testing.expectEqual(left.kind, right.kind) catch @panic("question type changed");
-        std.testing.expectEqual(left.class, right.class) catch @panic("question class changed");
-        std.testing.expectEqualSlices(u8, source_name.wire(), target_name.wire()) catch
+        testing.expectEqual(left.kind, right.kind) catch @panic("question type changed");
+        testing.expectEqual(left.class, right.class) catch @panic("question class changed");
+        testing.expectEqualSlices(u8, source_name.wire(), target_name.wire()) catch
             @panic("question name changed");
     }
 }

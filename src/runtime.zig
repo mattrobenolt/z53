@@ -1,7 +1,4 @@
 //! Compile-time transport selection. No runtime probing or blocking fallback.
-const builtin = @import("builtin");
-const linux = @import("runtime_linux.zig");
-const darwin = @import("runtime_darwin.zig");
 const platform = switch (builtin.os.tag) {
     .linux => linux,
     .macos => darwin,
@@ -12,10 +9,14 @@ pub const Error = platform.Error;
 pub const now = platform.now;
 pub const proctor = platform.proctor;
 pub const address = platform.address;
-pub const tcp = @import("runtime/tcp.zig");
-pub const udp = @import("runtime/udp.zig");
-pub const pipeline = @import("runtime/pipeline.zig");
-pub const forward = @import("runtime/forward.zig");
 pub const nowNs = platform.nowNs;
 
+const builtin = @import("builtin");
+
+const darwin = @import("runtime_darwin.zig");
+const linux = @import("runtime_linux.zig");
+pub const forward = @import("runtime/forward.zig");
 pub const log = @import("runtime/log.zig");
+pub const pipeline = @import("runtime/pipeline.zig");
+pub const tcp = @import("runtime/tcp.zig");
+pub const udp = @import("runtime/udp.zig");

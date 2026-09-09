@@ -124,7 +124,7 @@ in
       zig build -j2 -Doptimize=ReleaseSafe -Dcpu=baseline --system zig-pkg -Dunit-filter=TLS test-unit 2>&1 | tee foundation.log
       # ztest succeeds on an empty selection, so pin the promised TLS coverage.
       grep -Fx 'ztest: Running 3 tests...' foundation.log
-      zig build -j2 -Doptimize=ReleaseSafe -Dcpu=baseline --system zig-pkg test-config test-resolver test-wire bench-smoke
+      zig build -j2 -Doptimize=ReleaseSafe -Dcpu=baseline --system zig-pkg test-config test-resolver test-wire test-containers bench-smoke
       runHook postCheck
     '';
   };

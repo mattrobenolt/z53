@@ -1,13 +1,15 @@
 //! Synchronous pipeline seams. The runtime routes first, then calls beforeCache;
 //! only its miss permits cache lookup, and only a cache miss permits afterCache.
 //! Output must not overlap the borrowed request packet or encoder workspace.
-pub const wire = @import("wire.zig");
+const std = @import("std");
+const assert = std.debug.assert;
+
+pub const cache = @import("cache.zig");
 pub const config = @import("config.zig");
 pub const hosts = @import("hosts.zig");
 pub const rotation = @import("rotation.zig");
-pub const cache = @import("cache.zig");
 pub const Source = rotation.Source;
-const std = @import("std");
+pub const wire = @import("wire.zig");
 
 pub const Request = struct {
     packet: *const wire.Packet,
@@ -17,9 +19,9 @@ pub const Request = struct {
 
     /// Accept only packets already admitted by wire.query.
     pub fn init(self: *Request, packet: *wire.Packet) wire.Error!void {
-        std.debug.assert(packet.header.counts[0] == 1);
-        std.debug.assert(packet.header.opcode() == 0);
-        std.debug.assert(!packet.header.has(.response));
+        assert(packet.header.counts[0] == 1);
+        assert(packet.header.opcode() == 0);
+        assert(!packet.header.has(.response));
         var cursor: usize = 12;
         const question = try packet.readQuestion(&cursor);
         self.packet = packet;
@@ -28,7 +30,12 @@ pub const Request = struct {
         try packet.name(&self.name, question.name);
     }
 };
-pub const Answer = struct { bytes: []const u8, source: Source };
+
+pub const Answer = struct {
+    bytes: []const u8,
+    source: Source,
+};
+
 const Local = enum { loopback, reverse, empty };
 
 /// A returned answer bypasses cache, NODATA, hosts, forward, and rotation.
@@ -163,7 +170,7 @@ fn address(
 fn covered(name: *const wire.Name) ?Local {
     var suffix: wire.Name = undefined;
     suffix.fromText("1.0.0.127.in-addr.arpa.") catch unreachable;
-    if (name.equal(&suffix)) return .reverse;
+    if (name.eql(&suffix)) return .reverse;
     const zones = .{ "localhost.", "0.in-addr.arpa.", "127.in-addr.arpa.", "255.in-addr.arpa." };
     inline for (zones, 0..) |zone, index| {
         suffix.fromText(zone) catch unreachable;

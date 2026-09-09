@@ -1,8 +1,12 @@
 //! Read exactly one frame before each response. Coalesced queries remain in the socket.
 const std = @import("std");
-const log = @import("log.zig");
+const assert = std.debug.assert;
+
 const wire = @import("../wire.zig");
+const log = @import("log.zig");
+
 pub const clients_max = 128;
+
 pub const Client = struct {
     state: enum { vacant, connected, closing, replacing } = .vacant,
     phase: enum { prefix, body, waiting, response } = .prefix,
@@ -15,7 +19,7 @@ pub const Client = struct {
 
     pub fn reset(self: *Client) void {
         // Runtime admission checks exhaustion before it resets a connection.
-        std.debug.assert(self.generation < std.math.maxInt(u31));
+        assert(self.generation < std.math.maxInt(u31));
         self.generation += 1;
         self.state = .connected;
         self.nextQuery();
@@ -46,8 +50,8 @@ pub const Client = struct {
     }
 
     pub fn respond(self: *Client, length: usize) void {
-        std.debug.assert(length >= 12);
-        std.debug.assert(length <= wire.message_bytes_max);
+        assert(length >= 12);
+        assert(length <= wire.message_bytes_max);
         wire.framePrefix(&self.output, length) catch unreachable;
         self.phase = .response;
         self.offset = 0;
@@ -55,7 +59,7 @@ pub const Client = struct {
     }
 
     pub fn sent(self: *Client, count: i32) error{ Closed, InvalidFrame }!void {
-        std.debug.assert(self.phase == .response);
+        assert(self.phase == .response);
         if (count <= 0) return error.Closed;
         if (@as(u32, @intCast(count)) > self.length - self.offset) return error.InvalidFrame;
         self.offset += @intCast(count);

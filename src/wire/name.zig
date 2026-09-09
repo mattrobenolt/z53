@@ -1,4 +1,5 @@
 const std = @import("std");
+
 pub const ScratchSet = @import("bit_set.zig").ScratchSet;
 
 pub const Error = error{
@@ -9,7 +10,9 @@ pub const Error = error{
     CompressionForbidden,
     InvalidName,
 };
+
 pub const Compression = enum { allowed, forbidden };
+
 pub const Boundaries = struct {
     labels: ScratchSet(16384),
     opaque_bytes: ScratchSet(65536),
@@ -79,7 +82,7 @@ pub const Name = struct {
         return error.InvalidName;
     }
 
-    pub fn equal(self: *const Name, other: *const Name) bool {
+    pub fn eql(self: *const Name, other: *const Name) bool {
         // DNS equality folds ASCII only; label framing remains significant.
         return std.ascii.eqlIgnoreCase(self.wire(), other.wire());
     }
@@ -111,6 +114,7 @@ pub fn read(
 }
 
 const Access = enum { record, inspect };
+
 fn BoundaryPointer(comptime access: Access) type {
     return if (access == .record) *Boundaries else *const Boundaries;
 }

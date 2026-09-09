@@ -68,6 +68,7 @@ fn addTests(b: *std.Build, executable: *std.Build.Step.Compile, tls: *std.Build.
     run_tests.setEnvironmentVariable("ZTEST_VERBOSE", "1");
     run_tests.setEnvironmentVariable("ZTEST_PLAIN", "1");
     unit_step.dependOn(&run_tests.step);
+    addContainerTests(b, executable, ztest, test_step, test_compile);
     runtime.add(b, executable, ztest, test_step, test_compile);
     config.add(b, executable, ztest, test_step, test_compile);
     resolver.add(b, executable, ztest, test_step, test_compile);
@@ -80,4 +81,30 @@ fn addTests(b: *std.Build, executable: *std.Build.Step.Compile, tls: *std.Build.
         test_step,
         test_compile,
     );
+}
+
+fn addContainerTests(
+    b: *std.Build,
+    executable: *std.Build.Step.Compile,
+    ztest: *std.Build.Dependency,
+    all: *std.Build.Step,
+    compile: *std.Build.Step,
+) void {
+    const options: std.Build.TestOptions = .{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/array_buffer.zig"),
+            .target = executable.root_module.resolved_target.?,
+            .optimize = executable.root_module.optimize,
+            .link_libc = true,
+        }),
+        .test_runner = .{ .path = ztest.path("src/test_runner.zig"), .mode = .simple },
+    };
+    compile.dependOn(&b.addTest(options).step);
+    const run = b.addRunArtifact(b.addTest(options));
+    run.has_side_effects = true;
+    run.setEnvironmentVariable("ZTEST_VERBOSE", "1");
+    run.setEnvironmentVariable("ZTEST_PLAIN", "1");
+    const step = b.step("test-containers", "Run inline container tests");
+    step.dependOn(&run.step);
+    all.dependOn(step);
 }

@@ -1,5 +1,5 @@
-const wire = @import("../wire.zig");
 const config = @import("../config.zig");
+const wire = @import("../wire.zig");
 
 pub const Policy = struct {
     bank: enum { positive, denial },

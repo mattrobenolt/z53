@@ -2,15 +2,23 @@
 //! Output, request bytes and workspace must be disjoint. Delivery is full-size TCP;
 //! the runtime applies rotation and client UDP limits afterward, never before insertion.
 const std = @import("std");
+const assert = std.debug.assert;
+
+pub const packets = @import("cache/packets.zig");
+const policy = @import("cache/policy.zig");
+const store = @import("cache/store.zig");
+pub const Entry = store.Entry;
+const config = @import("config.zig");
 const resolver = @import("resolver.zig");
 const wire = @import("wire.zig");
-const config = @import("config.zig");
-const store = @import("cache/store.zig");
-const policy = @import("cache/policy.zig");
-pub const packets = @import("cache/packets.zig");
-pub const Entry = store.Entry;
+
 pub const Insertion = enum { stored, skipped, exhausted };
-pub const Result = struct { answer: resolver.Answer, insertion: Insertion };
+
+pub const Result = struct {
+    answer: resolver.Answer,
+    insertion: Insertion,
+};
+
 pub const Workspace = struct {
     packet: wire.Packet,
     rewrite: wire.rewrite.Workspace,
@@ -34,12 +42,12 @@ pub const Cache = struct {
     ) error{OutOfMemory}!void {
         self.* = .{ .allocator = allocator, .settings = zone.cache, .grace_s = zone.serve_stale_s };
         const settings = self.settings orelse return;
-        std.debug.assert(settings.capacity > 0);
-        std.debug.assert(settings.capacity <= config.cache_capacity_max);
-        std.debug.assert(settings.packet_bytes_max >= config.cache_packet_bytes_min);
-        std.debug.assert(settings.packet_bytes_max <= config.cache_packet_bytes_max);
-        std.debug.assert(settings.min_ttl_s <= settings.max_ttl_s);
-        std.debug.assert(settings.denialMaximum() >= 5);
+        assert(settings.capacity > 0);
+        assert(settings.capacity <= config.cache_capacity_max);
+        assert(settings.packet_bytes_max >= config.cache_packet_bytes_min);
+        assert(settings.packet_bytes_max <= config.cache_packet_bytes_max);
+        assert(settings.min_ttl_s <= settings.max_ttl_s);
+        assert(settings.denialMaximum() >= 5);
         try self.positive.init(allocator, settings.capacity);
         errdefer self.positive.deinit(allocator);
         try self.denial.init(allocator, settings.capacity);
@@ -210,7 +218,7 @@ pub const Cache = struct {
         now_s: u64,
         selected: *const policy.Policy,
     ) error{OutOfMemory}!Insertion {
-        std.debug.assert(bytes.len <= wire.message_bytes_max);
+        assert(bytes.len <= wire.message_bytes_max);
         const bank = if (selected.bank == .positive) &self.positive else &self.denial;
         const other = if (selected.bank == .positive) &self.denial else &self.positive;
         const index = bank.slot(key);
@@ -258,7 +266,7 @@ fn localFailure(
     encoder: *wire.Encoder,
     output: []u8,
 ) wire.Error!Result {
-    std.debug.assert(request.packet.opt == null);
+    assert(request.packet.opt == null);
     const header: wire.Header = .{
         .id = request.packet.header.id,
         .bits = (request.packet.header.bits & 0x0110) | 0x8082,

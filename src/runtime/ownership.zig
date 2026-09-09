@@ -1,13 +1,15 @@
 //! A slot cannot rearm until both the target and its cancellation acknowledge completion.
 const std = @import("std");
+const assert = std.debug.assert;
 
 pub const Completion = enum { more, terminal, cancellation };
+
 pub const Ownership = struct {
     generation: u31 = 0,
     state: enum { idle, active, cancelling, target_done, cancel_done } = .idle,
 
     pub fn arm(self: *Ownership, index: u32) error{GenerationExhausted}!u64 {
-        std.debug.assert(self.state == .idle);
+        assert(self.state == .idle);
         if (self.generation == std.math.maxInt(u31)) return error.GenerationExhausted;
         self.generation += 1;
         self.state = .active;
@@ -19,7 +21,7 @@ pub const Ownership = struct {
     }
 
     pub fn cancel(self: *Ownership) void {
-        std.debug.assert(self.state == .active);
+        assert(self.state == .active);
         self.state = .cancelling;
     }
 

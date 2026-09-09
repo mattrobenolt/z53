@@ -1,5 +1,8 @@
 const std = @import("std");
+const testing = std.testing;
+
 const wire = @import("wire");
+
 const fixture = @import("fixture.zig");
 
 // SPEC §3.9: non-QUERY gets NOTIMP and CH is not rejected by the codec.
@@ -9,14 +12,14 @@ test "query disposition separates NOTIMP FORMERR drop and CH" {
     builder.header.bits = 0x0100;
     builder.question("\x01x\x00", 16, 3);
     var packet: wire.Packet = undefined;
-    try std.testing.expectEqual(.accepted, wire.query(&packet, try builder.finish()));
+    try testing.expectEqual(.accepted, wire.query(&packet, try builder.finish()));
     builder.header.bits |= 2 << 11;
     const reply = wire.query(&packet, try builder.finish()).reply;
-    try std.testing.expectEqual(4, reply.bits & 15);
-    try std.testing.expectEqual(2, reply.opcode());
-    try std.testing.expect(reply.has(.response));
-    try std.testing.expectEqual(.drop, wire.query(&packet, builder.bytes[0..11]));
-    try std.testing.expectEqual(1, wire.query(&packet, builder.bytes[0..12]).reply.bits & 15);
+    try testing.expectEqual(4, reply.bits & 15);
+    try testing.expectEqual(2, reply.opcode());
+    try testing.expect(reply.has(.response));
+    try testing.expectEqual(.drop, wire.query(&packet, builder.bytes[0..11]));
+    try testing.expectEqual(1, wire.query(&packet, builder.bytes[0..12]).reply.bits & 15);
 }
 
 // RFC 1035 §4.1.4: the dictionary cannot encode offsets beyond 14 bits.
@@ -32,7 +35,7 @@ test "names after compression offset limit never wrap" {
     var workspace: wire.rewrite.Workspace = undefined;
     var output: [65535]u8 = undefined;
     const result = try workspace.rewrite(&packet, &output, &.{});
-    try std.testing.expectEqualSlices(u8, packet.bytes, result);
+    try testing.expectEqualSlices(u8, packet.bytes, result);
     var decoded: wire.Packet = undefined;
     try decoded.parse(result);
 }
@@ -47,11 +50,11 @@ test "shared long names do not require an expanded message buffer" {
     for (0..5000) |_| builder.record("\xc0\x0c", 65400, .answer, &.{});
     var packet: wire.Packet = undefined;
     try packet.parse(try builder.finish());
-    try std.testing.expectEqual(60271, packet.bytes.len);
+    try testing.expectEqual(60271, packet.bytes.len);
     var workspace: wire.rewrite.Workspace = undefined;
     var output: [65535]u8 = undefined;
     const result = try workspace.rewrite(&packet, &output, &.{});
-    try std.testing.expectEqualSlices(u8, packet.bytes, result);
+    try testing.expectEqualSlices(u8, packet.bytes, result);
 }
 
 // SPEC §3.7: TTL rewrites do not mutate packet names or OPT metadata.
@@ -70,9 +73,9 @@ test "record views support safe TTL rewrite without changing source bytes" {
     const result = try workspace.rewrite(&packet, &output, &.{});
     var decoded: wire.Packet = undefined;
     try decoded.parse(result);
-    try std.testing.expectEqual(5, decoded.records[0].ttl_s);
-    try std.testing.expectEqual(30, decoded.records[1].ttl_s);
-    try std.testing.expectEqual(original, std.hash.Wyhash.hash(0, packet.bytes));
+    try testing.expectEqual(5, decoded.records[0].ttl_s);
+    try testing.expectEqual(30, decoded.records[1].ttl_s);
+    try testing.expectEqual(original, std.hash.Wyhash.hash(0, packet.bytes));
 }
 
 // RFC 1035 §4.1.4: longest legal backward pointer chains terminate without recursion.
@@ -93,7 +96,7 @@ test "long backward pointer chains have bounded traversal" {
     try packet.parse(try builder.finish());
     var name: wire.Name = undefined;
     try packet.name(&name, previous);
-    try std.testing.expectEqualSlices(u8, &.{0}, name.wire());
+    try testing.expectEqualSlices(u8, &.{0}, name.wire());
 }
 
 // RFC 6891 §6.2.3 and SPEC §3.9: the UDP payload boundary is inclusive.
@@ -110,9 +113,9 @@ test "UDP exact limit and one byte over retain complete records" {
         try packet.parse(try builder.finish());
         const result = try workspace.rewrite(&packet, &output, &.{ .limit = .{ .udp = 512 } });
         try decoded.parse(result);
-        try std.testing.expectEqual(length == 490, decoded.header.has(.truncated));
-        try std.testing.expectEqual(@as(u16, @intFromBool(length == 489)), decoded.record_count);
-        try std.testing.expectEqual(@as(usize, if (length == 489) 512 else 12), result.len);
+        try testing.expectEqual(length == 490, decoded.header.has(.truncated));
+        try testing.expectEqual(@as(u16, @intFromBool(length == 489)), decoded.record_count);
+        try testing.expectEqual(@as(usize, if (length == 489) 512 else 12), result.len);
     }
 }
 
@@ -122,18 +125,18 @@ test "query classification rejects absent multiple and response questions" {
     builder.init();
     builder.header.bits = 0x0100;
     var packet: wire.Packet = undefined;
-    try std.testing.expectEqual(1, wire.query(&packet, try builder.finish()).reply.bits & 15);
+    try testing.expectEqual(1, wire.query(&packet, try builder.finish()).reply.bits & 15);
     builder.question("\x01x\x00", 1, 1);
     builder.question("\xc0\x0c", 1, 1);
-    try std.testing.expectEqual(1, wire.query(&packet, try builder.finish()).reply.bits & 15);
+    try testing.expectEqual(1, wire.query(&packet, try builder.finish()).reply.bits & 15);
     builder.init();
     builder.question("\x01x\x00", 1, 1);
-    try std.testing.expectEqual(1, wire.query(&packet, try builder.finish()).reply.bits & 15);
+    try testing.expectEqual(1, wire.query(&packet, try builder.finish()).reply.bits & 15);
 }
 
 // SPEC §1.10–11: storage is fixed, and none of these APIs has an allocator.
 test "codec workspace and metadata stay within explicit storage budgets" {
-    try std.testing.expectEqual(256, @sizeOf(wire.Name));
-    try std.testing.expect(@sizeOf(wire.Packet) <= 128 * 1024);
-    try std.testing.expect(@sizeOf(wire.rewrite.Workspace) <= 64 * 1024);
+    try testing.expectEqual(256, @sizeOf(wire.Name));
+    try testing.expect(@sizeOf(wire.Packet) <= 128 * 1024);
+    try testing.expect(@sizeOf(wire.rewrite.Workspace) <= 64 * 1024);
 }

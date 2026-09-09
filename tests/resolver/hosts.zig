@@ -29,7 +29,7 @@ test "hosts parser skips invalid lines and folds aliases" {
     try testing.expectEqual(@as(u16, 4), snapshot.store.table().count);
     var name: wire.Name = undefined;
     try name.fromText("MAIN.");
-    try testing.expect(snapshot.store.table().entries()[0].name.equal(&name));
+    try testing.expect(snapshot.store.table().entries()[0].name.eql(&name));
     var long: [64]u8 = @splat('a');
     var source: [128]u8 = undefined;
     const invalid = try std.fmt.bufPrint(&source, "127.0.0.1 valid {s}\n", .{&long});
@@ -99,7 +99,7 @@ test "hosts PTR synthesizes all aliases for IPv4 and IPv6" {
             var expected: wire.Name = undefined;
             try expected.fromText(alias);
             try fixture.response.name(&target, fixture.response.records[index].data_start);
-            try testing.expect(target.equal(&expected));
+            try testing.expect(target.eql(&expected));
         }
     }
 }
@@ -147,7 +147,7 @@ test "bounded replacement is atomic and failed mtime remains retryable" {
     try testing.expect(store.changed(2));
     var name: wire.Name = undefined;
     try name.fromText("old.");
-    try testing.expect(store.table().entries()[0].name.equal(&name));
+    try testing.expect(store.table().entries()[0].name.eql(&name));
     const oversized = try testing.allocator.alloc(u8, hosts.source_bytes_max + 1);
     defer testing.allocator.free(oversized);
     @memset(oversized, '\n');
@@ -156,7 +156,7 @@ test "bounded replacement is atomic and failed mtime remains retryable" {
     try testing.expectEqual(@as(?i128, 1), store.mtime);
     try store.replace("192.0.2.2 new\n", 2);
     try testing.expect(active != store.table());
-    try testing.expect(!store.table().entries()[0].name.equal(&name));
+    try testing.expect(!store.table().entries()[0].name.eql(&name));
     try testing.expect(!store.changed(2));
     try store.replace("# empty\ninvalid\n", 3);
     try testing.expectEqual(@as(u16, 0), store.table().count);

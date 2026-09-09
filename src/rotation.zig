@@ -1,5 +1,6 @@
 //! Reorder views, never raw compressed records. Rewriting relocates every known name.
 const std = @import("std");
+
 const wire = @import("wire.zig");
 
 pub const Source = enum {
@@ -28,6 +29,7 @@ pub const Source = enum {
         };
     }
 };
+
 pub const Mode = enum { fixed, rotate };
 const Group = enum { cname, other, address, mail };
 

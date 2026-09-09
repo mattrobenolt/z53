@@ -560,7 +560,7 @@ fn checkCookie(packet: *wire.Packet, cookie: u8, text: []const u8) !void {
     var actual: wire.Name = undefined;
     try expected.fromText(text);
     try packet.name(&actual, question_value.name);
-    try testing.expect(actual.equal(&expected));
+    try testing.expect(actual.eql(&expected));
 }
 
 // SPEC §3.6: rejected responses neither publish nor renew the absolute response deadline.

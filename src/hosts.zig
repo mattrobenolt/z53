@@ -1,12 +1,21 @@
 //! Bounded, caller-owned hosts snapshots. Only replacement writes the inactive table.
 const std = @import("std");
+const assert = std.debug.assert;
+const Io = std.Io;
+
 const wire = @import("wire.zig");
 
 pub const source_bytes_max = 1024 * 1024;
 pub const entries_max = 16384;
+
 pub const Error = error{ SourceTooLarge, TableFull };
 pub const Reload = enum { unchanged, replaced };
-const Address = union(enum) { ipv4: [4]u8, ipv6: [16]u8 };
+
+const Address = union(enum) {
+    ipv4: [4]u8,
+    ipv6: [16]u8,
+};
+
 pub const Entry = struct {
     name: wire.Name,
     reverse: wire.Name,
@@ -15,14 +24,14 @@ pub const Entry = struct {
     pub fn matches(self: *const Entry, name: *const wire.Name, kind: u16) bool {
         return switch (kind) {
             1 => switch (self.address) {
-                .ipv4 => self.name.equal(name),
+                .ipv4 => self.name.eql(name),
                 .ipv6 => false,
             },
             28 => switch (self.address) {
                 .ipv4 => false,
-                .ipv6 => self.name.equal(name),
+                .ipv6 => self.name.eql(name),
             },
-            12 => self.reverse.equal(name),
+            12 => self.reverse.eql(name),
             else => false,
         };
     }
@@ -47,7 +56,7 @@ pub const Table = struct {
 
     /// Failure invalidates this candidate, never the Store's active snapshot.
     fn parse(self: *Table, source: []const u8) Error!void {
-        std.debug.assert(self.storage.len <= entries_max);
+        assert(self.storage.len <= entries_max);
         self.count = 0;
         if (source.len > source_bytes_max) return error.SourceTooLarge;
         var lines = std.mem.splitScalar(u8, source, '\n');
@@ -59,10 +68,10 @@ pub const Table = struct {
         var tokens = std.mem.tokenizeAny(u8, text[0..end], " \t\r");
         const literal = tokens.next() orelse return;
         var address: Address = undefined;
-        if (std.Io.net.Ip4Address.parse(literal, 0)) |value| {
+        if (Io.net.Ip4Address.parse(literal, 0)) |value| {
             address = .{ .ipv4 = value.bytes };
         } else |_| {
-            const value = std.Io.net.Ip6Address.parse(literal, 0) catch return;
+            const value = Io.net.Ip6Address.parse(literal, 0) catch return;
             // A scoped address cannot be represented in DNS AAAA RDATA.
             if (std.mem.indexOfScalar(u8, literal, '%') != null) return;
             address = .{ .ipv6 = value.bytes };
@@ -86,8 +95,8 @@ pub const Table = struct {
 
     fn contains(self: *const Table, name: *const wire.Name, reverse: *const wire.Name) bool {
         for (self.entries()) |*entry| {
-            if (!entry.name.equal(name)) continue;
-            if (entry.reverse.equal(reverse)) return true;
+            if (!entry.name.eql(name)) continue;
+            if (entry.reverse.eql(reverse)) return true;
         }
         return false;
     }
@@ -101,14 +110,14 @@ pub const Store = struct {
     mtime: ?i128 = null,
 
     pub fn init(self: *Store, first: []Entry, second: []Entry) void {
-        std.debug.assert(first.len > 0);
-        std.debug.assert(first.len == second.len);
-        std.debug.assert(first.len <= entries_max);
+        assert(first.len > 0);
+        assert(first.len == second.len);
+        assert(first.len <= entries_max);
         const first_end = @intFromPtr(first.ptr) + first.len * @sizeOf(Entry);
         const second_end = @intFromPtr(second.ptr) + second.len * @sizeOf(Entry);
         if (@intFromPtr(first.ptr) < @intFromPtr(second.ptr)) {
-            std.debug.assert(first_end <= @intFromPtr(second.ptr));
-        } else std.debug.assert(second_end <= @intFromPtr(first.ptr));
+            assert(first_end <= @intFromPtr(second.ptr));
+        } else assert(second_end <= @intFromPtr(first.ptr));
         self.* = .{ .tables = .{ .{ .storage = first }, .{ .storage = second } } };
     }
 
@@ -124,14 +133,14 @@ pub const Store = struct {
     /// Read one opened regular file; a changed file is retried on the next check.
     pub fn load(
         self: *Store,
-        io: std.Io,
-        directory: std.Io.Dir,
+        io: Io,
+        directory: Io.Dir,
         path: []const u8,
         buffer: []u8,
-    ) (Error || std.Io.File.OpenError || std.Io.File.StatError ||
-        std.Io.Dir.StatFileError || std.Io.File.ReadPositionalError ||
+    ) (Error || Io.File.OpenError || Io.File.StatError ||
+        Io.Dir.StatFileError || Io.File.ReadPositionalError ||
         error{ NotRegularFile, FileChanged })!Reload {
-        std.debug.assert(buffer.len > source_bytes_max);
+        assert(buffer.len > source_bytes_max);
         // Reject configured devices/FIFOs before open, which can otherwise block.
         const path_stat = try directory.statFile(io, path, .{});
         if (path_stat.kind != .file) return error.NotRegularFile;
