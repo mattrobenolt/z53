@@ -4,6 +4,64 @@ const testing = std.testing;
 const log = runtime.log;
 const wire = runtime.pipeline.wire;
 
+fn formatTimestamp(logger: *log.Logger, packet: *wire.Packet, unix_ms: i64) ![]const u8 {
+    return log.format(logger, packet, &.{
+        .client = null,
+        .protocol = .udp,
+        .started_ns = 0,
+    }, &.{}, &.{ .bytes = &.{}, .source = .servfail }, null, .{
+        .unix_ms = unix_ms,
+        .finished_ns = 0,
+    });
+}
+
+// SPEC §4: UTC milliseconds remain exact across cache hits, rollovers, and backward clock jumps.
+test "logging calendar cache preserves clock boundaries and invalid timestamps" {
+    const packet = try testing.allocator.create(wire.Packet);
+    defer testing.allocator.destroy(packet);
+    var logger: log.Logger = .{};
+    const Case = struct { unix_ms: i64, expected: []const u8 };
+    const cases = [_]Case{
+        .{ .unix_ms = 0, .expected = "1970-01-01T00:00:00.000Z" },
+        .{ .unix_ms = 1, .expected = "1970-01-01T00:00:00.001Z" },
+        .{ .unix_ms = 999, .expected = "1970-01-01T00:00:00.999Z" },
+        .{ .unix_ms = 1000, .expected = "1970-01-01T00:00:01.000Z" },
+        .{ .unix_ms = 999, .expected = "1970-01-01T00:00:00.999Z" },
+        .{ .unix_ms = 1709251199999, .expected = "2024-02-29T23:59:59.999Z" },
+        .{ .unix_ms = 1709251200000, .expected = "2024-03-01T00:00:00.000Z" },
+        .{ .unix_ms = 1709251199999, .expected = "2024-02-29T23:59:59.999Z" },
+        .{ .unix_ms = -1, .expected = "timestamp=unknown" },
+        .{ .unix_ms = 1709251199999, .expected = "2024-02-29T23:59:59.999Z" },
+        .{ .unix_ms = 253402300799999, .expected = "9999-12-31T23:59:59.999Z" },
+        .{ .unix_ms = 253402300800000, .expected = "timestamp=unknown" },
+        .{ .unix_ms = std.math.maxInt(i64), .expected = "timestamp=unknown" },
+        .{ .unix_ms = std.math.minInt(i64), .expected = "timestamp=unknown" },
+        .{ .unix_ms = 253402300799999, .expected = "9999-12-31T23:59:59.999Z" },
+        .{ .unix_ms = 0, .expected = "1970-01-01T00:00:00.000Z" },
+    };
+    for (cases) |case| {
+        const bytes = try formatTimestamp(&logger, packet, case.unix_ms);
+        try testing.expectEqualStrings(case.expected, bytes[0..case.expected.len]);
+        try testing.expectEqualStrings(" event=", bytes[case.expected.len..][0..7]);
+    }
+}
+
+// SPEC §§1.10, 4: logger initialization invalidates the calendar but retains backing storage.
+test "logging initialization invalidates calendar without clearing retained bytes" {
+    const packet = try testing.allocator.create(wire.Packet);
+    defer testing.allocator.destroy(packet);
+    var logger: log.Logger = .{};
+    _ = try formatTimestamp(&logger, packet, 0);
+    @memset(&logger.calendar.prefix, 0xa5);
+    @memset(&logger.buffer, 0xa5);
+    logger.init();
+    try testing.expect(logger.calendar.second == null);
+    for (logger.buffer) |byte| try testing.expectEqual(@as(u8, 0xa5), byte);
+    for (logger.calendar.prefix) |byte| try testing.expectEqual(@as(u8, 0xa5), byte);
+    const bytes = try formatTimestamp(&logger, packet, 0);
+    try testing.expectEqualStrings("1970-01-01T00:00:00.000Z", bytes[0..24]);
+}
+
 pub const Capture = struct {
     storage: [16384]u8 = undefined,
     length: usize = 0,
@@ -69,8 +127,8 @@ test "logging formatter timestamp duration extended rcode and numeric qtype" {
     response[11] = 1;
     const opt = [_]u8{ 0, 0, 41, 4, 208, 0xab, 0, 0, 0, 0, 0 };
     @memcpy(response[query.len..][0..opt.len], &opt);
-    var buffer: [log.line_bytes_max]u8 = undefined;
-    const bytes = try log.format(&buffer, packet, &.{
+    var formatter: log.Logger = .{};
+    const bytes = try log.format(&formatter, packet, &.{
         .client = try std.Io.net.IpAddress.parse("127.0.0.1", 44123),
         .protocol = .udp,
         .started_ns = 1000000,
@@ -108,8 +166,8 @@ test "logging formatter hostile maximum name and local source has no upstream" {
     try testing.expectEqual(255, name.length);
     var input: [512]u8 = undefined;
     const query = try request(&input, &name, 65535);
-    var buffer: [log.line_bytes_max]u8 = undefined;
-    const bytes = try log.format(&buffer, packet, &.{
+    var formatter: log.Logger = .{};
+    const bytes = try log.format(&formatter, packet, &.{
         .client = try std.Io.net.IpAddress.parse("::1", 1234),
         .protocol = .tcp,
         .started_ns = 500,
@@ -125,7 +183,7 @@ test "logging formatter hostile maximum name and local source has no upstream" {
     try testing.expect(std.mem.indexOf(u8, bytes, "client=[::1]:1234") != null);
     try testing.expect(std.mem.indexOf(u8, bytes, "duration_ms=0.000 src=cache") != null);
     const hostile_tls: [253]u8 = @splat(0x1b);
-    const forwarded = try log.format(&buffer, packet, &.{
+    const forwarded = try log.format(&formatter, packet, &.{
         .client = try std.Io.net.IpAddress.parse("::1", 65535),
         .protocol = .tcp,
         .started_ns = 0,
@@ -183,14 +241,14 @@ test "logging retained workspace preserves dirty tail across event kinds and sin
 test "logging malformed query reply and failed capture sink" {
     const packet = try testing.allocator.create(wire.Packet);
     defer testing.allocator.destroy(packet);
-    var buffer: [log.line_bytes_max]u8 = undefined;
+    var formatter: log.Logger = .{};
     const observation: log.Query = .{ .client = null, .protocol = .udp, .started_ns = 0 };
     const malformed = [_]u8{ 0, 42, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0 };
     var reply: [12]u8 = undefined;
     try wire.malformed(&malformed).formerr.encode(&reply);
     const result: runtime.pipeline.resolver.Answer = .{ .bytes = &reply, .source = .servfail };
     const bytes = try log.format(
-        &buffer,
+        &formatter,
         packet,
         &observation,
         &malformed,
@@ -200,7 +258,7 @@ test "logging malformed query reply and failed capture sink" {
     );
     try testing.expect(std.mem.indexOf(u8, bytes, "qtype=unknown qname=unknown rcode=1") != null);
     const broken = try log.format(
-        &buffer,
+        &formatter,
         packet,
         &observation,
         &malformed,

@@ -31,6 +31,12 @@ pub const Sink = struct {
 pub const Logger = struct {
     sink: Sink = .{},
     buffer: [line_bytes_max]u8 = undefined,
+    calendar: Calendar = .{},
+
+    pub fn init(self: *Logger) void {
+        self.sink = .{};
+        self.calendar.second = null;
+    }
 };
 
 pub fn peer(
@@ -70,7 +76,7 @@ pub fn completed(
     upstream: ?*const Upstream,
     finished_ns: u64,
 ) void {
-    const bytes = format(&logger.buffer, packet, query, input, answer, upstream, .{
+    const bytes = format(logger, packet, query, input, answer, upstream, .{
         .unix_ms = std.Io.Timestamp.now(io, .real).toMilliseconds(),
         .finished_ns = finished_ns,
     }) catch return;
@@ -79,7 +85,7 @@ pub fn completed(
 
 pub const Time = struct { unix_ms: i64, finished_ns: u64 };
 pub fn format(
-    buffer: *[line_bytes_max]u8,
+    logger: *Logger,
     packet: *wire.Packet,
     query: *const Query,
     input: []const u8,
@@ -87,8 +93,8 @@ pub fn format(
     upstream: ?*const Upstream,
     time: Time,
 ) std.Io.Writer.Error![]const u8 {
-    var writer: std.Io.Writer = .fixed(buffer);
-    try timestamp(&writer, time.unix_ms);
+    var writer: std.Io.Writer = .fixed(&logger.buffer);
+    try logger.calendar.write(&writer, time.unix_ms);
     try writer.print(" event=query proto={s} client=", .{@tagName(query.protocol)});
     if (query.client) |client| {
         try writer.print("{f}", .{client});
@@ -170,7 +176,7 @@ fn upstreamFields(writer: *std.Io.Writer, upstream: *const Upstream) std.Io.Writ
 
 pub fn failure(logger: *Logger, io: std.Io, upstream: *const Upstream, reason: []const u8) void {
     var writer: std.Io.Writer = .fixed(&logger.buffer);
-    timestamp(&writer, std.Io.Timestamp.now(io, .real).toMilliseconds()) catch return;
+    logger.calendar.write(&writer, std.Io.Timestamp.now(io, .real).toMilliseconds()) catch return;
     writer.writeAll(" event=upstream_failure") catch return;
     upstreamFields(&writer, upstream) catch return;
     writer.writeAll(" reason=\"") catch return;
@@ -187,28 +193,45 @@ pub fn health(
     failures: u32,
 ) void {
     var writer: std.Io.Writer = .fixed(&logger.buffer);
-    timestamp(&writer, std.Io.Timestamp.now(io, .real).toMilliseconds()) catch return;
+    logger.calendar.write(&writer, std.Io.Timestamp.now(io, .real).toMilliseconds()) catch return;
     writer.writeAll(" event=upstream_health") catch return;
     upstreamFields(&writer, upstream) catch return;
     writer.print(" state={s} failures={d}\n", .{ @tagName(state), failures }) catch return;
     logger.sink.write(io, logger.sink.context, writer.buffered()) catch return;
 }
 
-fn timestamp(writer: *std.Io.Writer, unix_ms: i64) std.Io.Writer.Error!void {
-    if (unix_ms < 0) return writer.writeAll("timestamp=unknown");
-    if (unix_ms > 253402300799999) return writer.writeAll("timestamp=unknown");
-    const seconds: std.time.epoch.EpochSeconds = .{ .secs = @intCast(@divFloor(unix_ms, 1000)) };
-    const day = seconds.getEpochDay();
-    const year = day.calculateYearDay();
-    const month = year.calculateMonthDay();
-    const clock = seconds.getDaySeconds();
-    try writer.print("{d:0>4}-{d:0>2}-{d:0>2}T{d:0>2}:{d:0>2}:{d:0>2}.{d:0>3}Z", .{
-        year.year,
-        @intFromEnum(month.month),
-        month.day_index + 1,
-        clock.getHoursIntoDay(),
-        clock.getMinutesIntoHour(),
-        clock.getSecondsIntoMinute(),
-        @as(u16, @intCast(@mod(unix_ms, 1000))),
-    });
-}
+const Calendar = struct {
+    second: ?u64 = null,
+    prefix: [19]u8 = undefined,
+
+    fn write(self: *Calendar, writer: *std.Io.Writer, unix_ms: i64) std.Io.Writer.Error!void {
+        if (unix_ms < 0) return writer.writeAll("timestamp=unknown");
+        if (unix_ms > 253402300799999) return writer.writeAll("timestamp=unknown");
+        const second: u64 = @intCast(@divFloor(unix_ms, 1000));
+        // Equality also handles backward clock jumps and returns from invalid timestamps.
+        if (self.second != second) try self.refresh(second);
+        try writer.writeAll(&self.prefix);
+        try writer.print(".{d:0>3}Z", .{@as(u16, @intCast(@mod(unix_ms, 1000)))});
+    }
+
+    fn refresh(self: *Calendar, second: u64) std.Io.Writer.Error!void {
+        // Partial output must never retain the previous second's validity tag.
+        self.second = null;
+        const seconds: std.time.epoch.EpochSeconds = .{ .secs = second };
+        const day = seconds.getEpochDay();
+        const year = day.calculateYearDay();
+        const month = year.calculateMonthDay();
+        const clock = seconds.getDaySeconds();
+        var writer: std.Io.Writer = .fixed(&self.prefix);
+        try writer.print("{d:0>4}-{d:0>2}-{d:0>2}T{d:0>2}:{d:0>2}:{d:0>2}", .{
+            year.year,
+            @intFromEnum(month.month),
+            month.day_index + 1,
+            clock.getHoursIntoDay(),
+            clock.getMinutesIntoHour(),
+            clock.getSecondsIntoMinute(),
+        });
+        std.debug.assert(writer.end == self.prefix.len);
+        self.second = second;
+    }
+};
