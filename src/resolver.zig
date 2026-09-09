@@ -30,6 +30,23 @@ pub const Request = struct {
 };
 pub const Answer = struct { bytes: []const u8, source: Source };
 const Local = enum { loopback, reverse, empty };
+const localhost_name = literalName("localhost.");
+const localhost_reverse = literalName("1.0.0.127.in-addr.arpa.");
+const covered_zones = [_]wire.Name{
+    localhost_name,
+    literalName("0.in-addr.arpa."),
+    literalName("127.in-addr.arpa."),
+    literalName("255.in-addr.arpa."),
+};
+
+// Static names avoid repeated text decoding and runtime copies of the returned value.
+fn literalName(comptime text: []const u8) wire.Name {
+    return comptime value: {
+        var name: wire.Name = undefined;
+        name.fromText(text) catch @compileError("Invalid RFC 6761 name literal.");
+        break :value name;
+    };
+}
 
 /// A returned answer bypasses cache, NODATA, hosts, forward, and rotation.
 /// null means the runtime must try its per-zone cache next.
@@ -49,9 +66,7 @@ pub fn beforeCache(
         .reverse => {
             if (request.kind == 12) {
                 const offset = try record(encoder, &request.name, 12, 30);
-                var localhost: wire.Name = undefined;
-                localhost.fromText("localhost.") catch unreachable;
-                try encoder.name(&localhost, .allowed);
+                try encoder.name(&localhost_name, .allowed);
                 encoder.endRecord(offset);
             }
         },
@@ -161,12 +176,8 @@ fn address(
 }
 
 fn covered(name: *const wire.Name) ?Local {
-    var suffix: wire.Name = undefined;
-    suffix.fromText("1.0.0.127.in-addr.arpa.") catch unreachable;
-    if (name.equal(&suffix)) return .reverse;
-    const zones = .{ "localhost.", "0.in-addr.arpa.", "127.in-addr.arpa.", "255.in-addr.arpa." };
-    inline for (zones, 0..) |zone, index| {
-        suffix.fromText(zone) catch unreachable;
+    if (name.equal(&localhost_reverse)) return .reverse;
+    inline for (&covered_zones, 0..) |*suffix, index| {
         var offset: usize = 0;
         while (offset < name.length) {
             if (std.ascii.eqlIgnoreCase(name.wire()[offset..], suffix.wire())) {
