@@ -1,10 +1,9 @@
 //! One cache per routed zone. All methods are synchronous on one event thread.
 //! Output, request bytes and workspace must be disjoint. Delivery is full-size TCP;
 //! the runtime applies rotation and client UDP limits afterward, never before insertion.
-const builtin = @import("builtin");
-const test_fixture = @import("testing/cache.zig");
 const std = @import("std");
 const assert = std.debug.assert;
+const builtin = @import("builtin");
 
 pub const packets = @import("cache/packets.zig");
 const policy = @import("cache/policy.zig");
@@ -12,6 +11,7 @@ const store = @import("cache/store.zig");
 pub const Entry = store.Entry;
 const config = @import("config.zig");
 const resolver = @import("resolver.zig");
+const test_fixture = @import("testing/cache.zig");
 const wire = @import("wire.zig");
 
 pub const Insertion = enum { stored, skipped, exhausted };
@@ -310,7 +310,7 @@ fn deliver(
     output: []u8,
     source: resolver.Source,
 ) wire.Error!resolver.Answer {
-    var cookie: [wire.cookie_option_bytes_max]u8 = undefined;
+    var cookie: wire.Cookie = undefined;
     var edns: wire.rewrite.Edns = .{ .payload_bytes = wire.udp_payload_bytes_default };
     var settings: wire.rewrite.Settings = .{
         .id = request.packet.header.id,

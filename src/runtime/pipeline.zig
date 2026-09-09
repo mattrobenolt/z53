@@ -1,14 +1,14 @@
 //! Synchronous admission and continuation. No packet view survives asynchronous work.
-const builtin = @import("builtin");
-const runtime = @import("../runtime.zig");
 const std = @import("std");
 const Allocator = std.mem.Allocator;
+const builtin = @import("builtin");
 
 pub const resolver = @import("../resolver.zig");
 pub const wire = resolver.wire;
 const config = resolver.config;
 const hosts = resolver.hosts;
 const cache = resolver.cache;
+const runtime = @import("../runtime.zig");
 const udp = @import("udp.zig");
 
 pub const Transport = union(enum) {
@@ -279,7 +279,7 @@ pub const Pipeline = struct {
         };
         try encoder.init(output, &header);
         try encoder.question(&request.name, request.kind, request.class);
-        var cookie: [wire.cookie_option_bytes_max]u8 = undefined;
+        var cookie: wire.Cookie = undefined;
         if (request.packet.opt) |index| {
             const edns: wire.rewrite.Edns = .{
                 .payload_bytes = request.packet.records[index].class,

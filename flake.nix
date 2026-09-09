@@ -74,7 +74,6 @@
               ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [
                 pkgs.perf
                 pkgs.strace
-                # #1: loopback comparisons use the same generator and CPU affinity.
                 pkgs.dnsperf
                 pkgs.coredns
                 pkgs.util-linux

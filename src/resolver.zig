@@ -1,16 +1,16 @@
 //! Synchronous pipeline seams. The runtime routes first, then calls beforeCache;
 //! only its miss permits cache lookup, and only a cache miss permits afterCache.
 //! Output must not overlap the borrowed request packet or encoder workspace.
-const builtin = @import("builtin");
-const test_fixture = @import("testing/resolver.zig");
 const std = @import("std");
 const assert = std.debug.assert;
+const builtin = @import("builtin");
 
 pub const cache = @import("cache.zig");
 pub const config = @import("config.zig");
 pub const hosts = @import("hosts.zig");
 pub const rotation = @import("rotation.zig");
 pub const Source = rotation.Source;
+const test_fixture = @import("testing/resolver.zig");
 pub const wire = @import("wire.zig");
 
 pub const Request = struct {
@@ -129,7 +129,7 @@ fn start(request: *const Request, encoder: *wire.Encoder, output: []u8) wire.Err
 }
 
 fn finish(request: *const Request, encoder: *wire.Encoder, source: Source) wire.Error!Answer {
-    var cookie: [wire.cookie_option_bytes_max]u8 = undefined;
+    var cookie: wire.Cookie = undefined;
     if (request.packet.opt) |index| {
         const options = try wire.rewrite.responseOptions(request.packet, &cookie);
         const edns: wire.rewrite.Edns = .{

@@ -1,7 +1,9 @@
 const std = @import("std");
+pub const testing = std.testing;
+
 pub const resolver = @import("../resolver.zig");
 pub const wire = resolver.wire;
-pub const testing = std.testing;
+
 pub const zone: resolver.config.Zone = .{
     .suffix = ".",
     .upstreams = &.{.{ .address = "127.0.0.1:5300" }},

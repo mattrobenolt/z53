@@ -1,16 +1,16 @@
 //! Bounded DNS views. Input storage must remain immutable while a Packet lives.
-const builtin = @import("builtin");
-const wire = @This();
-const fixture = @import("testing/wire.zig");
-const equivalent_module = @import("testing/equivalent.zig");
 const std = @import("std");
+const builtin = @import("builtin");
 
+const equivalent_module = @import("testing/equivalent.zig");
+const fixture = @import("testing/wire.zig");
 pub const Encoder = @import("wire/encoder.zig").Encoder;
 pub const names = @import("wire/name.zig");
 pub const Name = names.Name;
 pub const rdata = @import("wire/rdata.zig");
 pub const rewrite = @import("wire/rewrite.zig");
 
+const wire = @This();
 /// DNS TYPE values remain open to unknown and private-use records.
 pub const RecordType = enum(u16) {
     a = 1,
@@ -79,6 +79,8 @@ pub const edns_rcode_shift = 24;
 pub const edns_version_shift = 16;
 pub const opcode_mask: u16 = 0x7800;
 pub const request_flags_mask = Flag.mask(&.{ .recursion_desired, .checking_disabled });
+
+pub const Cookie = [cookie_option_bytes_max]u8;
 
 pub const Rcode = enum(u4) {
     noerror = 0,

@@ -1,6 +1,7 @@
 const std = @import("std");
-const wire = @import("../wire.zig");
 const testing = std.testing;
+
+const wire = @import("../wire.zig");
 
 pub fn equivalent(
     source: *wire.Packet,
