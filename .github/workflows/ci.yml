@@ -63,6 +63,7 @@ jobs:
         timeout-minutes: 10
         run: nix develop --no-write-lock-file -c zig build test-runtime -Doptimize=ReleaseSafe -Dcpu=baseline
       - name: Fuzz both wire targets
+        if: ${{ !cancelled() }}
         run: |
           trace=
           attempts=1

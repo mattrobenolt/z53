@@ -753,6 +753,9 @@ test "Darwin native retained EAGAIN bytes destinations and shared filters" {
         const request = try query(&input);
         std.mem.writeInt(u16, input[0..2], @intCast(700 + index), .big);
         try send(sockets[index % 2], request);
+        // Retained writes can wake every step before the next datagram arrives.
+        const listener = first.service.listeners[index % 2].udp.?;
+        try testing.expectEqual(.ready, try socketReady(listener, system.POLL.IN, 1000));
         for (0..64) |_| {
             try testing.expect(try first.service.step());
             if (retainedCount(first.service) == index + 1) break;
