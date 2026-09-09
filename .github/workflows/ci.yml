@@ -1,0 +1,86 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions: {}
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  checks:
+    name: ${{ matrix.system }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    permissions:
+      actions: write # The Nix store cache saves build dependencies.
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - system: x86_64-linux
+            runner: ubuntu-24.04
+          - system: aarch64-linux
+            runner: ubuntu-24.04-arm
+          - system: aarch64-darwin
+            runner: macos-15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install Nix
+        uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31.11.1
+        with:
+          extra_nix_config: |
+            access-tokens =
+            accept-flake-config = false
+      - name: Cache the Nix store
+        uses: DeterminateSystems/magic-nix-cache-action@908b263ff629f4cc17666315b7fd3ec127c6244d # v14
+        with:
+          use-flakehub: false
+      - name: Check the native target
+        env:
+          EXPECTED_SYSTEM: ${{ matrix.system }}
+        run: test "$(nix eval --impure --raw --expr builtins.currentSystem)" = "$EXPECTED_SYSTEM"
+      - name: Build packages and run flake checks
+        run: nix flake check --no-write-lock-file --print-build-logs
+      - name: Check host trust and compile all tests
+        run: nix develop --no-write-lock-file -c zig build test-unit check test-compile -Doptimize=ReleaseSafe -Dcpu=baseline
+      - name: Fuzz both wire targets
+        run: nix develop --no-write-lock-file -c bash scripts/fuzz.sh 20000
+      # Linux socket execution needs a separate kernel 7.2 runner.
+      - name: Run the native kqueue suite
+        if: runner.os == 'macOS'
+        run: nix develop --no-write-lock-file -c zig build test-runtime -Doptimize=ReleaseSafe -Dcpu=baseline
+      - name: Record the package output
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        id: package
+        env:
+          CACHIX_AUTH_TOKEN: ${{ secrets.CACHIX_AUTH_TOKEN }}
+        run: |
+          if [[ -z "$CACHIX_AUTH_TOKEN" ]]; then
+            echo '::error::Set the CACHIX_AUTH_TOKEN repository secret to enable package publication.'
+            exit 1
+          fi
+          package=$(nix path-info --no-write-lock-file .#z53)
+          test -n "$package"
+          printf 'paths=%s\n' "$package" >> "$GITHUB_OUTPUT"
+      - name: Publish the package to Cachix
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: cachix/cachix-action@38b082610b782e7e93e209c35fd730d399dee866 # v17
+        with:
+          name: mattrobenolt
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+          pathsToPush: ${{ steps.package.outputs.paths }}
+          installCommand: nix profile install --inputs-from . nixpkgs#cachix

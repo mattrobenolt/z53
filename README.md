@@ -129,6 +129,31 @@ Before use on port 53, stop any resolver that already binds the address.
 Retain its configuration and the previous system generation for rollback.
 See [packaging and deployment](SPEC.md#8-packaging-and-deployment) for module details.
 
+## CI and binary cache
+
+CI runs on pull requests and `main`. Manual dispatch is also available.
+Each supported target runs `nix flake check`, the host trust tests, and compilation of the integration tests.
+Both wire fuzz targets receive at least 20000 iterations.
+The macOS job also runs the native kqueue suite.
+
+Linux socket tests require kernel 7.2 or newer.
+They remain a separate acceptance gate until CI has a compatible Linux runner.
+Hosted Linux checks do not substitute for that coverage.
+
+Successful pushes to `main` publish the package output and its runtime closure to [mattrobenolt.cachix.org](https://mattrobenolt.cachix.org).
+Pull requests cannot publish packages.
+The upload excludes development shells and test derivations.
+Publication fails if the repository lacks `CACHIX_AUTH_TOKEN`.
+
+Workflow checks use actionlint, pinact, and zizmor.
+pinact verifies SHA pins against their version comments and enforces a three-day release age.
+zizmor reports failures without GitHub Advanced Security.
+
+### Cache credentials
+
+Add a cache-scoped write token as the repository secret `CACHIX_AUTH_TOKEN`.
+Use the repository's [Actions secrets settings](https://github.com/mattrobenolt/z53/settings/secrets/actions).
+
 ## Development
 
 Enter `nix develop`, then run the build and tests:

@@ -878,6 +878,16 @@ CI runs a short benchmark smoke run. In-process timings do not establish end-to-
 - CI runs on all three targets: `zig build test`, `zig fmt --check`, lint,
   and the nix build.
 
+Hosted CI currently runs the flake checks and both fuzz targets on all three systems.
+It also checks host trust and compiles the integration suites.
+The macOS job executes the native socket suite.
+Linux socket execution still requires a kernel 7.2 runner and remains an open acceptance requirement.
+
+Successful pushes to `main` publish package outputs and their runtime closures to `mattrobenolt.cachix.org`.
+Publication requires the repository's `CACHIX_AUTH_TOKEN` secret.
+Pull requests receive no upload credentials.
+Workflow checks enforce action SHA pins and run zizmor without GitHub Advanced Security.
+
 ## 10. Implementation choices
 
 - Proctor design over io_uring and kqueue, thread model, and buffer

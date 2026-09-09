@@ -1,0 +1,57 @@
+name: actions-security
+
+on:
+  pull_request:
+    paths: [".github/**", "flake.nix", "flake.lock", "build.zig.zon"]
+  push:
+    branches: [main]
+    paths: [".github/**", "flake.nix", "flake.lock", "build.zig.zon"]
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  zizmor:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Audit workflows
+        uses: zizmorcore/zizmor-action@3dc1ecc9bcb9e94e9b2c709687979e1298497054 # v0.6.2
+        with:
+          advanced-security: false
+          min-confidence: medium
+
+  pinact:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      actions: write # The Nix store cache saves development tools.
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install Nix
+        uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31.11.1
+        with:
+          extra_nix_config: |
+            access-tokens =
+            accept-flake-config = false
+      - name: Cache the Nix store
+        uses: DeterminateSystems/magic-nix-cache-action@908b263ff629f4cc17666315b7fd3ec127c6244d # v14
+        with:
+          use-flakehub: false
+      - name: Check workflow syntax
+        run: nix develop --no-write-lock-file -c actionlint
+      - name: Verify action pins
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: nix develop --no-write-lock-file -c pinact run --check --verify --min-age 3
