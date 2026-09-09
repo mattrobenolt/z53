@@ -35,6 +35,11 @@ if [[ ! -d $cache/tmp || ! -d $cache/f ]]; then
     echo 'error: fuzz cache directories do not exist'
     exit 8
 fi
+# Concurrent Darwin openat(O_CREAT) calls need existing shared files.
+if [[ ! -f $cache/tmp/libfuzzer.log || ! -f $cache/f/in0 ]]; then
+    echo 'error: shared fuzz files do not exist'
+    exit 8
+fi
 mkdir -p "$cache/o"
 printf 'disposable compiler object\n' >"$cache/o/object"
 case "$Z53_GATE_CASE" in

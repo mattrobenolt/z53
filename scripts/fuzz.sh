@@ -48,9 +48,11 @@ trap 'status=129; exit 129' HUP
 trap 'status=130; exit 130' INT
 trap 'status=143; exit 143' TERM
 : >"$log"
-# Zig's fuzzer opens tmp/libfuzzer.log without creating its parent directory.
-# Prepare shared directories before either fuzz process starts.
+# Concurrent Darwin openat(O_CREAT) calls can fail on first creation.
+# Existing files avoid that race: https://github.com/golang/go/issues/81246.
 mkdir -p "$cache/tmp" "$cache/f"
+: >"$cache/tmp/libfuzzer.log"
+: >"$cache/f/in0"
 # Bash job control gives this asynchronous build its own process group on both targets.
 set -m
 zig build fuzz --fuzz="$iterations" --cache-dir "$cache" --summary all >"$log" 2>&1 &
