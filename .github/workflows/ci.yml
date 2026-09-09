@@ -63,7 +63,24 @@ jobs:
         timeout-minutes: 10
         run: nix develop --no-write-lock-file -c zig build test-runtime -Doptimize=ReleaseSafe -Dcpu=baseline
       - name: Fuzz both wire targets
-        run: nix develop --no-write-lock-file -c bash scripts/fuzz.sh 20000
+        run: |
+          trace=
+          if [[ $(uname -s) == Darwin ]]; then
+            # The runner owns the log. Only the trace command needs root.
+            # shellcheck disable=SC2024
+            sudo /usr/bin/fs_usage -w -f filesys -t 60 > "$RUNNER_TEMP/fuzz-files.log" 2>&1 &
+            trace=$!
+          fi
+          status=0
+          nix develop --no-write-lock-file -c bash scripts/fuzz.sh 20000 || status=$?
+          if [[ -n $trace ]]; then
+            sudo kill "$trace" 2>/dev/null || true
+            wait "$trace" || true
+            if (( status != 0 )); then
+              grep -E 'libfuzzer|run[.]|chdir|in0|failed|error' "$RUNNER_TEMP/fuzz-files.log" || true
+            fi
+          fi
+          exit "$status"
       - name: Realize the package output
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         id: package
