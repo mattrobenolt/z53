@@ -44,7 +44,7 @@
         {
           packages.z53 = build.package;
           packages.default = build.package;
-          formatter = pkgs.nixfmt;
+          formatter = pkgs.nixfmt-tree;
           checks = {
             package = build.package;
             portable = build.portable;
