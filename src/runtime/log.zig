@@ -121,10 +121,9 @@ fn question(
     packet.parse(input) catch return writer.writeAll(" qtype=unknown qname=unknown");
     if (packet.header.counts[0] != 1) return writer.writeAll(" qtype=unknown qname=unknown");
     var cursor: usize = 12;
-    const value = packet.readQuestion(&cursor) catch
-        return writer.writeAll(" qtype=unknown qname=unknown");
     var name: wire.Name = undefined;
-    packet.name(&name, value.name) catch return writer.writeAll(" qtype=unknown qname=unknown");
+    const value = packet.readQuestionInto(&name, &cursor) catch
+        return writer.writeAll(" qtype=unknown qname=unknown");
     try writer.print(" qtype={d} qname=\"", .{value.kind});
     var offset: u16 = 0;
     while (offset < name.length) {

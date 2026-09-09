@@ -420,11 +420,10 @@ pub const Forward = struct {
         var request: pipeline.resolver.Request = undefined;
         request.init(&workspace.request_packet) catch unreachable;
         var cursor: usize = 12;
-        const question = response.readQuestion(&cursor) catch return false;
+        var name: wire.Name = undefined;
+        const question = response.readQuestionInto(&name, &cursor) catch return false;
         if (question.kind != request.kind) return false;
         if (question.class != request.class) return false;
-        var name: wire.Name = undefined;
-        response.name(&name, question.name) catch return false;
         return name.equal(&request.name);
     }
 

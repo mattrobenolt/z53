@@ -116,9 +116,8 @@ pub const Workspace = struct {
         } else {
             var cursor: usize = 12;
             for (0..packet.header.counts[0]) |_| {
-                const question = try packet.readQuestion(&cursor);
                 var name: wire.Name = undefined;
-                try packet.name(&name, question.name);
+                const question = try packet.readQuestionInto(&name, &cursor);
                 try self.encoder.question(&name, question.kind, question.class);
             }
         }
