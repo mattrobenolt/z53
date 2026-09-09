@@ -880,8 +880,9 @@ CI runs a short benchmark smoke run. In-process timings do not establish end-to-
 
 Hosted CI currently runs the flake checks and both fuzz targets on all three systems.
 It also checks host trust and compiles the integration suites.
-The macOS job executes the native socket suite.
-Linux socket execution still requires a kernel 7.2 runner and remains an open acceptance requirement.
+All three jobs execute their native socket suites.
+Ubuntu 26.04 preview runners test Linux 7.0 compatibility and record their kernel versions.
+This experiment does not change the declared kernel minimum in section 1.
 
 Successful pushes to `main` publish package outputs and their runtime closures to `mattrobenolt.cachix.org`.
 Publication requires the repository's `CACHIX_AUTH_TOKEN` secret.

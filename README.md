@@ -134,11 +134,9 @@ See [packaging and deployment](SPEC.md#8-packaging-and-deployment) for module de
 CI runs on pull requests and `main`. Manual dispatch is also available.
 Each supported target runs `nix flake check`, the host trust tests, and compilation of the integration tests.
 Both wire fuzz targets receive at least 20000 iterations.
-The macOS job also runs the native kqueue suite.
-
-Linux socket tests require kernel 7.2 or newer.
-They remain a separate acceptance gate until CI has a compatible Linux runner.
-Hosted Linux checks do not substitute for that coverage.
+Each target also runs its native socket suite.
+The Linux jobs use Ubuntu 26.04 preview runners and record their kernel versions.
+These jobs test Linux 7.0 compatibility. The declared kernel minimum remains 7.2 until the compatibility review completes.
 
 Successful pushes to `main` publish the package output and its runtime closure to [mattrobenolt.cachix.org](https://mattrobenolt.cachix.org).
 Pull requests cannot publish packages.

@@ -29,9 +29,9 @@ jobs:
       matrix:
         include:
           - system: x86_64-linux
-            runner: ubuntu-24.04
+            runner: ubuntu-26.04
           - system: aarch64-linux
-            runner: ubuntu-24.04-arm
+            runner: ubuntu-26.04-arm
           - system: aarch64-darwin
             runner: macos-15
     steps:
@@ -52,17 +52,18 @@ jobs:
       - name: Check the native target
         env:
           EXPECTED_SYSTEM: ${{ matrix.system }}
-        run: test "$(nix eval --impure --raw --expr builtins.currentSystem)" = "$EXPECTED_SYSTEM"
+        run: |
+          uname -a
+          test "$(nix eval --impure --raw --expr builtins.currentSystem)" = "$EXPECTED_SYSTEM"
       - name: Build packages and run flake checks
         run: nix flake check --no-write-lock-file --print-build-logs
       - name: Check host trust and compile all tests
         run: nix develop --no-write-lock-file -c zig build test-unit check test-compile -Doptimize=ReleaseSafe -Dcpu=baseline
+      - name: Run the native socket suite
+        timeout-minutes: 10
+        run: nix develop --no-write-lock-file -c zig build test-runtime -Doptimize=ReleaseSafe -Dcpu=baseline
       - name: Fuzz both wire targets
         run: nix develop --no-write-lock-file -c bash scripts/fuzz.sh 20000
-      # Linux socket execution needs a separate kernel 7.2 runner.
-      - name: Run the native kqueue suite
-        if: runner.os == 'macOS'
-        run: nix develop --no-write-lock-file -c zig build test-runtime -Doptimize=ReleaseSafe -Dcpu=baseline
       - name: Record the package output
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         id: package
