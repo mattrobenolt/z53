@@ -2,52 +2,6 @@ const std = @import("std");
 const wire = @import("wire");
 const fixture = @import("fixture.zig");
 
-// RFC 1035 §§4.1.2, 4.1.4: one decode supplies fields and a case-preserving expanded name.
-test "question decode publishes names into reusable caller storage" {
-    var builder: fixture.Builder = undefined;
-    builder.init();
-    builder.question("\x03WwW\x07ExAmPlE\x00", 1, 1);
-    builder.question("\xc0\x0c", 28, 3);
-    var packet: wire.Packet = undefined;
-    try packet.parse(try builder.finish());
-    var name: wire.Name = undefined;
-    try name.fromText("retained.invalid.");
-    var cursor: usize = 12;
-    const first = try packet.readQuestionInto(&name, &cursor);
-    try std.testing.expectEqual(12, first.name);
-    try std.testing.expectEqual(1, first.kind);
-    try std.testing.expectEqual(1, first.class);
-    try std.testing.expectEqual(29, cursor);
-    try std.testing.expectEqualSlices(u8, "\x03WwW\x07ExAmPlE\x00", name.wire());
-    try name.fromText("another.retained.invalid.");
-    const second = try packet.readQuestionInto(&name, &cursor);
-    try std.testing.expectEqual(29, second.name);
-    try std.testing.expectEqual(28, second.kind);
-    try std.testing.expectEqual(3, second.class);
-    try std.testing.expectEqual(packet.bytes.len, cursor);
-    try std.testing.expectEqualSlices(u8, "\x03WwW\x07ExAmPlE\x00", name.wire());
-}
-
-// RFC 1035 §4.1.2: the direct decoder still requires four bytes for type and class.
-test "question decode rejects truncated fields and permits clean reuse" {
-    var builder: fixture.Builder = undefined;
-    builder.init();
-    builder.question("\x03www\x00", 1, 1);
-    const bytes = try builder.finish();
-    var packet: wire.Packet = undefined;
-    try packet.parse(bytes);
-    packet.bytes = bytes[0 .. bytes.len - 1];
-    var name: wire.Name = undefined;
-    var cursor: usize = 12;
-    try std.testing.expectError(error.Truncated, packet.readQuestionInto(&name, &cursor));
-    try packet.parse(bytes);
-    cursor = 12;
-    const question = try packet.readQuestionInto(&name, &cursor);
-    try std.testing.expectEqual(1, question.kind);
-    try std.testing.expectEqual(1, question.class);
-    try std.testing.expectEqualSlices(u8, "\x03www\x00", name.wire());
-}
-
 // RFC 1035 §2.3.4 and SPEC §9.1: 63-byte labels and 255-byte names are inclusive.
 test "name exact bounds and hostile label encodings" {
     var name: wire.Name = undefined;

@@ -119,15 +119,9 @@ pub const Packet = struct {
 
     pub fn readQuestion(self: *Packet, cursor: *usize) Error!Question {
         var expanded: Name = undefined;
-        return self.readQuestionInto(&expanded, cursor);
-    }
-
-    /// Callers can reuse the decoded name without another walk.
-    /// The output name must not overlap the packet bytes.
-    pub fn readQuestionInto(self: *Packet, expanded: *Name, cursor: *usize) Error!Question {
         const start = cursor.*;
         cursor.* = try names.decode(
-            expanded,
+            &expanded,
             self.bytes,
             start,
             self.bytes.len,

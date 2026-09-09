@@ -21,10 +21,11 @@ pub const Request = struct {
         std.debug.assert(packet.header.opcode() == 0);
         std.debug.assert(!packet.header.has(.response));
         var cursor: usize = 12;
-        const question = try packet.readQuestionInto(&self.name, &cursor);
+        const question = try packet.readQuestion(&cursor);
         self.packet = packet;
         self.kind = question.kind;
         self.class = question.class;
+        try packet.name(&self.name, question.name);
     }
 };
 pub const Answer = struct { bytes: []const u8, source: Source };
