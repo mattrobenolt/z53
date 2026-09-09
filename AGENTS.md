@@ -29,7 +29,7 @@ Run commands directly inside the shell.
 4. Commit the change.
 5. Record results and remaining work on the GitHub issue.
 
-Reference GitHub issues in committed files.
+Reference GitHub issues in commit messages, not routine source comments.
 Keep private work notes out of the repository.
 Run `zig fmt` and both ziglint invocations before every commit:
 
@@ -163,6 +163,9 @@ Record the reason for any deviation from these I/O choices in the design notes.
 Use ordinary kevent operations on macOS.
 
 ## Tests
+
+Keep unit tests beside their implementation.
+Keep socket integration fixtures separate.
 
 Cite the relevant RFC or specification section for every test:
 

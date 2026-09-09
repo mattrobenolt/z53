@@ -1,6 +1,8 @@
 const config = @import("../config.zig");
 const wire = @import("../wire.zig");
 
+const servfail_ttl_s = 5;
+
 pub const Policy = struct {
     bank: enum { positive, denial },
     lifetime_s: u32,
@@ -11,35 +13,39 @@ pub const Policy = struct {
 pub fn classify(
     packet: *const wire.Packet,
     settings: *const config.Cache,
-    question_kind: u16,
+    question_kind: wire.RecordType,
 ) ?Policy {
     if (!packet.header.has(.response)) return null;
     if (packet.header.has(.truncated)) return null;
     if (packet.opt) |index| {
-        if (packet.records[index].ttl_s >> 24 != 0) return null;
+        if (packet.records[index].ttl_s >> wire.edns_rcode_shift != 0) return null;
     }
-    const rcode = packet.header.bits & 15;
-    if (rcode == 2) return .{ .bank = .denial, .lifetime_s = 5, .category = .failure };
-    if (rcode != 0) {
-        if (rcode != 3) return null;
+    const rcode = packet.header.rcode();
+    if (rcode == .servfail) return .{
+        .bank = .denial,
+        .lifetime_s = servfail_ttl_s,
+        .category = .failure,
+    };
+    if (rcode != .noerror) {
+        if (rcode != .nxdomain) return null;
     }
     var denial_s: ?u32 = null;
     var terminal: u16 = 0;
     var positive_s: u32 = settings.max_ttl_s;
     for (packet.records[0..packet.record_count]) |*record| {
-        if (record.kind == 41) continue;
+        if (record.kind == .opt) continue;
         positive_s = @min(positive_s, clamp(record.ttl_s, settings));
         if (record.section == .answer) {
             if (terminalAnswer(record.kind, question_kind)) terminal += 1;
         }
         if (record.section != .authority) continue;
-        if (record.kind != 6) continue;
+        if (record.kind != .soa) continue;
         // The codec validates the SOA layout; MINIMUM is its final u32 (RFC 1035 §3.3.13).
         const minimum_s = wire.integer(u32, packet.bytes[record.data_end - 4 .. record.data_end]);
         const lifetime_s = @min(record.ttl_s, minimum_s);
         denial_s = @min(denial_s orelse lifetime_s, lifetime_s);
     }
-    if (rcode == 3) return denial(denial_s, settings);
+    if (rcode == .nxdomain) return denial(denial_s, settings);
     if (packet.header.counts[1] == 0) return denial(denial_s, settings);
     if (terminal == 0) {
         if (denial_s != null) return denial(denial_s, settings);
@@ -47,12 +53,12 @@ pub fn classify(
     return .{ .bank = .positive, .lifetime_s = positive_s, .category = .answer };
 }
 
-fn terminalAnswer(record_kind: u16, question_kind: u16) bool {
+fn terminalAnswer(record_kind: wire.RecordType, question_kind: wire.RecordType) bool {
     if (record_kind == question_kind) return true;
-    if (question_kind == 255) return true;
-    if (record_kind == 5) return false;
-    if (record_kind == 39) return false;
-    if (record_kind == 46) return false;
+    if (question_kind == .any) return true;
+    if (record_kind == .cname) return false;
+    if (record_kind == .dname) return false;
+    if (record_kind == .rrsig) return false;
     return true;
 }
 
@@ -61,7 +67,7 @@ fn denial(lifetime_s: ?u32, settings: *const config.Cache) ?Policy {
     const seconds = lifetime_s orelse return null;
     return .{
         .bank = .denial,
-        .lifetime_s = @max(5, @min(seconds, settings.denialMaximum())),
+        .lifetime_s = @max(config.denial_ttl_s_min, @min(seconds, settings.denialMaximum())),
         .category = .answer,
     };
 }
@@ -72,7 +78,7 @@ fn clamp(ttl_s: u32, settings: *const config.Cache) u32 {
 
 pub fn apply(packet: *wire.Packet, policy: *const Policy, settings: *const config.Cache) void {
     for (packet.records[0..packet.record_count]) |*record| {
-        if (record.kind == 41) continue;
+        if (record.kind == .opt) continue;
         record.ttl_s = switch (policy.bank) {
             .positive => clamp(record.ttl_s, settings),
             .denial => policy.lifetime_s,

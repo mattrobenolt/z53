@@ -16,9 +16,14 @@ const config = pipeline.resolver.config;
 const tcp = @import("runtime/tcp.zig");
 const datagram = @import("runtime/udp_darwin.zig");
 
-const timer_slot = 32;
-const client_start = 33;
+const timer_slot = 2 * config.listeners_max;
+const client_start = timer_slot + 1;
 const send_start = client_start + tcp.clients_max;
+pub const upstream_start = send_start + config.listeners_max;
+
+comptime {
+    assert(proctor.operations_max == upstream.timer_slot + 1);
+}
 
 pub const Error = error{
     SetupFailed,
@@ -54,13 +59,13 @@ pub const Runtime = struct {
     clients: [tcp.clients_max]tcp.Client,
     descriptors: [tcp.clients_max]?system.fd_t,
     responses: [proctor.buffers_max]datagram.Response,
-    input: [65535]u8,
+    input: [pipeline.wire.message_bytes_max]u8,
     listener_count: u16,
     state: enum { running, stopping },
     io: Io,
     // Scheduler time stays fixed from event dispatch until the next completed wait.
     tick_ns: u64,
-    // #1: injected errno tests retain real Runtime dispatch and kqueue readiness.
+    // injected errno tests retain real Runtime dispatch and kqueue readiness.
     test_send_errno: if (builtin.is_test) ?system.E else void,
     test_send_attempts: if (builtin.is_test) u32 else void,
     pub const test_datagram = if (builtin.is_test) datagram else void;
@@ -107,7 +112,7 @@ pub const Runtime = struct {
         }
         self.tick_ns = try nowNs();
         const now_s = self.tick_ns / std.time.ns_per_s;
-        for (self.pipeline.zones) |*zone| zone.check_s = now_s;
+        for (self.pipeline.zones.items) |*zone| zone.check_s = now_s;
         try self.proctor.arm(timer_slot, timer_slot, system.EVFILT.TIMER);
     }
 
@@ -145,11 +150,11 @@ pub const Runtime = struct {
         }
         const slot = (try self.proctor.next()) orelse return true;
         self.tick_ns = try nowNs();
-        if (slot < 16) {
+        if (slot < config.listeners_max) {
             try self.datagramReady(@intCast(slot));
             try self.receive(@intCast(slot));
         } else if (slot < timer_slot) {
-            try self.accepted(@intCast(slot - 16));
+            try self.accepted(@intCast(slot - config.listeners_max));
         } else if (slot == timer_slot) {
             self.pipeline.reload(self.io, self.tick_ns / std.time.ns_per_s);
             try self.resumeAccepts();
@@ -173,7 +178,7 @@ pub const Runtime = struct {
 
     fn accept(self: *Runtime, index: u16) Error!void {
         try self.proctor.arm(
-            16 + @as(u32, index),
+            config.listeners_max + @as(u32, index),
             @intCast(self.listeners[index].tcp.?),
             system.EVFILT.READ,
         );
@@ -381,7 +386,7 @@ pub const Runtime = struct {
     fn resumeAccepts(self: *Runtime) Error!void {
         if (self.freeClient() == null) return;
         for (0..self.listener_count) |index| {
-            if (self.proctor.registrations[16 + index] != null) continue;
+            if (self.proctor.registrations[config.listeners_max + index] != null) continue;
             try self.accept(@intCast(index));
         }
     }

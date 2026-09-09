@@ -1,4 +1,4 @@
-//! #1: one-shot readiness and a nearest-deadline nanosecond timer own upstream sockets.
+//! One-shot readiness and a nearest-deadline nanosecond timer own upstream sockets.
 const std = @import("std");
 const system = std.c;
 const posix = std.posix;
@@ -7,8 +7,8 @@ const builtin = @import("builtin");
 const runtime = @import("../runtime_darwin.zig");
 const forward = @import("forward.zig");
 
-pub const operation_start = 177;
-pub const timer_slot = 209;
+pub const operation_start = runtime.upstream_start;
+pub const timer_slot = operation_start + forward.sessions_max;
 
 const Operation = struct {
     descriptor: ?system.fd_t = null,
@@ -25,7 +25,7 @@ const ConnectError = union(enum) {
 pub const Driver = struct {
     operations: [forward.sessions_max]Operation,
     timer_deadline_ns: ?u64,
-    // #1: this one-shot fixture replaces SO_ERROR, not kqueue readiness or dispatch.
+    // This one-shot fixture replaces SO_ERROR, not kqueue readiness or dispatch.
     test_connect_error: if (builtin.is_test) ?ConnectError else void,
 
     pub fn init(self: *Driver) void {
@@ -128,7 +128,7 @@ pub const Driver = struct {
 
     fn localFailure(self: *Driver, service: *runtime.Runtime, index: u16) runtime.Error!void {
         _ = self;
-        service.forward.failed(index, "local_resource");
+        service.forward.failed(index, .local_resource);
         const session = &service.forward.sessions[index];
         service.forward.localCompletion(index, .immediate, service.tick_ns);
         session.state = .vacant;
@@ -250,7 +250,10 @@ pub const Driver = struct {
         err: forward.tls.Error,
     ) runtime.Error!void {
         const session = &service.forward.sessions[index];
-        session.failure_reason = session.tls.failure_reason orelse @errorName(err);
+        session.failure_reason = if (session.tls.failure_reason) |cause|
+            .{ .handshake = cause }
+        else
+            .{ .tls_io = err };
         try switch (err) {
             error.LocalFailure => self.abortLocal(service, index),
             error.TransportFailure => self.close(service, index, .retry),
@@ -273,8 +276,8 @@ pub const Driver = struct {
             const session = &service.forward.sessions[index];
             const now_ns = service.tick_ns;
             var reason = session.failure_reason;
-            if (std.mem.eql(u8, reason, "transport_failure")) {
-                if (now_ns >= session.deadline_ns) reason = "timeout";
+            if (reason == .transport_failure) {
+                if (now_ns >= session.deadline_ns) reason = .timeout;
             }
             service.forward.failed(index, reason);
         }

@@ -1,4 +1,4 @@
-//! #1: bounded literal UDP and TCP exchanges. Backends own socket and cancellation barriers.
+//! Bounded literal UDP and TCP exchanges. Backends own socket and cancellation barriers.
 const std = @import("std");
 const Io = std.Io;
 const IpAddress = Io.net.IpAddress;
@@ -9,6 +9,7 @@ const time = std.time;
 const ArrayBuffer = @import("../array_buffer.zig").ArrayBuffer;
 pub const log = @import("log.zig");
 const ownership = @import("ownership.zig");
+const FailureReason = @import("failure.zig").Reason;
 const pipeline = @import("pipeline.zig");
 const config = pipeline.resolver.config;
 const wire = pipeline.wire;
@@ -78,29 +79,30 @@ pub const Session = struct {
     offset: u32,
     length: u32,
     identifier: u16,
-    failure_reason: []const u8,
+    failure_reason: FailureReason,
     disposition: enum { retry, replace, retire } = .retire,
-    input: [wire.message_bytes_max + 2]u8,
-    output: [wire.message_bytes_max + 2]u8,
+    input: [wire.message_bytes_max + wire.frame_prefix_bytes]u8,
+    output: [wire.message_bytes_max + wire.frame_prefix_bytes]u8,
 
     pub fn prefix(self: *Session) void {
         self.state = .read_prefix;
         self.offset = 0;
-        self.length = 2;
+        self.length = wire.frame_prefix_bytes;
     }
 
     pub fn startRead(self: *Session) void {
         if (self.transport != .udp) return self.prefix();
         self.state = .read_datagram;
-        self.offset = 2;
+        self.offset = wire.frame_prefix_bytes;
         self.length = self.input.len;
     }
 
     pub fn received(self: *Session, count: i32) enum { progress, frame, failed } {
         if (self.state == .read_datagram) {
             if (count < 0) return .failed;
-            if (@as(u32, @intCast(count)) > self.input.len - 2) return .failed;
-            self.length = @as(u32, @intCast(count)) + 2;
+            if (@as(u32, @intCast(count)) > self.input.len - wire.frame_prefix_bytes)
+                return .failed;
+            self.length = @as(u32, @intCast(count)) + wire.frame_prefix_bytes;
             return .frame;
         }
         switch (self.state) {
@@ -112,10 +114,10 @@ pub const Session = struct {
         self.offset += @intCast(count);
         if (self.offset < self.length) return .progress;
         if (self.state == .read_body) return .frame;
-        const length: u32 = wire.integer(u16, self.input[0..2]);
-        if (length < 12) return .failed;
+        const length: u32 = wire.integer(u16, self.input[0..wire.frame_prefix_bytes]);
+        if (length < wire.header_bytes) return .failed;
         self.state = .read_body;
-        self.length = length + 2;
+        self.length = length + wire.frame_prefix_bytes;
         return .progress;
     }
 };
@@ -261,7 +263,7 @@ pub const Forward = struct {
         session.transaction = index;
         session.endpoint = endpoint;
         session.transport = transport;
-        session.failure_reason = "transport_failure";
+        session.failure_reason = .transport_failure;
         session.deadline_ns = now_ns +
             duration(self.config.zones[transaction.zone].read_timeout_s);
         return selected;
@@ -407,7 +409,7 @@ pub const Forward = struct {
         };
         const bytes = try workspace.cache_workspace.rewrite.rewrite(
             &workspace.request_packet,
-            session.output[2..],
+            session.output[wire.frame_prefix_bytes..],
             &settings,
         );
         if (session.transport == .udp) {
@@ -420,8 +422,8 @@ pub const Forward = struct {
         }
         try wire.framePrefix(&session.output, bytes.len);
         // Datagram payloads share the response layout but never send the TCP length prefix.
-        session.offset = if (session.transport == .udp) 2 else 0;
-        session.length = @intCast(bytes.len + 2);
+        session.offset = if (session.transport == .udp) wire.frame_prefix_bytes else 0;
+        session.length = @intCast(bytes.len + wire.frame_prefix_bytes);
         if (session.transport == .tls) session.tls.begin(session.length);
     }
 
@@ -436,7 +438,7 @@ pub const Forward = struct {
         if (peer.endpoint != session.endpoint) return false;
         if (peer.generation != session.generation) return false;
         const response = &workspace.response_packet;
-        response.parse(session.input[2..session.length]) catch return false;
+        response.parse(session.input[wire.frame_prefix_bytes..session.length]) catch return false;
         if (response.header.id != session.identifier) return false;
         if (!response.header.has(.response)) return false;
         if (response.header.opcode() != 0) return false;
@@ -445,7 +447,7 @@ pub const Forward = struct {
         workspace.request_packet.parse(transaction.input[0..transaction.length]) catch unreachable;
         var request: pipeline.resolver.Request = undefined;
         request.init(&workspace.request_packet) catch unreachable;
-        var cursor: usize = 12;
+        var cursor: usize = wire.header_bytes;
         const question = response.readQuestion(&cursor) catch return false;
         if (question.kind != request.kind) return false;
         if (question.class != request.class) return false;
@@ -561,7 +563,7 @@ pub const Forward = struct {
         };
     }
 
-    pub fn failed(self: *Forward, index: u16, reason: []const u8) void {
+    pub fn failed(self: *Forward, index: u16, reason: FailureReason) void {
         const selected = self.selectedUpstream(index);
         log.failure(&self.logger, self.io, &selected, reason);
     }
@@ -570,7 +572,7 @@ pub const Forward = struct {
         const session = &self.sessions[index];
         assert(session.state == .idle);
         assert(session.transaction != null);
-        return session.input[2..session.length];
+        return session.input[wire.frame_prefix_bytes..session.length];
     }
 
     pub fn localCompletion(

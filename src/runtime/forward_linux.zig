@@ -1,4 +1,4 @@
-//! #1: each linked pair retains both completions and both explicit cancellation barriers.
+//! Each linked pair retains both completions and both explicit cancellation barriers.
 const std = @import("std");
 const linux = std.os.linux;
 const assert = std.debug.assert;
@@ -8,9 +8,9 @@ const runtime = @import("../runtime_linux.zig");
 const forward = @import("forward.zig");
 const retired = forward.retired;
 
-pub const operation_start = 225;
-pub const timer_slot = 289;
-pub const file_start = 160;
+pub const operation_start = runtime.upstream_start;
+pub const timer_slot = operation_start + 2 * forward.sessions_max;
+pub const file_start = runtime.proctor.client_file_start + runtime.tcp.clients_max;
 
 const Operation = struct {
     kind: enum { none, pair, close } = .none,
@@ -103,7 +103,7 @@ pub const Driver = struct {
 
     fn localFailure(self: *Driver, service: *runtime.Runtime, index: u16) runtime.Error!void {
         _ = self;
-        service.forward.failed(index, "local_resource");
+        service.forward.failed(index, .local_resource);
         const session = &service.forward.sessions[index];
         service.forward.localCompletion(index, .immediate, service.tick_ns);
         session.state = .vacant;
@@ -204,13 +204,13 @@ pub const Driver = struct {
         switch (completionError(timeout_result)) {
             .CANCELED, .ALREADY, .NOENT => {},
             .TIME => {
-                service.forward.sessions[index].failure_reason = "timeout";
+                service.forward.sessions[index].failure_reason = .timeout;
                 return self.close(service, index, .retry);
             },
             else => return error.InvalidCompletion,
         }
         if (count < 0) {
-            service.forward.sessions[index].failure_reason = @tagName(completionError(count));
+            service.forward.sessions[index].failure_reason = .{ .socket = completionError(count) };
             return switch (completionError(count)) {
                 .CANCELED => self.abortLocal(service, index),
                 .MFILE, .NFILE, .NOBUFS, .NOMEM => self.abortLocal(service, index),
@@ -287,7 +287,10 @@ pub const Driver = struct {
         err: forward.tls.Error,
     ) runtime.Error!void {
         const session = &service.forward.sessions[index];
-        session.failure_reason = session.tls.failure_reason orelse @errorName(err);
+        session.failure_reason = if (session.tls.failure_reason) |cause|
+            .{ .handshake = cause }
+        else
+            .{ .tls_io = err };
         switch (err) {
             error.LocalFailure => try self.abortLocal(service, index),
             error.TransportFailure => try self.close(service, index, .retry),
@@ -304,8 +307,8 @@ pub const Driver = struct {
             const session = &service.forward.sessions[index];
             const now_ns = service.tick_ns;
             var reason = session.failure_reason;
-            if (std.mem.eql(u8, reason, "transport_failure")) {
-                if (now_ns >= session.deadline_ns) reason = "timeout";
+            if (reason == .transport_failure) {
+                if (now_ns >= session.deadline_ns) reason = .timeout;
             }
             service.forward.failed(index, reason);
         }

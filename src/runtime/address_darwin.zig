@@ -16,8 +16,8 @@ pub const Address = struct {
 
     pub fn parse(self: *Address, text: []const u8) Error!void {
         var endpoint: config.Endpoint = undefined;
-        endpoint.parse(text, 53) catch unreachable;
-        // #1: bootstrap must add listener hostname resolution before final acceptance.
+        endpoint.parse(text, config.dns_port) catch unreachable;
+        // Listener sockets require literal addresses.
         const ip = IpAddress.parse(endpoint.host, endpoint.port) catch
             return error.UnresolvedListener;
         self.fromIp(&ip);

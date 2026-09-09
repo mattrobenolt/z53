@@ -1,4 +1,4 @@
-//! DNS packet classes share one fixed backing allocation (#1).
+//! DNS packet classes share one fixed backing allocation.
 //! Pool arenas and free-list nodes stay inside that allocation. Classes never rebalance.
 const std = @import("std");
 const assert = std.debug.assert;

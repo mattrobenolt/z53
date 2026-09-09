@@ -1,3 +1,5 @@
+const builtin = @import("builtin");
+const fixture = @import("../testing/wire.zig");
 const std = @import("std");
 const Wyhash = std.hash.Wyhash;
 const assert = std.debug.assert;
@@ -11,15 +13,15 @@ pub const Encoder = struct {
     output: []u8,
     cursor: usize,
     header: wire.Header,
-    dictionary: [16384]u16,
-    occupied: names.ScratchSet(16384),
+    dictionary: [names.compression_targets_max]u16,
+    occupied: names.ScratchSet(names.compression_targets_max),
     boundaries: names.Boundaries,
     section: wire.Section,
 
     pub fn init(self: *Encoder, output: []u8, header: *const wire.Header) wire.Error!void {
-        if (output.len < 12) return error.NoSpace;
+        if (output.len < wire.header_bytes) return error.NoSpace;
         self.output = output[0..@min(output.len, wire.message_bytes_max)];
-        self.cursor = 12;
+        self.cursor = wire.header_bytes;
         self.header = header.*;
         self.header.counts = @splat(0);
         self.occupied.init();
@@ -55,7 +57,7 @@ pub const Encoder = struct {
         while (index + 1 < value.length) {
             if (compression == .allowed) {
                 if (self.lookup(value.wire()[index..])) |offset| {
-                    try self.number(u16, 0xc000 | offset);
+                    try self.number(u16, names.pointer_tag | offset);
                     break;
                 }
             }
@@ -67,7 +69,7 @@ pub const Encoder = struct {
         var suffix: usize = 0;
         while (suffix <= index) {
             const offset = start + suffix;
-            if (offset >= 16384) break;
+            if (offset >= names.compression_targets_max) break;
             self.boundaries.set(offset);
             if (suffix + 1 == value.length) break;
             self.insert(value.wire()[suffix..], @intCast(offset));
@@ -110,12 +112,12 @@ pub const Encoder = struct {
     pub fn question(
         self: *Encoder,
         value: *const wire.Name,
-        kind: u16,
+        kind: wire.RecordType,
         class: u16,
     ) wire.Error!void {
         if (self.section != .question) return error.InvalidOrder;
         try self.name(value, .allowed);
-        try self.number(u16, kind);
+        try self.number(u16, @intFromEnum(kind));
         try self.number(u16, class);
         self.header.counts[0] += 1;
     }
@@ -130,7 +132,7 @@ pub const Encoder = struct {
         if (@intFromEnum(value.section) < @intFromEnum(self.section)) return error.InvalidOrder;
         self.section = value.section;
         try self.name(owner, .allowed);
-        try self.number(u16, value.kind);
+        try self.number(u16, @intFromEnum(value.kind));
         try self.number(u16, value.class);
         try self.number(u32, value.ttl_s);
         const offset = self.cursor;
@@ -162,5 +164,144 @@ pub const Encoder = struct {
             }
         }
         self.endRecord(length_offset);
+    }
+};
+
+comptime {
+    if (builtin.is_test) _ = WireTestsReuse;
+}
+
+const WireTestsReuse = struct {
+    const testing = std.testing;
+
+    // SPEC §§1.10, 3.9: dirty scratch words remain unavailable after a logical reset.
+    test "scratch bitmaps retain backing words and reject stale bits" {
+        inline for (.{ wire.records_max, 16384, 65536 }) |capacity| {
+            var bits: wire.names.ScratchSet(capacity) = undefined;
+            bits.bits = .initFull();
+            const original = bits.bits;
+            bits.init();
+            for (0..capacity) |index| try testing.expect(!bits.isSet(index));
+            try testing.expectEqualSlices(u64, &original.masks, &bits.bits.masks);
+            // Each first write must replace the dirty word, including its neighboring bits.
+            for (0..bits.bits.masks.len) |word| {
+                const offset = @min(capacity - 1, word * 64 + word % 64);
+                bits.set(offset);
+                for (word * 64..@min(capacity, word * 64 + 64)) |index| {
+                    try testing.expectEqual(index == offset, bits.isSet(index));
+                }
+            }
+            bits.init();
+            for (0..capacity) |index| try testing.expect(!bits.isSet(index));
+            bits.set(capacity - 1);
+            try testing.expect(bits.isSet(capacity - 1));
+            try testing.expect(!bits.isSet(capacity - 2));
+            try testing.expect(!bits.isSet(0));
+        }
+    }
+
+    // RFC 1035 §4.1.4 and RFC 3597 §4: old packet provenance cannot admit a new pointer.
+    test "packet reuse rejects stale opaque provenance after success and failure" {
+        var builder: fixture.Builder = undefined;
+        var packet: wire.Packet = undefined;
+        for (0..3) |_| {
+            builder.init();
+            builder.record("\x00", 65400, .answer, "\x01x\x00\x00");
+            builder.record("\xc0\x17", 1, .answer, &.{ 127, 0, 0, 1 });
+            try packet.parse(try builder.finish());
+            // An IN A payload has the same shape but supplies no legal pointer target.
+            wire.put(u16, builder.bytes[13..15], 1);
+            try testing.expectError(error.InvalidPointer, packet.parse(try builder.finish()));
+            try testing.expectError(error.InvalidPointer, packet.parse(try builder.finish()));
+        }
+    }
+
+    // RFC 1035 §4.1.4: a reused compression dictionary refers only to the current output.
+    test "encoder reset retains dirty offsets without retaining old names" {
+        var encoder: wire.Encoder = undefined;
+        @memset(&encoder.dictionary, 65535);
+        var output: [512]u8 = undefined;
+        var packet: wire.Packet = undefined;
+        for ([_][]const u8{
+            "long.old.example.",
+            "x.",
+            "long.old.example.",
+            "y.new.example.",
+        }) |text| {
+            const before = std.hash.Wyhash.hash(0, std.mem.sliceAsBytes(&encoder.dictionary));
+            try encoder.init(&output, &.{});
+            const after = std.hash.Wyhash.hash(0, std.mem.sliceAsBytes(&encoder.dictionary));
+            try testing.expectEqual(before, after);
+            var name: wire.Name = undefined;
+            try name.fromText(text);
+            try encoder.question(&name, .a, 1);
+            try encoder.question(&name, .aaaa, 1);
+            try packet.parse(try encoder.finish());
+            var decoded: wire.Name = undefined;
+            try packet.name(&decoded, 12);
+            try testing.expectEqualSlices(u8, name.wire(), decoded.wire());
+            const second = 12 + name.length + 4;
+            try testing.expectEqualSlices(u8, "\xc0\x0c", output[second..][0..2]);
+        }
+    }
+
+    // RFC 3597 §4: a name inspection does not publish new parser provenance.
+    test "name inspection preserves opaque boundary state" {
+        var builder: fixture.Builder = undefined;
+        builder.init();
+        builder.record("\x00", 65400, .answer, "\x01x\x07example\x00");
+        var packet: wire.Packet = undefined;
+        try packet.parse(try builder.finish());
+        const offset = packet.records[0].data_start;
+        try testing.expect(!packet.boundaries.isSet(offset));
+        var name: wire.Name = undefined;
+        try packet.name(&name, offset);
+        try testing.expectEqualSlices(u8, "\x01x\x07example\x00", name.wire());
+        try testing.expect(!packet.boundaries.isSet(offset));
+    }
+};
+
+comptime {
+    if (builtin.is_test) _ = WireTestsCompressionReuse;
+}
+
+const WireTestsCompressionReuse = struct {
+    const testing = std.testing;
+
+    // RFC 1035 §4.1.4 and SPEC §3.9: collisions and failed encodes cannot leak old offsets.
+    test "compression collisions survive dirty reuse and an encoding failure" {
+        var query_names: [2]wire.Name = undefined;
+        try query_names[0].fromText("collision.example.");
+        try query_names[1].fromText("x7334.example.");
+        const bucket = std.hash.Wyhash.hash(0, query_names[0].wire()) % 16384;
+        try testing.expectEqual(bucket, std.hash.Wyhash.hash(0, query_names[1].wire()) % 16384);
+        var encoder: wire.Encoder = undefined;
+        var output: [512]u8 = undefined;
+        for (0..3) |_| {
+            try encoder.init(&output, &.{});
+            try testing.expect(!encoder.occupied.isSet(bucket));
+            for (0..4) |index| try encoder.question(&query_names[index % 2], .a, 1);
+            var packet: wire.Packet = undefined;
+            try packet.parse(try encoder.finish());
+            var cursor: usize = 12;
+            for (0..4) |index| {
+                const question = try packet.readQuestion(&cursor);
+                var decoded: wire.Name = undefined;
+                try packet.name(&decoded, question.name);
+                try testing.expectEqualSlices(u8, query_names[index % 2].wire(), decoded.wire());
+            }
+            // The name enters the dictionary before the question's final class field fails.
+            const limit = 12 + @as(usize, query_names[0].length) + 2;
+            try encoder.init(output[0..limit], &.{});
+            try testing.expectError(error.NoSpace, encoder.question(&query_names[0], .a, 1));
+            try testing.expect(encoder.occupied.isSet(bucket));
+            try encoder.init(&output, &.{ .id = 0xbeef });
+            try testing.expect(!encoder.occupied.isSet(bucket));
+            try encoder.question(&query_names[1], .aaaa, 1);
+            try packet.parse(try encoder.finish());
+            var decoded: wire.Name = undefined;
+            try packet.name(&decoded, 12);
+            try testing.expectEqualSlices(u8, query_names[1].wire(), decoded.wire());
+        }
     }
 };

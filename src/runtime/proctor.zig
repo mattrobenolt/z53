@@ -10,13 +10,19 @@ const page_size_min = std.heap.page_size_min;
 const alignForward = std.mem.alignForward;
 const builtin = @import("builtin");
 
+const wire = @import("../wire.zig");
+const config = @import("../config.zig");
+const tcp = @import("tcp.zig");
 const ownership = @import("ownership.zig");
 pub const Ownership = ownership.Ownership;
 
+pub const ring_entries = 512;
+pub const client_file_start = 2 * config.listeners_max;
 pub const operations_max = 290;
 pub const mapping_bytes_max = 256 * 1024;
 pub const buffers_max = 64;
-pub const buffer_bytes = 65535 + 16 + @sizeOf(linux.sockaddr.storage);
+pub const buffer_bytes = wire.message_bytes_max +
+    @sizeOf(linux.io_uring_recvmsg_out) + @sizeOf(linux.sockaddr.storage);
 pub const cancel_bit: u64 = 1 << 63;
 
 pub const Error = error{
@@ -28,7 +34,7 @@ pub const Error = error{
     GenerationExhausted,
 };
 
-// #1: the external test record survives Runtime destruction. Production retains no slot.
+// The external test record survives Runtime destruction. Production retains no slot.
 pub const TeardownObserver = struct {
     context: *anyopaque,
     cancellation_result: ?usize = null,
@@ -49,7 +55,7 @@ pub const Proctor = struct {
         if (builtin.is_test) self.teardown_observer = null;
         self.ownership = @splat(.{});
         const flags = linux.IORING_SETUP_SINGLE_ISSUER | linux.IORING_SETUP_DEFER_TASKRUN;
-        self.ring = Ring.init(512, flags) catch |err| {
+        self.ring = Ring.init(ring_entries, flags) catch |err| {
             print("z53: io_uring setup: {s}\n", .{@errorName(err)});
             return error.SetupFailed;
         };
@@ -141,13 +147,13 @@ pub const Proctor = struct {
     }
 
     fn teardownSubmit(self: *Proctor, deadline_ns: u64) TeardownError!void {
-        // Each successful enter consumes at least one of the existing 512 SQEs.
-        for (0..512) |_| {
+        // Each successful enter consumes at least one of the queued SQEs.
+        for (0..ring_entries) |_| {
             _ = try teardownRemaining(deadline_ns);
             try self.teardownDropped();
             const queued = self.ring.sq_ready();
             if (queued == 0) return;
-            if (queued > 512) return error.TeardownSubmissionFailed;
+            if (queued > ring_entries) return error.TeardownSubmissionFailed;
             const submitted = self.ring.submit() catch return error.TeardownSubmissionFailed;
             if (submitted == 0) return error.TeardownSubmissionFailed;
             if (submitted > queued) return error.TeardownSubmissionFailed;
@@ -206,7 +212,7 @@ pub const Proctor = struct {
             .pad = 0,
             .ts = @intFromPtr(&deadline),
         };
-        // #1: v7.2.3 UAPI defines ABS_TIMER at bit 5. Pinned std lacks this constant.
+        // v7.2.3 UAPI defines ABS_TIMER at bit 5. Pinned std lacks this constant.
         const absolute_timer = 1 << 5;
         // The std wrapper fixes argsz to NSIG/8 instead of sizeof(getevents_arg).
         const result = linux.syscall6(
@@ -234,8 +240,12 @@ pub const Proctor = struct {
     }
 
     pub fn registerClients(self: *Proctor) Error!void {
-        // #1: pinned std passes sizeof(range), but this opcode requires nr_args=0.
-        const range: linux.io_uring_file_index_range = .{ .off = 32, .len = 128, .resv = 0 };
+        // pinned std passes sizeof(range), but this opcode requires nr_args=0.
+        const range: linux.io_uring_file_index_range = .{
+            .off = client_file_start,
+            .len = tcp.clients_max,
+            .resv = 0,
+        };
         const result = linux.io_uring_register(self.ring.fd, .REGISTER_FILE_ALLOC_RANGE, &range, 0);
         if (linux.errno(result) != .SUCCESS) return error.RegistrationFailed;
     }
@@ -308,7 +318,7 @@ pub const Proctor = struct {
     }
 };
 
-// #1: low token bits cannot alias any normal or cancellation owner index.
+// low token bits cannot alias any normal or cancellation owner index.
 const teardown_token: u64 = std.math.maxInt(u64);
 // 1024 published + 290 terminals + 290 acknowledgements + 64 UDP shots + 256 accepts + marker.
 const teardown_completions_max = 2048;

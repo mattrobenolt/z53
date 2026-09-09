@@ -50,11 +50,11 @@ fn message(output: []u8, index: u16, kind: enum { query, response }) ![]const u8
     try name.fromText(try std.fmt.bufPrint(&text, "host{d}.bench.example.", .{index}));
     var encoder: wire.Encoder = undefined;
     try encoder.init(output, &.{ .id = index, .bits = if (kind == .query) 0x100 else 0x8180 });
-    try encoder.question(&name, 1, 1);
+    try encoder.question(&name, .a, 1);
     if (kind == .response) {
         const record: wire.Record = .{
             .owner = 0,
-            .kind = 1,
+            .kind = .a,
             .class = 1,
             .ttl_s = 300,
             .data_start = 0,

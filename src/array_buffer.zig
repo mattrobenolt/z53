@@ -1,4 +1,4 @@
-//! #1: bounded append-only storage. Clear the active length without touching retained elements.
+//! Bounded append-only storage. Clear the active length without touching retained elements.
 const std = @import("std");
 const testing = std.testing;
 

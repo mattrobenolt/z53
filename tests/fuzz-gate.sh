@@ -57,12 +57,12 @@ case "$Z53_GATE_CASE" in
     panic) echo 'thread 123 panic: injected failing invariant' ;;
 esac
 if [[ $Z53_GATE_CASE == no-report ]]; then exit 0; fi
-echo 'Fuzz test: "fuzz.test.fuzz DNS decoder and safe rewrites" (abc)'
+echo 'Fuzz test: "wire.FuzzTests.test.fuzz DNS decoder and safe rewrites" (abc)'
 echo 'Runs: 0 -> 20'
 case "$Z53_GATE_CASE" in
     missing-target) exit 0 ;;
     duplicate-target)
-        echo 'Fuzz test: "fuzz.test.fuzz DNS decoder and safe rewrites" (abc)'
+        echo 'Fuzz test: "wire.FuzzTests.test.fuzz DNS decoder and safe rewrites" (abc)'
         echo 'Runs: 0 -> 20'
         ;;
     unknown-target)
@@ -70,7 +70,7 @@ case "$Z53_GATE_CASE" in
         echo 'Runs: 0 -> 20'
         ;;
 esac
-echo 'Fuzz test: "fuzz.test.fuzz structured DNS record relocation" (def)'
+echo 'Fuzz test: "wire.FuzzTests.test.fuzz structured DNS record relocation" (def)'
 case "$Z53_GATE_CASE" in
     no-runs) ;;
     too-few) echo 'Runs: 0 -> 9' ;;

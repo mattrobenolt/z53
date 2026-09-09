@@ -108,7 +108,7 @@ fn queryName(output: []u8, text: []const u8, kind: u16) ![]const u8 {
     var name: wire.Name = undefined;
     try name.fromText(text);
     try encoder.init(output, &.{ .id = 345, .bits = 0x100 });
-    try encoder.question(&name, kind, 1);
+    try encoder.question(&name, @enumFromInt(kind), 1);
     return encoder.finish();
 }
 
@@ -258,19 +258,19 @@ test "native hosts reload timer failure retry and disabled checks" {
     harness.zones[0].hosts = .{ .path = path, .reload_s = 1 };
     try harness.start();
     defer harness.deinit();
-    const store = &harness.service.pipeline.zones[0].hosts.?;
-    try testing.expectEqual(@as(u16, 1), store.table().count);
+    const store = &harness.service.pipeline.zones.items[0].hosts.?;
+    try testing.expectEqual(@as(usize, 1), store.table().entries().len);
     try temporary.dir.deleteFile(testing.io, "hosts");
     try testing.expect(try harness.service.step());
     try testing.expectEqual(@as(?i128, 100 * std.time.ns_per_s), store.mtime);
     try hostsFile(temporary.dir, "", 101);
     try testing.expect(try harness.service.step());
-    try testing.expectEqual(@as(u16, 0), store.table().count);
+    try testing.expectEqual(@as(usize, 0), store.table().entries().len);
     try testing.expectEqual(@as(?i128, 101 * std.time.ns_per_s), store.mtime);
     harness.zones[0].hosts.?.reload_s = 0;
     try hostsFile(temporary.dir, "192.0.2.2 ignored\n", 102);
     try testing.expect(try harness.service.step());
-    try testing.expectEqual(@as(u16, 0), store.table().count);
+    try testing.expectEqual(@as(usize, 0), store.table().entries().len);
     try harness.stop();
 }
 

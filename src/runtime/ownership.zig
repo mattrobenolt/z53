@@ -1,4 +1,6 @@
 //! A slot cannot rearm until both the target and its cancellation acknowledge completion.
+const builtin = @import("builtin");
+const runtime = @import("../runtime.zig");
 const std = @import("std");
 const assert = std.debug.assert;
 
@@ -48,5 +50,51 @@ pub const Ownership = struct {
                 else => return error.InvalidCompletion,
             },
         }
+    }
+};
+
+comptime {
+    if (builtin.is_test) _ = RuntimeUnitTests;
+}
+
+const RuntimeUnitTests = struct {
+    const testing = std.testing;
+    const linux = std.os.linux;
+    const wire = runtime.pipeline.wire;
+
+    // SPEC §1: cancellation and target completion jointly release ownership, in either order.
+    test "completion generations and cancellation barriers" {
+        var owner: runtime.proctor.Ownership = .{};
+        const first = try owner.arm(4);
+        try owner.complete(first, .more);
+        owner.cancel();
+        try owner.complete(first, .terminal);
+        try testing.expectEqual(.target_done, owner.state);
+        try owner.complete(first, .cancellation);
+        const second = try owner.arm(4);
+        try testing.expectError(error.InvalidCompletion, owner.complete(first, .terminal));
+        owner.cancel();
+        try owner.complete(second, .cancellation);
+        try testing.expectEqual(.cancel_done, owner.state);
+        try owner.complete(second, .more);
+        try owner.complete(second, .terminal);
+        try testing.expectEqual(.idle, owner.state);
+        owner.generation = std.math.maxInt(u31);
+        try testing.expectError(error.GenerationExhausted, owner.arm(4));
+    }
+
+    // SPEC §1: one-shot readiness consumption or synchronous deletion permits reuse, not replay.
+    test "readiness ownership releases exactly once and rejects stale reuse" {
+        var owner: runtime.proctor.Ownership = .{};
+        const ready = try owner.arm(7);
+        try owner.complete(ready, .terminal);
+        try testing.expectEqual(.idle, owner.state);
+        try testing.expectError(error.InvalidCompletion, owner.complete(ready, .terminal));
+        const replacement = try owner.arm(7);
+        try testing.expectError(error.InvalidCompletion, owner.complete(ready, .terminal));
+        try testing.expectEqual(.active, owner.state);
+        // The kqueue backend completes terminal ownership only after EV_DELETE succeeds.
+        try owner.complete(replacement, .terminal);
+        try testing.expectEqual(.idle, owner.state);
     }
 };

@@ -15,9 +15,14 @@ const linux = proctor.linux;
 pub const tcp = @import("runtime/tcp.zig");
 pub const udp = @import("runtime/udp.zig");
 
-const client_start = 33;
+const timer_slot = 2 * config.listeners_max;
+const client_start = timer_slot + 1;
 const response_start = client_start + tcp.clients_max;
-const timer_slot = 32;
+pub const upstream_start = response_start + proctor.buffers_max;
+
+comptime {
+    assert(proctor.operations_max == upstream.timer_slot + 1);
+}
 
 pub const Error = error{
     ClockFailed,
@@ -93,7 +98,7 @@ pub const Runtime = struct {
         try self.proctor.init();
         errdefer self.proctor.deinit();
         errdefer self.closeDescriptors();
-        self.proctor.ring.register_files_sparse(192) catch
+        self.proctor.ring.register_files_sparse(upstream.file_start + forwarding.sessions_max) catch
             return error.RegistrationFailed;
         try self.proctor.registerClients();
         for (settings.listen, 0..) |text, index| try self.bindListener(@intCast(index), text);
@@ -103,7 +108,7 @@ pub const Runtime = struct {
         }
         self.tick_ns = try nowNs();
         const now_s = self.tick_ns / std.time.ns_per_s;
-        for (self.pipeline.zones) |*zone| zone.check_s = now_s;
+        for (self.pipeline.zones.items) |*zone| zone.check_s = now_s;
         try self.timer();
     }
 
@@ -156,7 +161,7 @@ pub const Runtime = struct {
     }
 
     fn accept(self: *Runtime, index: u16) Error!void {
-        const token = try self.proctor.arm(16 + @as(u32, index));
+        const token = try self.proctor.arm(config.listeners_max + @as(u32, index));
         const entry = self.proctor.ring.accept_multishot_direct(
             token,
             @as(i32, index) * 2 + 1,
@@ -196,10 +201,10 @@ pub const Runtime = struct {
             return true;
         }
         if (completion.user_data & proctor.cancel_bit != 0) return true;
-        if (slot < 16) {
+        if (slot < config.listeners_max) {
             try self.datagram(@intCast(slot), &completion);
-        } else if (slot < 32) {
-            try self.accepted(@intCast(slot - 16), &completion);
+        } else if (slot < timer_slot) {
+            try self.accepted(@intCast(slot - config.listeners_max), &completion);
         } else if (slot == timer_slot) {
             if (self.state == .running) {
                 if (completion.err() != .TIME) return error.TransportFailed;
@@ -377,9 +382,12 @@ pub const Runtime = struct {
 
     fn accepted(self: *Runtime, listener: u16, completion: *const linux.io_uring_cqe) Error!void {
         if (completion.res >= 0) {
-            if (completion.res < 32) return error.InvalidCompletion;
-            if (completion.res >= 32 + tcp.clients_max) return error.InvalidCompletion;
-            if (self.state == .running) try self.addClient(@intCast(completion.res - 32));
+            if (completion.res < proctor.client_file_start) return error.InvalidCompletion;
+            if (completion.res >= proctor.client_file_start + tcp.clients_max)
+                return error.InvalidCompletion;
+            if (self.state == .running) try self.addClient(
+                @intCast(completion.res - proctor.client_file_start),
+            );
         }
         if (self.state == .stopping) return;
         if (completion.res < 0) {
@@ -422,7 +430,7 @@ pub const Runtime = struct {
         // liburing io_uring_prep_cmd_getsockname defines these SQE aliases.
         entry.prep_rw(
             .URING_CMD,
-            32 + @as(i32, index),
+            proctor.client_file_start + @as(i32, index),
             @intFromPtr(&peer_address.address.storage),
             0,
             5,
@@ -437,7 +445,7 @@ pub const Runtime = struct {
         const client_value = &self.clients[index];
         if (client_value.phase == .waiting) return;
         const token = try self.proctor.arm(client_start + @as(u32, index));
-        const descriptor: i32 = 32 + @as(i32, index);
+        const descriptor: i32 = proctor.client_file_start + @as(i32, index);
         if (client_value.state == .closing) {
             _ = self.proctor.ring.close_direct(token, @intCast(descriptor)) catch
                 return error.SubmissionFailed;

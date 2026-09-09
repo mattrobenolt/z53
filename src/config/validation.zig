@@ -22,7 +22,7 @@ pub const Context = struct {
         }
         for (target.listen, 0..) |address, index| {
             var parsed: config.Endpoint = undefined;
-            parsed.parse(address, 53) catch {
+            parsed.parse(address, config.dns_port) catch {
                 return self.fail(self.element(listen_node, index), "invalid listener address");
             };
         }
@@ -117,7 +117,10 @@ pub const Context = struct {
         node: Index,
     ) config.Error!void {
         var parsed: config.Endpoint = undefined;
-        parsed.parse(upstream.address, if (upstream.tls != null) 853 else 53) catch {
+        parsed.parse(
+            upstream.address,
+            if (upstream.tls != null) config.dot_port else config.dns_port,
+        ) catch {
             return self.fail(self.field(node, "address"), "invalid upstream address");
         };
         if (upstream.tls) |tls| {
@@ -134,7 +137,7 @@ pub const Context = struct {
         if (cache.min_ttl_s > cache.max_ttl_s) {
             return self.fail(self.field(node, "min_ttl_s"), "min_ttl_s exceeds max_ttl_s");
         }
-        if (cache.denialMaximum() < 5) {
+        if (cache.denialMaximum() < config.denial_ttl_s_min) {
             return self.fail(node, "effective denial maximum must be at least 5 seconds");
         }
         if (cache.packet_bytes_max < config.cache_packet_bytes_min) {

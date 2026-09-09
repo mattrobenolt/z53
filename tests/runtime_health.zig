@@ -156,7 +156,7 @@ test "health probe root RD fresh secure ID admission rcodes and restoration" {
         try testing.expect(packet.header.has(.recursion_desired));
         var request: runtime.pipeline.resolver.Request = undefined;
         try request.init(packet);
-        try testing.expectEqual(2, request.kind);
+        try testing.expectEqual(2, @intFromEnum(request.kind));
         try testing.expectEqualSlices(u8, &.{0}, request.name.bytes[0..request.name.length]);
         const deadline_ns = session.deadline_ns;
         @memcpy(session.input[0..session.length], session.output[0..session.length]);

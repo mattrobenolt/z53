@@ -26,7 +26,7 @@ fn startup(init: *const process.Init) void {
         return;
     };
     var diagnostic: config.Diagnostic = .{ .path = path };
-    const workspace = arena.alloc(u8, config.workspace_bytes_max) catch {
+    const workspace = arena.create([config.workspace_bytes_max]u8) catch {
         print("{s}:1:1: error: configuration workspace allocation failed\n", .{path});
         return;
     };

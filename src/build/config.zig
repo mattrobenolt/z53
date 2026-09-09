@@ -13,12 +13,8 @@ pub fn add(
         .optimize = executable.root_module.optimize,
     });
     const options: std.Build.TestOptions = .{
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("tests/config.zig"),
-            .target = executable.root_module.resolved_target.?,
-            .optimize = executable.root_module.optimize,
-            .imports = &.{.{ .name = "config", .module = module }},
-        }),
+        .root_module = module,
+        .filters = &.{"ConfigTests."},
         .test_runner = .{ .path = ztest.path("src/test_runner.zig"), .mode = .simple },
     };
     options.root_module.link_libc = true;

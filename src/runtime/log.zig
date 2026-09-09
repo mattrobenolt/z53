@@ -1,4 +1,4 @@
-//! #1: bounded, synchronous completion logs. Sink failures never change DNS outcomes.
+//! Bounded, synchronous completion logs. Sink failures never change DNS outcomes.
 const std = @import("std");
 const system = std.c;
 const Io = std.Io;
@@ -6,7 +6,10 @@ const IpAddress = Io.net.IpAddress;
 const mem = std.mem;
 
 const resolver = @import("../resolver.zig");
+const FailureReason = @import("failure.zig").Reason;
 const wire = resolver.wire;
+
+const failure_reason_bytes_max = 128;
 
 pub const line_bytes_max = 3072;
 pub const Protocol = enum { udp, tcp, dot };
@@ -105,8 +108,11 @@ pub fn format(
     try question(&writer, packet, input);
     try writer.writeAll(" rcode=");
     if (packet.parse(answer.bytes)) |_| {
-        var rcode: u16 = packet.header.bits & 15;
-        if (packet.opt) |index| rcode |= @as(u16, @intCast(packet.records[index].ttl_s >> 24)) << 4;
+        var rcode: u16 = @intFromEnum(packet.header.rcode());
+        if (packet.opt) |index| {
+            const extended: u16 = @intCast(packet.records[index].ttl_s >> wire.edns_rcode_shift);
+            rcode |= extended << @bitSizeOf(wire.Rcode);
+        }
         try writer.print("{d}", .{rcode});
     } else |_| try writer.writeAll("unknown");
     const elapsed_ns = time.finished_ns -| query.started_ns;
@@ -129,12 +135,12 @@ fn question(
 ) Io.Writer.Error!void {
     packet.parse(input) catch return writer.writeAll(" qtype=unknown qname=unknown");
     if (packet.header.counts[0] != 1) return writer.writeAll(" qtype=unknown qname=unknown");
-    var cursor: usize = 12;
+    var cursor: usize = wire.header_bytes;
     const value = packet.readQuestion(&cursor) catch
         return writer.writeAll(" qtype=unknown qname=unknown");
     var name: wire.Name = undefined;
     packet.name(&name, value.name) catch return writer.writeAll(" qtype=unknown qname=unknown");
-    try writer.print(" qtype={d} qname=\"", .{value.kind});
+    try writer.print(" qtype={d} qname=\"", .{@intFromEnum(value.kind)});
     var offset: u16 = 0;
     while (offset < name.length) {
         const length = name.bytes[offset];
@@ -177,13 +183,14 @@ fn upstreamFields(writer: *Io.Writer, upstream: *const Upstream) Io.Writer.Error
     }
 }
 
-pub fn failure(logger: *Logger, io: Io, upstream: *const Upstream, reason: []const u8) void {
+pub fn failure(logger: *Logger, io: Io, upstream: *const Upstream, reason: FailureReason) void {
     var writer: Io.Writer = .fixed(&logger.buffer);
     timestamp(&writer, Io.Timestamp.now(io, .real).toMilliseconds()) catch return;
     writer.writeAll(" event=upstream_failure") catch return;
     upstreamFields(&writer, upstream) catch return;
     writer.writeAll(" reason=\"") catch return;
-    escaped(&writer, reason[0..@min(reason.len, 128)], .text) catch return;
+    const message = reason.message();
+    escaped(&writer, message[0..@min(message.len, failure_reason_bytes_max)], .text) catch return;
     writer.writeAll("\"\n") catch return;
     logger.sink.write(io, logger.sink.context, writer.buffered()) catch return;
 }

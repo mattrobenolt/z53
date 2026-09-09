@@ -1,5 +1,5 @@
 const std = @import("std");
-pub const resolver = @import("resolver");
+pub const resolver = @import("../resolver.zig");
 pub const wire = resolver.wire;
 pub const testing = std.testing;
 pub const zone: resolver.config.Zone = .{
@@ -23,7 +23,7 @@ pub const Fixture = struct {
         try expanded.fromText(name);
         const header: wire.Header = .{ .id = 0x1234, .bits = 0x01b0 };
         try self.encoder.init(&self.input, &header);
-        try self.encoder.question(&expanded, kind, class);
+        try self.encoder.question(&expanded, @enumFromInt(kind), class);
         const bytes = try self.encoder.finish();
         try self.query.parse(bytes);
         try self.request.init(&self.query);

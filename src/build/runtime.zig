@@ -37,4 +37,18 @@ pub fn add(
     const step = b.step("test-runtime", "Run native transport and lifecycle tests");
     step.dependOn(&run.step);
     all.dependOn(step);
+    const unit_options: std.Build.TestOptions = .{
+        .root_module = module,
+        .filters = &.{"RuntimeUnitTests"},
+        .test_runner = .{ .path = ztest.path("src/test_runner.zig"), .mode = .simple },
+    };
+    compile.dependOn(&b.addTest(unit_options).step);
+    const unit_run = b.addRunArtifact(b.addTest(unit_options));
+    unit_run.setCwd(b.path("."));
+    unit_run.has_side_effects = true;
+    unit_run.setEnvironmentVariable("ZTEST_VERBOSE", "1");
+    unit_run.setEnvironmentVariable("ZTEST_PLAIN", "1");
+    const unit_step = b.step("test-runtime-unit", "Run inline runtime unit tests without sockets");
+    unit_step.dependOn(&unit_run.step);
+    all.dependOn(unit_step);
 }

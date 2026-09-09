@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SPEC §9.3, #1: Zig 0.16 can report fuzz crashes while exiting zero.
+# SPEC §9.3: Zig 0.16 can report fuzz crashes with a zero exit code.
 set -euo pipefail
 iterations=${1:-20000}
 if [[ ! $iterations =~ ^[1-9][0-9]{0,8}$ ]]; then
@@ -71,8 +71,8 @@ fi
 if ! awk -v minimum="$iterations" '
     /^Fuzz test: / {
         current = ""
-        if ($0 ~ /"fuzz.test.fuzz DNS decoder and safe rewrites"/) current = "raw"
-        if ($0 ~ /"fuzz.test.fuzz structured DNS record relocation"/) current = "structured"
+        if ($0 ~ /"wire[.]FuzzTests[.]test[.]fuzz DNS decoder and safe rewrites"/) current = "raw"
+        if ($0 ~ /"wire[.]FuzzTests[.]test[.]fuzz structured DNS record relocation"/) current = "structured"
         if (current == "") exit 1
         seen[current]++
     }

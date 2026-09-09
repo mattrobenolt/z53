@@ -50,7 +50,7 @@ pub const Capture = struct {
 fn request(output: []u8, name: *const wire.Name, kind: u16) ![]const u8 {
     var encoder: wire.Encoder = undefined;
     try encoder.init(output, &.{ .id = 42, .bits = 0x100 });
-    try encoder.question(name, kind, 1);
+    try encoder.question(name, @enumFromInt(kind), 1);
     return encoder.finish();
 }
 
@@ -162,7 +162,7 @@ test "logging retained workspace preserves dirty tail across event kinds and sin
         .protocol = .udp,
     };
     capture.length = 0;
-    log.failure(&logger, testing.io, &upstream, "test");
+    log.failure(&logger, testing.io, &upstream, .transport_failure);
     try testing.expectEqual(1, capture.count("\n"));
     try testing.expectEqual(0, capture.count("retained.log.example"));
     extent = @max(extent, capture.length);

@@ -1,4 +1,4 @@
-//! #1: caller-owned TLS records survive the same retirement barriers as DNS buffers.
+//! Caller-owned TLS records survive the same retirement barriers as DNS buffers.
 const std = @import("std");
 const Io = std.Io;
 const assert = std.debug.assert;
@@ -30,15 +30,15 @@ pub const Connection = struct {
     handshake: ?engine.ClientHandshake = null,
     records: engine.RecordBuffer,
     reassembly: [65536]u8,
-    record_storage: [33290]u8,
-    output: [16645]u8,
+    record_storage: [engine.RecordBuffer.recommended_storage]u8,
+    output: [engine.RecordBuffer.min_storage]u8,
     write_offset: u32 = 0,
     write_length: u32 = 0,
     query_offset: u32 = 0,
     query_length: u32 = 0,
     phase: enum { request, response } = .request,
     plaintext: []const u8 = &.{},
-    failure_reason: ?[]const u8 = null,
+    failure_reason: ?engine.errors.HandshakeError = null,
 
     pub const Action = union(enum) {
         read,
@@ -122,8 +122,7 @@ pub const Connection = struct {
     }
 
     fn failed(self: *Connection, err: engine.errors.HandshakeError) Error {
-        // Error names are static diagnostics, never certificate bytes or session secrets.
-        self.failure_reason = @errorName(err);
+        self.failure_reason = err;
         return classify(err);
     }
 
@@ -137,7 +136,10 @@ pub const Connection = struct {
                         self.phase = .response;
                         return .request_sent;
                     }
-                    const end = @min(self.query_offset + 16384, self.query_length);
+                    const end = @min(
+                        self.query_offset + engine.frame.max_plaintext_len,
+                        self.query_length,
+                    );
                     self.queue(self.handshake.?.sendApplicationData(
                         query[self.query_offset..end],
                         &self.output,

@@ -1,5 +1,4 @@
-const wire = @import("wire");
-
+const wire = @import("../wire.zig");
 pub const Builder = struct {
     bytes: [65535]u8,
     cursor: usize,

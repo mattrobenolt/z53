@@ -1,7 +1,7 @@
 const std = @import("std");
 pub const testing = std.testing;
 
-const f = @import("fixture.zig");
+const f = @import("resolver.zig");
 pub const resolver = f.resolver;
 pub const wire = f.wire;
 pub const cache = resolver.cache;
@@ -41,7 +41,7 @@ pub const Fixture = struct {
     ) !void {
         const value: wire.Record = .{
             .owner = 0,
-            .kind = kind,
+            .kind = @enumFromInt(kind),
             .class = self.client.request.class,
             .ttl_s = ttl_s,
             .data_start = 0,

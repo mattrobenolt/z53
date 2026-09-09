@@ -90,13 +90,13 @@ const Fixture = struct {
         };
         // Direct seeding avoids quadratic setup. Every entry owns its packet and valid LRU links.
         try self.seed(
-            &self.service.zones[0].cache.positive,
+            &self.service.zones.items[0].cache.positive,
             occupancy,
             0,
             .positive,
         );
         if (case == .lookup_denial_last) try self.seed(
-            &self.service.zones[0].cache.denial,
+            &self.service.zones.items[0].cache.denial,
             capacity,
             capacity,
             .denial,
@@ -115,7 +115,7 @@ const Fixture = struct {
                 else => capacity - 1,
             };
             try key.name.fromText(try label(&self.input, index));
-            key.kind = 1;
+            key.kind = .a;
             key.class = 1;
             key.dnssec = .ordinary;
             expected.* = if (index < occupancy) index else null;
@@ -147,8 +147,8 @@ const Fixture = struct {
                 if (kind == .positive) .positive else .denial,
             );
             bank.put(@intCast(index), &.{
-                .key = .{ .name = name, .kind = 1, .class = 1, .dnssec = .ordinary },
-                .bytes = try self.service.zones[0].cache.packet_storage.copy(bytes),
+                .key = .{ .name = name, .kind = .a, .class = 1, .dnssec = .ordinary },
+                .bytes = try self.service.zones.items[0].cache.packet_storage.copy(bytes),
                 .packet_class = resolver.cache.packets.class(bytes.len),
                 .inserted_s = 100,
                 .lifetime_s = 300,
@@ -175,11 +175,11 @@ fn encode(
             .denial => 0x8183,
         },
     });
-    try encoder.question(name, 1, 1);
+    try encoder.question(name, .a, 1);
     if (kind != .query) {
         const record: wire.Record = .{
             .owner = 0,
-            .kind = if (kind == .positive) 1 else 6,
+            .kind = if (kind == .positive) .a else .soa,
             .class = 1,
             .ttl_s = 300,
             .data_start = 0,
@@ -218,7 +218,7 @@ fn Runner(comptime capacity: u32, comptime case: Case) type {
                 .insert_evict => try churnLoop(timer, fixture, capacity),
                 else => try lookupLoop(case, timer, fixture),
             }
-            const storage = &fixture.service.zones[0].cache.packet_storage;
+            const storage = &fixture.service.zones.items[0].cache.packet_storage;
             try timer.reportMetric(@floatFromInt(storage.fixed.buffer.len), "packet-reserved-B");
             try timer.reportMetric(@floatFromInt(storage.fixed.end_index), "pool-consumed-B");
             try timer.reportMetric(@floatFromInt(storage.live_bytes), "packet-live-B");
@@ -228,7 +228,7 @@ fn Runner(comptime capacity: u32, comptime case: Case) type {
 }
 
 fn indexLoop(timer: *benchmark.B, fixture: *Fixture) !void {
-    const bank = &fixture.service.zones[0].cache.positive;
+    const bank = &fixture.service.zones.items[0].cache.positive;
     var index: u32 = 0;
     var found: ?u32 = null;
     while (try timer.loop()) {
@@ -241,7 +241,7 @@ fn indexLoop(timer: *benchmark.B, fixture: *Fixture) !void {
 
 fn lookupLoop(comptime case: Case, timer: *benchmark.B, fixture: *Fixture) !void {
     const service = fixture.service;
-    const cache = &service.zones[0].cache;
+    const cache = &service.zones.items[0].cache;
     const bytes = service.request_packet.bytes;
     var result: ?resolver.Answer = null;
     while (try timer.loop()) {
@@ -273,7 +273,7 @@ fn lookupLoop(comptime case: Case, timer: *benchmark.B, fixture: *Fixture) !void
 const ChurnInput = struct { name: wire.Name, bytes: [128]u8, length: u16 };
 
 fn churnLoop(timer: *benchmark.B, fixture: *Fixture, capacity: u32) !void {
-    const cache = &fixture.service.zones[0].cache;
+    const cache = &fixture.service.zones.items[0].cache;
     const workspace = &fixture.service.cache_workspace;
     const count = @min(capacity + 1, @max(128, @divTrunc(10000000, capacity)));
     const inputs = try timer.allocator.alloc(ChurnInput, count);
