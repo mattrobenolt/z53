@@ -48,6 +48,9 @@ trap 'status=129; exit 129' HUP
 trap 'status=130; exit 130' INT
 trap 'status=143; exit 143' TERM
 : >"$log"
+# Zig's fuzzer opens tmp/libfuzzer.log without creating its parent directory.
+# Prepare shared directories before either fuzz process starts.
+mkdir -p "$cache/tmp" "$cache/f"
 # Bash job control gives this asynchronous build its own process group on both targets.
 set -m
 zig build fuzz --fuzz="$iterations" --cache-dir "$cache" --summary all >"$log" 2>&1 &

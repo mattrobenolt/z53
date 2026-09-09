@@ -30,7 +30,12 @@ while (( $# > 0 )); do
 done
 printf '%s\n' "$cache" >cache-path
 printf '%s\n' "$$" >build-pid
-mkdir -p "$cache/f" "$cache/o"
+# The fuzzer opens these directories before it processes any input.
+if [[ ! -d $cache/tmp || ! -d $cache/f ]]; then
+    echo 'error: fuzz cache directories do not exist'
+    exit 8
+fi
+mkdir -p "$cache/o"
 printf 'disposable compiler object\n' >"$cache/o/object"
 case "$Z53_GATE_CASE" in
     empty-crash) : >"$cache/f/crash" ;;

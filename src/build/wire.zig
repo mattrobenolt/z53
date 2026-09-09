@@ -44,6 +44,8 @@ fn addFuzz(
     filter: []const u8,
 ) void {
     const fuzz = b.addTest(.{
+        // The default x86 backend emits no fuzz coverage instrumentation in Zig 0.16.
+        .use_llvm = true,
         .filters = &.{filter},
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/wire.zig"),

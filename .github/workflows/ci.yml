@@ -64,7 +64,7 @@ jobs:
         run: nix develop --no-write-lock-file -c zig build test-runtime -Doptimize=ReleaseSafe -Dcpu=baseline
       - name: Fuzz both wire targets
         run: nix develop --no-write-lock-file -c bash scripts/fuzz.sh 20000
-      - name: Record the package output
+      - name: Realize the package output
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         id: package
         env:
@@ -74,7 +74,8 @@ jobs:
             echo '::error::Set the CACHIX_AUTH_TOKEN repository secret to enable package publication.'
             exit 1
           fi
-          package=$(nix path-info --no-write-lock-file .#z53)
+          # Flake checks can accept cached outputs without downloading them.
+          package=$(nix build --no-write-lock-file --no-link --print-out-paths .#z53)
           test -n "$package"
           printf 'paths=%s\n' "$package" >> "$GITHUB_OUTPUT"
       - name: Publish the package to Cachix

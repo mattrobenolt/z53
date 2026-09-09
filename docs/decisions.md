@@ -351,6 +351,8 @@ A short or failed write loses log bytes without a DNS error or retry queue.
 The pinned Zig default fuzz runner uses a stack-trace API that changed in Zig 0.16.
 Returned-error tracing is disabled only for fuzz roots. Runtime safety and panic traces remain enabled.
 Raw and structured targets run in separate binaries so each receives its full iteration budget.
+Fuzz builds select LLVM because the default x86 backend emits no coverage instrumentation in Zig 0.16.
+The gate creates the shared cache directories before either process starts. The fuzzer assumes that `tmp` exists for its log.
 
 `scripts/fuzz.sh` checks reports and crash artifacts because the build runner can return zero after a fuzz panic.
 It rejects incomplete reports and empty crash samples as well as nonzero exits.
