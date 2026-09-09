@@ -83,7 +83,7 @@ const Harness = struct {
         var length: usize = 0;
         var target: usize = 2;
         for (0..64) |_| {
-            // #1: later frames must stay queued because this reader retains no trailing bytes.
+            // later frames must stay queued because this reader retains no trailing bytes.
             const received = try self.receive(descriptor, output[length..target]);
             if (received == 0) return error.UnexpectedEof;
             length += received;
@@ -131,7 +131,7 @@ fn connectSocket(descriptor: system.fd_t, endpoint: *const runtime.address.Addre
         .INPROGRESS => {},
         else => return error.ConnectFailed,
     }
-    // #1: EINPROGRESS does not permit the first TCP send, even on loopback.
+    // EINPROGRESS does not permit the first TCP send, even on loopback.
     try finishConnect(descriptor);
 }
 
@@ -154,7 +154,7 @@ fn finishConnect(descriptor: system.fd_t) !void {
     }
 }
 
-// SPEC §1.2, #1: fixture waits have finite deadlines and reject invalid descriptors.
+// SPEC §1.2: fixture waits have finite deadlines and reject invalid descriptors.
 test "Darwin native client readiness deadline and invalid descriptor" {
     const pair = try socketPair();
     defer _ = system.close(pair[1]);
@@ -168,7 +168,7 @@ test "Darwin native client readiness deadline and invalid descriptor" {
     try testing.expectError(error.InvalidSocket, socketReady(closed, system.POLL.IN, 1));
 }
 
-// SPEC §1.2, #1: XNU drops packets for a bound TCPS_CLOSED socket without a reset.
+// SPEC §1.2: XNU drops packets for a bound TCPS_CLOSED socket without a reset.
 test "Darwin native client deadline on bound non-listening endpoint" {
     var endpoint: runtime.address.Address = undefined;
     try endpoint.parse("127.0.0.1:1");
@@ -194,7 +194,7 @@ test "Darwin native client deadline on bound non-listening endpoint" {
     try testing.expectError(error.ConnectDeadline, connectSocket(descriptor, &endpoint));
 }
 
-// SPEC §1.2, #1: a real peer reset exercises SO_ERROR, not a failed handshake or a deadline.
+// SPEC §1.2: a real peer reset exercises SO_ERROR, not a failed handshake or a deadline.
 test "Darwin native client completion rejects peer reset" {
     var endpoint: runtime.address.Address = undefined;
     try endpoint.parse("127.0.0.1:1");
@@ -261,7 +261,7 @@ fn frameSocketPair() ![2]system.fd_t {
     return descriptors;
 }
 
-// SPEC §3.9, RFC 1035 §4.2.2, #1: one receive must not discard a second queued DNS frame.
+// SPEC §3.9, RFC 1035 §4.2.2: one receive must not discard a second queued DNS frame.
 test "Darwin native frame reader preserves a second queued frame" {
     var harness: Harness = undefined;
     try harness.init();
@@ -291,7 +291,7 @@ test "Darwin native frame reader preserves a second queued frame" {
     );
 }
 
-// SPEC §3.9, RFC 1035 §4.2.2, #1: fixture bounds and incomplete frames return explicit errors.
+// SPEC §3.9, RFC 1035 §4.2.2: fixture bounds and incomplete frames return explicit errors.
 test "Darwin native frame reader bounds malformed lengths and partial EOF" {
     var harness: Harness = undefined;
     try harness.init();
@@ -602,7 +602,7 @@ test "Darwin native UDP response pool exhaustion and recovery" {
     var input: [512]u8 = undefined;
     var output: [512]u8 = undefined;
     const request = try query(&input);
-    // #1: this isolates pool exhaustion, not EAGAIN or write-filter ownership.
+    // this isolates pool exhaustion, not EAGAIN or write-filter ownership.
     for (&harness.service.responses) |*response| response.listener = 0;
     try send(descriptor, request);
     const generation = harness.service.proctor.ownership[0].generation;
@@ -729,7 +729,7 @@ fn writeFilters(service: *const runtime.Runtime) !void {
     try testing.expectEqualSlices(u32, &.{ 1, 1 }, &counts);
 }
 
-// SPEC §1.2 and §3.9, #1: injected EAGAIN retains actual queries across native write readiness.
+// SPEC §1.2 and §3.9: injected EAGAIN retains actual queries across native write readiness.
 test "Darwin native retained EAGAIN bytes destinations and shared filters" {
     var first: Harness = undefined;
     try first.init();
@@ -879,7 +879,7 @@ fn socketPair() ![2]system.fd_t {
     return descriptors;
 }
 
-// SPEC §1.2, #1: an already-ready socket must disappear before a distinct sentinel or reuse.
+// SPEC §1.2: an already-ready socket must disappear before a distinct sentinel or reuse.
 test "Darwin native ready socket deletion sentinel and descriptor reuse" {
     var proctor: runtime.proctor.Proctor = undefined;
     try proctor.init();
@@ -916,7 +916,7 @@ test "Darwin native ready socket deletion sentinel and descriptor reuse" {
     try testing.expect(!proctor.pending());
 }
 
-// SPEC §1.2, #1: actual kevent delivery rejects stale descriptor identities and generations.
+// SPEC §1.2: actual kevent delivery rejects stale descriptor identities and generations.
 test "Darwin native stale event identity and generation rejection" {
     var proctor: runtime.proctor.Proctor = undefined;
     try proctor.init();
@@ -946,7 +946,7 @@ test "Darwin native stale event identity and generation rejection" {
     try testing.expectError(error.InvalidCompletion, proctor.next());
 }
 
-// SPEC §3.9, #1: Darwin sockaddr metadata must match both external and embedded lengths.
+// SPEC §3.9: Darwin sockaddr metadata must match both external and embedded lengths.
 test "Darwin native malformed datagram metadata" {
     var source: system.sockaddr.storage = std.mem.zeroes(system.sockaddr.storage);
     source.family = system.AF.INET;
@@ -978,7 +978,7 @@ fn quotaDiscarded(descriptor: system.fd_t) !void {
     try testing.expectEqual(.CONNRESET, failure);
 }
 
-// SPEC §1.2, #1: kernel accept quota failure pauses admission until the real timer fires.
+// SPEC §1.2: kernel accept quota failure pauses admission until the real timer fires.
 test "Darwin native accept quota timer recovery" {
     var harness: Harness = undefined;
     try harness.init();

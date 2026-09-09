@@ -1,4 +1,4 @@
-//! SPEC §§3.1, 3.2, 3.7, 9.4: bounded DNS baselines through the pinned helper (#1).
+//! SPEC §§3.1, 3.2, 3.7, 9.4: bounded DNS baselines through the pinned helper.
 const std = @import("std");
 const benchmark = @import("benchmark");
 const pipeline = @import("pipeline").pipeline;

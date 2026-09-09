@@ -1287,7 +1287,7 @@ test {
     if (builtin.os.tag == .linux) _ = LinuxSubmittedTeardown;
 }
 
-// #1: this Linux host disables IPv6. Native Linux IPv6 exchange coverage remains unproved.
+// this Linux host disables IPv6. Native Linux IPv6 exchange coverage remains unproved.
 const Darwin = struct {
     // SPEC §§1.2, 3.6: fixture peer traffic cannot wait for an unrelated runtime timer.
     test "health forward Darwin fixture peer readiness precedes runtime progress" {
@@ -3466,7 +3466,7 @@ test "logging native concurrent TCP accepts retain distinct peers" {
     try harness.stop();
 }
 
-// SPEC §§1.3, 3.2, 3.7, 3.9, 4: eight clients retain identities through a full cache (#1).
+// SPEC §§1.3, 3.2, 3.7, 3.9, 4: eight clients retain identities through a full cache.
 test "cache stress native full cache mixed concurrent clients and upstream reuse" {
     var harness: Harness = undefined;
     try harness.init();

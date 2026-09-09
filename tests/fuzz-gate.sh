@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SPEC §9.3: the fuzz gate rejects absent evidence and zero-exit crashes (#1).
+# SPEC §9.3: the fuzz gate rejects absent evidence and zero-exit crashes.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 gate="$PWD/scripts/fuzz.sh"

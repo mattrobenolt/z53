@@ -1,4 +1,4 @@
-//! SPEC §§1.3, 3.7, 9.4: cache scaling with identical timed production boundaries (#1).
+//! SPEC §§1.3, 3.7, 9.4: cache scaling with identical timed production boundaries.
 const std = @import("std");
 const benchmark = @import("benchmark");
 const pipeline = @import("pipeline").pipeline;

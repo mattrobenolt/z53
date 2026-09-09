@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""SPEC §9.4 / #1: bounded comparisons on owned loopback listeners."""
+"""Benchmark z53 against CoreDNS with dnsperf on owned loopback listeners."""
 
 import argparse
 import contextlib
