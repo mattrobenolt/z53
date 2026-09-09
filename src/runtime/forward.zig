@@ -122,7 +122,7 @@ pub const Forward = struct {
     ) (std.Io.RandomSecureError || tls.TrustError)!void {
         self.config = settings;
         self.io = io;
-        self.logger.init();
+        self.logger.sink = .{};
         self.trust.bundle = .empty;
         self.support = @splat(.unsupported);
         self.protocols = @splat(null);
