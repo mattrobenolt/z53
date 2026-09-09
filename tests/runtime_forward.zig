@@ -1972,7 +1972,8 @@ const LinuxPair = struct {
             try testing.expectEqual(.waiting, service.clients[0].phase);
             try self.empty();
             // Only this real CLOSE is queued. Its CQE releases a real registered socket.
-            const completion = try service.proctor.next();
+            const completion = (try service.proctor.next()) orelse
+                return error.TestUnexpectedResult;
             try testing.expectEqual(
                 service.proctor.ownership[self.slot].token(self.slot),
                 completion.user_data,

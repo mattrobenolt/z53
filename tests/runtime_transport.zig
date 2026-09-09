@@ -432,10 +432,12 @@ test "forward native stop batches a full operation table" {
     const stopped: ?runtime.proctor.Error = if (proctor.stop()) |_| null else |err| err;
     try testing.expectEqual(null, stopped);
     var count: u32 = 0;
-    while (proctor.pending()) {
-        _ = try proctor.next();
+    for (0..runtime.proctor.operations_max * 4) |_| {
+        if (!proctor.pending()) break;
+        if (try proctor.next() == null) continue;
         count += 1;
         try testing.expect(count <= runtime.proctor.operations_max * 2);
     }
+    try testing.expect(!proctor.pending());
     try testing.expectEqual(runtime.proctor.operations_max * 2, count);
 }

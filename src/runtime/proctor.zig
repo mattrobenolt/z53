@@ -243,9 +243,17 @@ pub const Proctor = struct {
         return self.ownership[index].arm(index);
     }
 
-    pub fn next(self: *Proctor) Error!linux.io_uring_cqe {
-        _ = self.ring.submit() catch return error.SubmissionFailed;
-        const completion = self.ring.copy_cqe() catch return error.CompletionFailed;
+    /// An interrupted enter returns no completion and leaves operation ownership unchanged.
+    pub fn next(self: *Proctor) Error!?linux.io_uring_cqe {
+        // The shared SQ head preserves unconsumed entries across an interrupted enter.
+        _ = self.ring.submit() catch |err| switch (err) {
+            error.SignalInterrupt => return null,
+            else => return error.SubmissionFailed,
+        };
+        const completion = self.ring.copy_cqe() catch |err| switch (err) {
+            error.SignalInterrupt => return null,
+            else => return error.CompletionFailed,
+        };
         const index: u32 = @truncate(completion.user_data);
         if (index >= operations_max) return error.InvalidCompletion;
         if (completion.user_data & cancel_bit != 0) {

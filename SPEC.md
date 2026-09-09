@@ -86,6 +86,9 @@ Slot 289 supplies the idle timer. Both linked completions retire before a sessio
 Explicit cancellation also retains each slot until its target completion and cancellation acknowledgement arrive.
 Stop batches cancellation submissions against the remaining submission capacity.
 
+An interrupted event-loop submission or completion wait returns without a CQE.
+The next step uses the existing ring state. Interruption does not retire operations or renew DNS deadlines.
+
 Linux teardown retains storage through cancellation, request retirement, and checked resource unregistration (#1).
 One five-second absolute MONOTONIC deadline covers teardown, independently of DNS timeouts.
 After complete submission of older work, teardown cancels it and submits one standalone `NOP` with `IOSQE_IO_DRAIN`.

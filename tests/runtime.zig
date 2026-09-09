@@ -11,6 +11,7 @@ test {
     _ = @import("runtime_log.zig");
     if (builtin.os.tag == .linux) {
         _ = @import("runtime_transport.zig");
+        _ = @import("runtime_interrupt.zig");
     } else {
         _ = @import("runtime_darwin.zig");
     }
@@ -91,11 +92,13 @@ test "native ring setup registered files and cancellation" {
     _ = try proctor.ring.submit();
     try proctor.stop();
     var completions: u8 = 0;
-    while (proctor.pending()) {
-        _ = try proctor.next();
+    for (0..4) |_| {
+        if (!proctor.pending()) break;
+        if (try proctor.next() == null) continue;
         completions += 1;
         try testing.expect(completions <= 2);
     }
+    try testing.expect(!proctor.pending());
     try testing.expectEqual(2, completions);
 }
 

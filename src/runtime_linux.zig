@@ -174,7 +174,7 @@ pub const Runtime = struct {
         if (self.state == .stopping) {
             if (!self.proctor.pending()) return false;
         }
-        const completion = try self.proctor.next();
+        const completion = (try self.proctor.next()) orelse return true;
         const slot: u32 = @truncate(completion.user_data);
         if (slot >= upstream.operation_start) {
             if (slot == upstream.timer_slot) {

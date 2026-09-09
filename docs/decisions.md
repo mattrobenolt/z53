@@ -1448,3 +1448,21 @@ Targeted reverts remove all three experiments. Reverts through `135b510` restore
 No speculative parser or event-loop redesign follows these results.
 The capture records the untimed warmup change and the unresolved earlier timeouts.
 Production remains at `9a7c2c4`. This campaign performs no push or deployment.
+
+## Interrupted Linux event waits — 2026-09-08 (#1)
+
+A `strace -p` attachment interrupted an owned resolver's `io_uring_enter` wait.
+A diagnostic build reported `SignalInterrupt`. The old proctor converted it into `CompletionFailed` and exited with status 1.
+The reproduction used a spare loopback port, not the production resolver.
+
+`Proctor.next` now returns no completion on an interrupted submission or wait.
+`Runtime.step` returns to the event loop without dispatch or ownership retirement, as the kqueue backend already does.
+The next step uses the existing ring queues. No timeout restarts and no synthetic CQE appears.
+Other syscall errors remain fatal. Teardown retains its existing five-second deadline and fail-closed error policy.
+
+The native signal regression failed with `CompletionFailed` before the fix.
+It now checks retained ownership and generation, then retires the operation through cancellation.
+The fixed binary also passed ten strace attach/detach cycles with UDP and TCP answers while attached.
+Strace injection of `EINTR` into submission and wait calls preserved DNS service.
+Injection of `EIO` into those calls retained `SubmissionFailed` and `CompletionFailed`, respectively.
+This fix includes no production restart or deployment and does not diagnose the historical restart bind failures.
