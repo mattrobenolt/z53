@@ -1,107 +1,113 @@
 # z53
 
-z53 is an experimental DNS caching forwarder in Zig, with io_uring on Linux and kqueue on macOS.
-Configuration uses [ZON](SPEC.md#5-configuration-zon).
+z53 is a DNS caching forwarder. It answers from its cache and a hosts file
+when it can, and forwards everything else to the resolvers you configure,
+over UDP, TCP, or verified DNS-over-TLS.
 
-- UDP and TCP clients, with UDP, TCP, or verified DNS-over-TLS upstreams.
-- Sequential failover on transport errors, with health checks and connection reuse.
-- Per-zone positive and negative caches, bounded memory, and optional stale answers.
-- Hosts files, NODATA rules, and answer rotation.
-- Nix packages and modules for NixOS and nix-darwin.
+The design goal is a resolver whose memory you can reason about. It is a
+single binary running one event thread, with storage pre-sized at startup
+instead of growing under load. io_uring on Linux and kqueue on macOS. The
+steady-state query path performs no allocations. It does not resolve
+recursively or validate DNSSEC.
 
-z53 forwards queries to configured resolvers. It does not perform recursive resolution or DNSSEC validation.
-The [specification](SPEC.md) defines its behavior and differences from CoreDNS.
+z53 is experimental. Two things are known-incomplete: listener and upstream
+hostnames are not resolved (use literal IP addresses), and intermittent Linux
+restart bind failures are still under investigation in
+[#1](https://github.com/mattrobenolt/z53/issues/1).
 
 ## Requirements
 
-Supported targets:
-
-- aarch64-linux and x86_64-linux, with Linux 7.0.0 or newer.
+- aarch64-linux and x86_64-linux, on Linux 7.0.0 or newer. io_uring is
+  required; there is no epoll fallback.
 - aarch64-darwin.
 
-Linux requires io_uring. There is no epoll fallback.
-The build uses Zig 0.16, ztls, and OpenSSL through pkg-config.
-The Nix flake pins the toolchain and dependencies.
+The build uses Zig 0.16, ztls, and OpenSSL through pkg-config. The Nix flake
+pins the toolchain and every dependency.
 
 ## Quick start
 
-Build the package:
-
 ```sh
 nix build .#z53
-```
-
-Start it with the example configuration:
-
-```sh
 ./result/bin/z53 -c examples/poc.zon
 ```
 
-The example listens on `127.0.0.1:5354` and forwards to Cloudflare.
-It does not change the system resolver.
-
-In another terminal, enter the development shell:
-
-```sh
-nix develop
-```
-
-Query the resolver:
+The example listens on `127.0.0.1:5354` and forwards to Cloudflare over UDP.
+It does not touch the system resolver. Query it:
 
 ```sh
 dig @127.0.0.1 -p 5354 example.com A
 dig @127.0.0.1 -p 5354 example.net A +tcp
 ```
 
-The default config path is `/etc/z53/z53.zon`. The `-c` flag selects another file.
-Configuration changes require a restart. Hosts files reload separately at their configured interval.
+For DNS-over-TLS, `examples/dot.zon` listens on `127.0.0.1:8853` and forwards
+to Cloudflare over verified TLS, using the system trust store and the
+configured `server_name` for certificate checks and SNI.
 
-For DNS-over-TLS, use `examples/dot.zon`, which listens on `127.0.0.1:8853`.
-Both client transports then use verified TLS upstream.
-TLS uses the system trust store and the configured `server_name` for certificate checks and SNI.
+The default configuration path is `/etc/z53/z53.zon`; `-c` selects another
+file. Configuration changes take effect on restart. Hosts files reload
+separately, at their configured interval, without a restart.
 
-Use literal IP addresses for listeners and upstreams. Hostname resolution is not implemented.
-Bind only to trusted interfaces. z53 does not authenticate DNS clients.
+Bind only to interfaces you trust. z53 does not authenticate DNS clients.
 
 ## Configuration
 
-Each zone selects the longest matching DNS suffix and has its own upstream list.
-The query pipeline is:
+Configuration is a [ZON](SPEC.md#5-configuration-zon) document. A minimal
+split-DNS setup, forwarding most names over TLS but a private zone to an
+internal resolver:
 
-1. RFC 6761 local answers.
-2. Cache lookup.
-3. NODATA rules.
-4. Hosts lookup.
-5. Forward to an upstream.
+```zig
+.{
+    .listen = .{"127.0.0.1:53"},
+    .zones = .{
+        .{
+            .suffix = ".",
+            .upstreams = .{
+                .{ .address = "1.1.1.1:853", .tls = .{ .server_name = "one.one.one.one" } },
+            },
+        },
+        .{
+            .suffix = "internal.example.",
+            .upstreams = .{ .{ .address = "10.0.0.1:53" } },
+        },
+    },
+}
+```
 
-Only transport errors and timeouts trigger failover. DNS responses such as SERVFAIL and REFUSED end the attempt sequence.
-Down endpoints receive health probes. `max_fails = 0` disables health checks.
+A query matches the zone with the longest suffix, then runs through local
+RFC 6761 names, the cache, NODATA rules, and the hosts table before any
+upstream sees it. Each zone carries its own upstream list, cache, hosts file,
+and NODATA rules.
 
-See [the configuration reference](SPEC.md#5-configuration-zon) for defaults and limits.
-The [reference configurations](SPEC.md#6-reference-configs) demonstrate split DNS and transport selection.
+Failover is sequential. Only transport errors and timeouts advance it. A DNS
+response, including SERVFAIL, ends the attempt sequence. Endpoints
+that keep failing are probed on their configured interval and held out of
+rotation until they answer again; `max_fails = 0` disables health checking
+entirely. When every upstream for a zone is down, cached answers are served
+past expiry, per RFC 8767.
+
+Defaults, limits, and the full field list are in
+[the configuration reference](SPEC.md#5-configuration-zon). The
+[reference configurations](SPEC.md#6-reference-configs) show more of the
+surface.
 
 ## Logs
 
-Answered queries produce one completion line on stderr.
-It contains the query, response code, duration, and answer source.
-Forwarded responses also identify the selected upstream and its transport.
-Cache hits omit upstream fields. Attempt failures and health transitions use separate events.
+Every answered query logs one line on stderr: client address and protocol,
+query name and type, response code, duration, and the answer source: cache,
+stale, hosts, or a named upstream with its transport. Failures and health
+transitions get their own events.
 
-`duration_ms` measures query admission through response publication, not socket delivery.
-Log writes are synchronous, so a slow stderr consumer can delay queries.
-See [the log format](SPEC.md#4-observability) for field definitions and escaping.
+Writes are synchronous, so a slow stderr consumer delays the resolver.
+Field definitions and escaping rules are in [SPEC §4](SPEC.md#4-observability).
 
 ## NixOS and nix-darwin
 
-Add the flake input:
+Add the flake and import the module for your platform:
 
 ```nix
 inputs.z53.url = "github:mattrobenolt/z53";
 inputs.z53.inputs.nixpkgs.follows = "nixpkgs";
 ```
-
-Pass `inputs` through `specialArgs` to the host modules.
-Import the module in the NixOS host configuration:
 
 ```nix
 { inputs, ... }:
@@ -110,86 +116,55 @@ Import the module in the NixOS host configuration:
   services.z53 = {
     enable = true;
     config = builtins.readFile ./z53.zon;
-    # Optional: package = inputs.z53.packages.aarch64-linux.z53;
   };
 }
 ```
 
-For nix-darwin, import `inputs.z53.darwinModules.default` instead.
-Both modules install `/etc/z53/z53.zon` and restart the service after config changes.
-Config text enters the Nix store and must not contain secrets.
-The modules do not disable other resolvers or change host DNS settings.
+For nix-darwin, import `inputs.z53.darwinModules.default` instead. Both
+modules install `/etc/z53/z53.zon` and restart the service when it changes.
+Config text lands in the Nix store, so it must not contain secrets. The
+modules do not disable other resolvers or change host DNS settings — before
+binding port 53, stop whatever already owns it and keep the previous system
+generation for rollback.
 
-NixOS uses a dynamic user with the bind capability and sends logs to journald.
-nix-darwin uses a root launchd daemon and `/var/log/z53.log`.
-An hourly logrotate job retains seven compressed archives, with daily rotation and a 10 MiB threshold.
-Copytruncate avoids a resolver restart, but can lose concurrent writes. The active log can exceed the threshold between checks.
+On NixOS the service runs as a dynamic user with the bind capability and
+logs to journald. On macOS it runs as a root launchd daemon writing
+`/var/log/z53.log`, with an hourly logrotate job using copytruncate so the
+inherited descriptors keep working without a restart.
 
-Before use on port 53, stop any resolver that already binds the address.
-Retain its configuration and the previous system generation for rollback.
-See [packaging and deployment](SPEC.md#8-packaging-and-deployment) for module details.
+Module details are in [SPEC §8](SPEC.md#8-packaging-and-deployment).
 
 ## CI and binary cache
 
-CI runs on pull requests and `main`. Manual dispatch is also available.
-Each supported target runs `nix flake check`, the host trust tests, and compilation of the integration tests.
-Both wire fuzz targets receive at least 20000 iterations.
-Each target also runs its native socket suite.
-The Linux jobs use Ubuntu 26.04 preview runners and record their kernel versions.
+CI runs the flake checks, the native socket suites, and both fuzz targets
+(20,000 iterations each) on all three supported systems. Workflow auditing
+uses actionlint, pinact, and zizmor.
 
-Successful pushes to `main` publish the package output and its runtime closure to [mattrobenolt.cachix.org](https://mattrobenolt.cachix.org).
-Pull requests cannot publish packages.
-The upload excludes development shells and test derivations.
-Publication fails if the repository lacks `CACHIX_AUTH_TOKEN`.
-
-Workflow checks use actionlint, pinact, and zizmor.
-pinact verifies SHA pins against their version comments and enforces a three-day release age.
-zizmor reports failures without GitHub Advanced Security.
-
-### Cache credentials
-
-Add a cache-scoped write token as the repository secret `CACHIX_AUTH_TOKEN`.
-Use the repository's [Actions secrets settings](https://github.com/mattrobenolt/z53/settings/secrets/actions).
+Pushes to `main` publish the package and its runtime closure to
+[mattrobenolt.cachix.org](https://mattrobenolt.cachix.org). Pull requests
+build but cannot publish.
 
 ## Development
 
-Enter `nix develop`, then run the build and tests:
-
 ```sh
-zig build
-zig build test
-zig fmt --check build.zig build.zig.zon src tests
-ziglint
-ziglint build.zig src tests
-nixfmt --check flake.nix nix/*.nix nix/modules/*.nix nix/tests/*.nix
-```
-
-`zig build` installs `zig-out/bin/z53`.
-
-Run from source with the example configuration:
-
-```sh
+nix develop
+zig build                 # installs zig-out/bin/z53
 zig build run -- -c examples/poc.zon
-```
-
-Run the fuzz targets with 20000 iterations per target:
-
-```sh
+zig build test
+nix fmt
+ziglint && ziglint build.zig src tests
+nix flake check
 bash scripts/fuzz.sh 20000
 ```
 
-Run the package and module checks:
+`zig build test` runs every suite, including the native socket tests and a
+benchmark smoke run. Intermittent Linux restart tests can fail with
+`BindFailed`; the cause remains under investigation in
+[#1](https://github.com/mattrobenolt/z53/issues/1).
 
-```sh
-nix flake check
-```
-
-The sandbox selects TLS API tests that do not require host trust files.
-`zig build test` also exercises the host trust store and native socket paths.
-Intermittent Linux restart tests can fail with `BindFailed`; the cause remains under investigation in [#1](https://github.com/mattrobenolt/z53/issues/1).
-
-[Design notes](docs/decisions.md) describe the implementation and its constraints.
-[Benchmarks](docs/benchmarks/README.md) include commands, methodology, and recorded results.
+[Design notes](docs/decisions.md) explain the implementation and its
+constraints. [Benchmarks](docs/benchmarks/README.md) record commands,
+methodology, and results, including comparisons against CoreDNS.
 
 ## License
 
