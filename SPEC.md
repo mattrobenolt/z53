@@ -20,7 +20,7 @@ TLS `server_name` supplies certificate verification and SNI, not address resolut
    pkg-config. No other runtime dependency is allowed.
 4. Use ztest and zig-benchmark as the test and benchmark helpers. Keep them
    lazy and test-only in `build.zig.zon`, following the ztls pattern.
-5. I/O model: Linux builds require kernel 7.2.0 or newer and use io_uring
+5. I/O model: Linux builds require kernel 7.0.0 or newer and use io_uring
    for socket events. There is no epoll fallback and no feature probing.
    Every io_uring feature named in this document exists on that kernel.
    Use provided buffer rings, multishot `RECVMSG` on unconnected UDP
@@ -203,7 +203,7 @@ Final client encoding and rotation succeed before cache publication.
 - Query rewriting, views, per-client routing.
 - Authoritative zone serving from zone files.
 - Config reload without restart.
-- epoll or select fallbacks on Linux. Kernel 7.2.0 or newer is a hard
+- epoll or select fallbacks on Linux. Kernel 7.0.0 or newer is a hard
   requirement.
 
 ## 3. Behavior
@@ -881,8 +881,8 @@ CI runs a short benchmark smoke run. In-process timings do not establish end-to-
 Hosted CI currently runs the flake checks and both fuzz targets on all three systems.
 It also checks host trust and compiles the integration suites.
 All three jobs execute their native socket suites.
-Ubuntu 26.04 preview runners test Linux 7.0 compatibility and record their kernel versions.
-This experiment does not change the declared kernel minimum in section 1.
+Ubuntu 26.04 preview runners execute the Linux suites and record their kernel versions.
+Both Linux architectures passed the native socket suite on `7.0.0-1012-azure`.
 
 Successful pushes to `main` publish package outputs and their runtime closures to `mattrobenolt.cachix.org`.
 Publication requires the repository's `CACHIX_AUTH_TOKEN` secret.

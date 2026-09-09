@@ -1,4 +1,4 @@
-//! Linux 7.2 is a contract, not a capability negotiation.
+//! Linux 7.0.0 is a contract, not a capability negotiation.
 const std = @import("std");
 pub const linux = std.os.linux;
 const Ring = linux.IoUring;

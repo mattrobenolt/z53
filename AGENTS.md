@@ -143,7 +143,7 @@ Keep perf and disassembly as the baseline measurement tools.
 
 ### Linux I/O
 
-Require Linux 7.2.0 or newer.
+Require Linux 7.0.0 or newer.
 Treat `io_uring_setup` failure as a startup error.
 Do not add feature probes or an epoll fallback.
 Use raw `std.os.linux` syscalls where standard wrappers lack required features.

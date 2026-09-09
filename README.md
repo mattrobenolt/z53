@@ -16,7 +16,7 @@ The [specification](SPEC.md) defines its behavior and differences from CoreDNS.
 
 Supported targets:
 
-- aarch64-linux and x86_64-linux, with Linux 7.2.0 or newer.
+- aarch64-linux and x86_64-linux, with Linux 7.0.0 or newer.
 - aarch64-darwin.
 
 Linux requires io_uring. There is no epoll fallback.
@@ -136,7 +136,7 @@ Each supported target runs `nix flake check`, the host trust tests, and compilat
 Both wire fuzz targets receive at least 20000 iterations.
 Each target also runs its native socket suite.
 The Linux jobs use Ubuntu 26.04 preview runners and record their kernel versions.
-These jobs test Linux 7.0 compatibility. The declared kernel minimum remains 7.2 until the compatibility review completes.
+Both Linux architectures passed the native socket suite on `7.0.0-1012-azure`.
 
 Successful pushes to `main` publish the package output and its runtime closure to [mattrobenolt.cachix.org](https://mattrobenolt.cachix.org).
 Pull requests cannot publish packages.

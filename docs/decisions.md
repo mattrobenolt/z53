@@ -222,6 +222,9 @@ Partial reads and writes retain offsets in fixed buffers. Coalesced TCP queries 
 
 ### Linux
 
+The minimum supported kernel is Linux 7.0.0.
+Both Linux architectures passed the native socket suite on `7.0.0-1012-azure` ([CI run](https://github.com/mattrobenolt/z53/actions/runs/34411427340)).
+
 The ring uses `SINGLE_ISSUER` and `DEFER_TASKRUN`, without a fallback backend.
 Unconnected UDP listeners use multishot RECVMSG with a non-incremental provided buffer ring.
 Response slots retain their output and destination until send completion.
