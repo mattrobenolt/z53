@@ -148,18 +148,21 @@ build but cannot publish.
 
 ```sh
 nix develop
-zig build                 # installs zig-out/bin/z53
-zig build run -- -c examples/poc.zon
-zig build test
-nix fmt
-ziglint && ziglint build.zig src tests
-nix flake check
-bash scripts/fuzz.sh 20000
+just build                 # installs zig-out/bin/z53
+just run                  # examples/poc.zon by default; pass another config path
+just test
+just fmt
+just lint
+just check
+just fuzz
 ```
 
-`zig build test` runs every suite, including the native socket tests and a
-benchmark smoke run. Intermittent Linux restart tests can fail with
-`BindFailed`; the cause remains under investigation in
+`just test` runs every suite, including the native socket tests and a
+benchmark smoke run, with the reference ReleaseSafe and baseline CPU flags.
+Benchmarks have their own recipes: `just bench` for one mode and
+`just bench-build` to install the binary for profiling. Run `just` with no
+arguments to list every recipe. Intermittent Linux restart tests can fail
+with `BindFailed`; the cause remains under investigation in
 [#1](https://github.com/mattrobenolt/z53/issues/1).
 
 [Design notes](docs/decisions.md) explain the implementation and its

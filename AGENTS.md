@@ -31,12 +31,11 @@ Run commands directly inside the shell.
 
 Reference GitHub issues in commit messages, not routine source comments.
 Keep private work notes out of the repository.
-Run `zig fmt` and both ziglint invocations before every commit:
+Run the formatting and lint gates before every commit:
 
 ```sh
-zig fmt --check build.zig build.zig.zon src tests
-ziglint
-ziglint build.zig src tests
+just fmt-check
+just lint
 ```
 
 ## Hostile wire input

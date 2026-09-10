@@ -58,13 +58,13 @@ jobs:
       - name: Build packages and run flake checks
         run: nix flake check --no-write-lock-file --print-build-logs
       - name: Check host trust and compile all tests
-        run: nix develop --no-write-lock-file -c zig build test-unit check test-compile -Doptimize=ReleaseSafe -Dcpu=baseline
+        run: nix develop --no-write-lock-file -c just test-portable
       - name: Run the native socket suite
         timeout-minutes: 10
-        run: nix develop --no-write-lock-file -c zig build test-runtime -Doptimize=ReleaseSafe -Dcpu=baseline
+        run: nix develop --no-write-lock-file -c just test-runtime
       - name: Fuzz both wire targets
         if: ${{ !cancelled() }}
-        run: nix develop --no-write-lock-file -c bash scripts/fuzz.sh 20000
+        run: nix develop --no-write-lock-file -c just fuzz
       - name: Realize the package output
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         id: package
