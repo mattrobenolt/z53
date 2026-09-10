@@ -2,6 +2,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const runtime = @import("runtime");
 const testing = std.testing;
+const listen_port = @import("listen_port.zig");
 const logging = @import("runtime_log.zig");
 const system = std.c;
 const wire = runtime.pipeline.wire;
@@ -29,9 +30,16 @@ const Harness = struct {
         self.allocator = testing.FailingAllocator.init(testing.allocator, .{});
         self.service = try self.allocator.allocator().create(runtime.Runtime);
         errdefer self.allocator.allocator().destroy(self.service);
-        const reservation = try endpoint(&self.address, &self.text);
-        defer _ = system.close(reservation);
-        self.listener = try endpoint(&self.upstream_address, &self.upstream_text);
+        // bind(0) ports can be re-issued to another process before the server
+        // or a later datagram peer binds them; reserve outside the ephemeral
+        // range instead.
+        const chosen = try listen_port.reserve(&self.address, "127.0.0.1");
+        @memset(&self.text, 0); // listen uses sliceTo for the sentinel scan.
+        _ = try std.fmt.bufPrint(&self.text, "127.0.0.1:{d}", .{chosen});
+        const upstream_chosen = try listen_port.reserve(&self.upstream_address, "127.0.0.1");
+        @memset(&self.upstream_text, 0);
+        _ = try std.fmt.bufPrint(&self.upstream_text, "127.0.0.1:{d}", .{upstream_chosen});
+        self.listener = try self.upstream_address.bind(system.SOCK.STREAM);
         self.listen = .{std.mem.sliceTo(&self.text, 0)};
         self.upstreams = .{
             .{ .address = std.mem.sliceTo(&self.upstream_text, 0), .force_tcp = true },

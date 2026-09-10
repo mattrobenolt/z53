@@ -2,6 +2,7 @@ const std = @import("std");
 const runtime = @import("runtime");
 const testing = std.testing;
 const system = std.c;
+const listen_port = @import("listen_port.zig");
 const wire = runtime.pipeline.wire;
 const Response = runtime.Runtime.test_datagram.Response;
 
@@ -18,23 +19,13 @@ const Harness = struct {
     }
 
     fn initFamily(self: *Harness, family: runtime.udp.Family) !void {
-        const text = if (family == .ipv4) "127.0.0.1:1" else "[::1]:1";
-        try self.address.parse(text);
-        const port = switch (family) {
-            .ipv4 => &@as(*system.sockaddr.in, @ptrCast(&self.address.storage)).port,
-            .ipv6 => &@as(*system.sockaddr.in6, @ptrCast(&self.address.storage)).port,
-        };
-        port.* = 0;
-        const reservation = try self.address.bind(system.SOCK.STREAM);
-        defer _ = system.close(reservation);
-        try testing.expectEqual(.SUCCESS, std.posix.errno(system.getsockname(
-            reservation,
-            @ptrCast(&self.address.storage),
-            &self.address.length,
-        )));
+        // bind(0) ports can be re-issued to another process before the server
+        // binds them; reserve outside the ephemeral range instead.
+        const host: []const u8 = if (family == .ipv4) "127.0.0.1" else "::1";
+        const chosen = try listen_port.reserve(&self.address, host);
         self.listen[0] = try std.fmt.bufPrint(&self.text, "{s}:{d}", .{
             if (family == .ipv4) "127.0.0.1" else "[::1]",
-            std.mem.bigToNative(u16, port.*),
+            chosen,
         });
         self.zones = .{.{
             .suffix = ".",

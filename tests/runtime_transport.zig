@@ -2,6 +2,7 @@ const std = @import("std");
 const runtime = @import("runtime");
 const testing = std.testing;
 const linux = std.os.linux;
+const listen_port = @import("listen_port.zig");
 const wire = runtime.pipeline.wire;
 
 const Harness = struct {
@@ -13,19 +14,10 @@ const Harness = struct {
     address: runtime.address.Address,
 
     fn init(self: *Harness) !void {
-        try self.address.parse("127.0.0.1:1");
-        const ip: *linux.sockaddr.in = @ptrCast(&self.address.storage);
-        ip.port = 0;
-        const reservation = try self.address.bind(linux.SOCK.STREAM);
-        defer _ = linux.close(reservation);
-        try testing.expectEqual(.SUCCESS, linux.errno(linux.getsockname(
-            reservation,
-            @ptrCast(&self.address.storage),
-            &self.address.length,
-        )));
-        self.listen[0] = try std.fmt.bufPrint(&self.text, "127.0.0.1:{d}", .{
-            std.mem.bigToNative(u16, ip.port),
-        });
+        // bind(0) ports can be re-issued to another process before the server
+        // binds them; reserve outside the ephemeral range instead.
+        const chosen = try listen_port.reserve(&self.address, "127.0.0.1");
+        self.listen[0] = try std.fmt.bufPrint(&self.text, "127.0.0.1:{d}", .{chosen});
         self.zones = .{.{
             .suffix = ".",
             .cache = null,

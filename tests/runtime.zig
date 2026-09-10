@@ -7,6 +7,7 @@ const runtime = @import("runtime");
 const wire = runtime.pipeline.wire;
 
 test {
+    _ = @import("listen_port.zig");
     _ = @import("runtime_forward.zig");
     _ = @import("runtime_health.zig");
     _ = @import("runtime_log.zig");

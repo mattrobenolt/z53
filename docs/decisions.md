@@ -280,7 +280,12 @@ The conservative producer count is 1925:
 Final file release depends on the sole-submitter context and the current ordinary socket operations.
 See [`file_table.c`](https://github.com/gregkh/linux/blob/v7.2.3/fs/file_table.c#L484-L590) and [`resume_user_mode.h`](https://github.com/gregkh/linux/blob/v7.2.3/include/linux/resume_user_mode.h#L40-L50).
 SOCKET operations, zero-copy sends, forced asynchronous closes, or another issuer require a new lifetime analysis.
-The teardown tests do not establish a cause for the intermittent restart `BindFailed` failures tracked in [#3](https://github.com/mattrobenolt/z53/issues/3).
+The intermittent restart `BindFailed` failures in [#3](https://github.com/mattrobenolt/z53/issues/3) are attributed to port theft.
+Another host process received the harness's released `bind(0)` port inside the reserve-close-rebind window, and the server UDP bind refused with `EADDRINUSE` as designed.
+Deliberate ephemeral-port exhaustion reproduces the exact failure signature against the real runtime.
+Test harnesses now reserve listener ports outside the ephemeral range, with pid-partitioned candidate classes for concurrent suites.
+The historical events lack the errno and endpoint record for direct attribution.
+A recurrence with the hardened harness indicates a genuine listener-socket leak.
 
 ### macOS
 
