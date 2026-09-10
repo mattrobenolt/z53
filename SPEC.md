@@ -4,7 +4,7 @@ This document defines z53 behavior, resource limits, and acceptance criteria.
 [Design notes](docs/decisions.md) explain the implementation.
 Section 6 contains example configurations. Section 9 defines test requirements.
 
-z53 is experimental. Listener hostname resolution remains incomplete, and intermittent Linux restart bind failures remain under investigation in [#1](https://github.com/mattrobenolt/z53/issues/1).
+z53 is experimental. Listener hostname resolution remains incomplete, and intermittent Linux restart bind failures remain under investigation in [#3](https://github.com/mattrobenolt/z53/issues/3).
 Use literal IP addresses for listeners and upstreams.
 TLS `server_name` supplies certificate verification and SNI, not address resolution.
 

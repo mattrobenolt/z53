@@ -280,7 +280,7 @@ The conservative producer count is 1925:
 Final file release depends on the sole-submitter context and the current ordinary socket operations.
 See [`file_table.c`](https://github.com/gregkh/linux/blob/v7.2.3/fs/file_table.c#L484-L590) and [`resume_user_mode.h`](https://github.com/gregkh/linux/blob/v7.2.3/include/linux/resume_user_mode.h#L40-L50).
 SOCKET operations, zero-copy sends, forced asynchronous closes, or another issuer require a new lifetime analysis.
-The teardown tests do not establish a cause for the intermittent restart `BindFailed` failures tracked in [#1](https://github.com/mattrobenolt/z53/issues/1).
+The teardown tests do not establish a cause for the intermittent restart `BindFailed` failures tracked in [#3](https://github.com/mattrobenolt/z53/issues/3).
 
 ### macOS
 

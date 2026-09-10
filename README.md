@@ -13,7 +13,7 @@ recursively or validate DNSSEC.
 z53 is experimental. Two things are known-incomplete: listener and upstream
 hostnames are not resolved (use literal IP addresses), and intermittent Linux
 restart bind failures are still under investigation in
-[#1](https://github.com/mattrobenolt/z53/issues/1).
+[#3](https://github.com/mattrobenolt/z53/issues/3).
 
 ## Requirements
 
@@ -163,7 +163,7 @@ Benchmarks have their own recipes: `just bench` for one mode and
 `just bench-build` to install the binary for profiling. Run `just` with no
 arguments to list every recipe. Intermittent Linux restart tests can fail
 with `BindFailed`; the cause remains under investigation in
-[#1](https://github.com/mattrobenolt/z53/issues/1).
+[#3](https://github.com/mattrobenolt/z53/issues/3).
 
 [Design notes](docs/decisions.md) explain the implementation and its
 constraints. [Benchmarks](docs/benchmarks/README.md) record commands,
