@@ -36,32 +36,45 @@ var reserved_count: u16 = 0;
 /// The address retains the chosen port; the caller still rebinds it later.
 pub fn reserve(address: *Address, host: []const u8) Error!u16 {
     const current = ephemeralRange();
-    if (try scan(@as(u32, current.high) + 1, 65535, .ascending, address, host)) |port|
-        return port;
-    if (try scan(current.low -| 1, low_water, .descending, address, host)) |port|
-        return port;
+    for (spans(current)) |span| {
+        if (try scan(span, address, host)) |port| return port;
+    }
     return error.NoFreePort;
 }
 
-/// Walk this process's stride class within [first, last] in the given
-/// direction, probing candidates until one binds or the class is exhausted.
-fn scan(
+const Span = struct {
     first: u32,
     last: u32,
     direction: enum { ascending, descending },
+};
+
+/// The span above the range comes first: services conventionally live below
+/// it. The below-range span exists for Darwin, whose default range ends at
+/// 65535 and leaves nothing above.
+fn spans(range: Range) [2]Span {
+    return .{
+        .{ .first = @as(u32, range.high) + 1, .last = 65535, .direction = .ascending },
+        .{ .first = low_water, .last = @as(u32, range.low) -| 1, .direction = .descending },
+    };
+}
+
+/// Walk this process's stride class within the span, probing candidates until
+/// one binds or the class is exhausted.
+fn scan(
+    span: Span,
     address: *Address,
     host: []const u8,
 ) Error!?u16 {
-    if (first > last) return null;
-    const span: u32 = last - first + 1;
+    if (span.first > span.last) return null;
+    const width: u32 = span.last - span.first + 1;
     const class: u32 = @as(u32, @intCast(std.c.getpid())) % stride;
-    if (class >= span) return null;
-    const capacity: u32 = 1 + (span - 1 - class) / stride;
+    if (class >= width) return null;
+    const capacity: u32 = 1 + (width - 1 - class) / stride;
     for (0..capacity) |walk| {
         const offset: u32 = class + stride * @as(u32, @intCast(walk));
-        const candidate: u16 = switch (direction) {
-            .ascending => @intCast(first + offset),
-            .descending => @intCast(last - offset),
+        const candidate: u16 = switch (span.direction) {
+            .ascending => @intCast(span.first + offset),
+            .descending => @intCast(span.last - offset),
         };
         if (remembered(candidate)) continue;
         if (try probe(address, host, candidate)) return candidate;
@@ -194,6 +207,25 @@ test "range parser rejects malformed input" {
     try std.testing.expectEqual(@as(?Range, null), parseRange("32768\n"));
     try std.testing.expectEqual(@as(?Range, null), parseRange("99999 100000\n"));
     try std.testing.expectEqual(@as(?Range, null), parseRange(""));
+}
+
+test "spans prefer above the range and fall below it" {
+    const linux_like = spans(.{ .low = 32768, .high = 60999 });
+    try std.testing.expectEqual(@as(u32, 61000), linux_like[0].first);
+    try std.testing.expectEqual(@as(u32, 65535), linux_like[0].last);
+    try std.testing.expectEqual(.ascending, linux_like[0].direction);
+    try std.testing.expectEqual(low_water, linux_like[1].first);
+    try std.testing.expectEqual(@as(u32, 32767), linux_like[1].last);
+    try std.testing.expectEqual(.descending, linux_like[1].direction);
+    // A range ending at 65535 leaves an empty above span; the below span answers.
+    const darwin_like = spans(.{ .low = 49152, .high = 65535 });
+    try std.testing.expect(darwin_like[0].first > darwin_like[0].last);
+    try std.testing.expect(darwin_like[1].first <= darwin_like[1].last);
+    var address: Address = undefined;
+    const port = try scan(darwin_like[1], &address, "127.0.0.1") orelse
+        return error.TestUnexpectedResult;
+    try std.testing.expect(port >= low_water);
+    try std.testing.expect(port <= 49151);
 }
 
 test "reserve hands out distinct ports outside the ephemeral range" {
