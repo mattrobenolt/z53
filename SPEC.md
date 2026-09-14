@@ -796,6 +796,12 @@ Options: `services.z53.enable`, `services.z53.config` (text, required),
 The module provides the same three options as the NixOS module and configures a root launchd daemon:
 
 - `RunAtLoad = true`, `KeepAlive = true`
+- Both jobs run through `/bin/sh -c '/bin/wait4path /nix/store && exec ...'`.
+  launchd does not retry a failed exec even with `KeepAlive`, so an unguarded job
+  parks permanently when the store volume mounts after the daemon loads, as on
+  a macOS update reboot. The guard keeps the job waiting as a shell until the
+  executable path exists, and a later exec failure inside the shell exits with
+  a real status that `KeepAlive` restarts.
 - `StandardOutPath` and `StandardErrorPath` at `/var/log/z53.log`
 - Config file at `/etc/z53/z53.zon` through `environment.etc`
 - The plist includes the content-addressed config source as `Z53_CONFIG_SOURCE`.

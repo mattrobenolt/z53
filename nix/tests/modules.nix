@@ -101,9 +101,9 @@ let
       (require "keep alive" flags.KeepAlive)
       (require "command" (
         flags.ProgramArguments == [
-          "${lib.getExe defaultPackage}"
+          "/bin/sh"
           "-c"
-          "/etc/z53/z53.zon"
+          "/bin/wait4path /nix/store && exec ${lib.getExe defaultPackage} -c /etc/z53/z53.zon"
         ]
       ))
       (require "stdout" (flags.StandardOutPath == "/var/log/z53.log"))
@@ -115,13 +115,19 @@ let
       (require "disabled daemon absent" (!(disabled.launchd.daemons ? z53)))
       (require "disabled rotation absent" (!(disabled.launchd.daemons ? z53-logrotate)))
       (require "package override" (
-        builtins.head overridden.launchd.daemons.z53.serviceConfig.ProgramArguments
-        == lib.getExe overridePackage
+        overridden.launchd.daemons.z53.serviceConfig.ProgramArguments == [
+          "/bin/sh"
+          "-c"
+          "/bin/wait4path /nix/store && exec ${lib.getExe overridePackage} -c /etc/z53/z53.zon"
+        ]
       ))
       (require "hourly rotation" (rotation.StartInterval == 3600))
       (require "rotation root" (rotation.UserName == "root"))
+      (require "rotation store volume guard" (
+        lib.hasPrefix "/bin/wait4path /nix/store && exec " (builtins.elemAt rotation.ProgramArguments 2)
+      ))
       (require "rotation state" (
-        builtins.elemAt rotation.ProgramArguments 2 == "/var/log/z53-logrotate.status"
+        lib.hasInfix "--state /var/log/z53-logrotate.status" (builtins.elemAt rotation.ProgramArguments 2)
       ))
       (require "retention and descriptor preservation" (
         lib.hasInfix "copytruncate" rotationConfig.text

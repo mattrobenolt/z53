@@ -39,10 +39,16 @@ in
     environment.etc."z53/z53.zon".source = configFile;
     environment.etc."z53/logrotate.conf".source = rotation;
     launchd.daemons.z53.serviceConfig = {
+      # launchd execs ProgramArguments at load and never retries a failed exec,
+      # even with KeepAlive. If the Nix store volume is not mounted yet, the
+      # job parks permanently and only a manual kickstart or reboot recovers
+      # it. Waiting for the store keeps the job alive as a shell until the
+      # executable path exists, and a later exec failure inside the shell
+      # exits with a real status that KeepAlive does restart.
       ProgramArguments = [
-        "${lib.getExe cfg.package}"
+        "/bin/sh"
         "-c"
-        "/etc/z53/z53.zon"
+        "/bin/wait4path /nix/store && exec ${lib.getExe cfg.package} -c /etc/z53/z53.zon"
       ];
       # The content-addressed path changes the plist so a switch reloads the job.
       EnvironmentVariables.Z53_CONFIG_SOURCE = "${configFile}";
@@ -53,11 +59,11 @@ in
       StandardErrorPath = "/var/log/z53.log";
     };
     launchd.daemons.z53-logrotate.serviceConfig = {
+      # The same store-volume guard as the resolver. See the comment above.
       ProgramArguments = [
-        "${lib.getExe pkgs.logrotate}"
-        "--state"
-        "/var/log/z53-logrotate.status"
-        "/etc/z53/logrotate.conf"
+        "/bin/sh"
+        "-c"
+        "/bin/wait4path /nix/store && exec ${lib.getExe pkgs.logrotate} --state /var/log/z53-logrotate.status /etc/z53/logrotate.conf"
       ];
       UserName = "root";
       StartInterval = 3600;
