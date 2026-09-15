@@ -15,7 +15,7 @@ TLS `server_name` supplies certificate verification and SNI, not address resolut
 1. Language: Zig 0.16.x. The flake pins the exact toolchain revision.
 2. Targets: aarch64-linux, x86_64-linux, aarch64-darwin. No other target.
 3. Runtime dependencies: ztls and one libcrypto backend. Pin ztls at commit
-   `1d72c5331c6a9079279a27eede680534b74f596d`.
+   `4dec72170ebe7be7574bb6cb1addea3ac76ca228`.
    The default backend is OpenSSL from nixpkgs, linked through
    pkg-config. No other runtime dependency is allowed.
 4. Use ztest and zig-benchmark as the test and benchmark helpers. Keep them
@@ -372,6 +372,8 @@ Connections:
   Scan allocation exhaustion aborts startup with `TrustStoreTooLarge`.
   TLS retains partial records and partial writes across socket operations.
   Only complete socket transmission acknowledges pending TLS output, including Finished and KeyUpdate responses.
+  Each ClientHello offers `x25519_mlkem768` and retains the classical X25519 and P-256 shares.
+  A peer can select classical key exchange. A selected hybrid exchange never falls back after a provider failure.
   Post-handshake tickets are discarded. KeyUpdate responses use the established TLS engine.
   Distinguishable local crypto and buffer failures return uncached local SERVFAIL.
 - Upstream queries use a fresh random query ID.

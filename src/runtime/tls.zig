@@ -8,6 +8,7 @@ pub const engine = @import("ztls");
 
 pub const Error = error{ TransportFailure, LocalFailure };
 pub const TrustError = error{ TrustStoreTooLarge, TrustStoreLoadFailed };
+const hybrid_groups = [_]engine.kex.NamedGroup{.x25519_mlkem768};
 
 pub const Trust = struct {
     bundle: std.crypto.Certificate.Bundle,
@@ -59,15 +60,22 @@ pub const Connection = struct {
         defer x25519.secureZero();
         var p256 = engine.p256.KeyPair.generateDeterministic(.init(entropy[32..64].*)) catch
             return error.LocalFailure;
-        defer std.crypto.secureZero(u8, std.mem.asBytes(&p256));
-        self.handshake = .init(.{
+        defer p256.secureZero();
+        var config: engine.ClientHandshake.Config = .{
             .keypairs = .initWithP256(x25519, p256),
             .host_name = name,
             .now_sec = Io.Timestamp.now(io, .real).toSeconds(),
             .random = .init(entropy[64..96].*),
             .bundle = &trust.bundle,
             .reassembly = &self.reassembly,
-        });
+            .hybrid = .{
+                .supported_groups = &hybrid_groups,
+                .initial_key_share = .x25519_mlkem768,
+            },
+        };
+        defer config.keypairs.secureZero();
+        config.validate() catch return error.LocalFailure;
+        self.handshake = .init(config);
         errdefer self.deinit();
         self.records = .init(&self.record_storage);
         self.plaintext = &.{};

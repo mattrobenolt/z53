@@ -3104,12 +3104,18 @@ const DotPeer = struct {
         self.answer_count = 1;
         self.chain = .{@embedFile("fixtures/dot-ca.der")};
         self.signer = try .fromPem(.ecdsa_secp256r1_sha256, @embedFile("fixtures/dot-key.pem"));
-        self.reset();
+        try self.reset();
     }
 
-    fn reset(self: *DotPeer) void {
+    fn reset(self: *DotPeer) !void {
+        var x25519: tls.x25519.KeyPair = .generate();
+        defer x25519.secureZero();
+        var p256: tls.p256.KeyPair = try .generate();
+        defer p256.secureZero();
+        var keypairs: tls.ServerHandshake.KeyPairs = .initWithP256(x25519, p256);
+        defer keypairs.secureZero();
         self.handshake = .init(.{
-            .keypairs = .initWithP256(.generate(), .generate()),
+            .keypairs = keypairs,
             .random = .zero,
         });
         self.handshake.setCredentials(&self.chain, self.signer.signer());
@@ -3146,7 +3152,7 @@ const DotPeer = struct {
             _ = system.close(self.descriptor.?);
             self.descriptor = null;
             self.handshake.deinit();
-            self.reset();
+            try self.reset();
             return;
         }
         self.records.advance(@intCast(count));
@@ -3219,7 +3225,7 @@ fn dotReceive(harness: *Harness, peer: *DotPeer, client: system.fd_t, output: []
 }
 
 // SPEC §§3.6, 3.9, §4: TLS retains authentication across transports and fragmented records.
-test "forward TLS native encrypted exchange reuse and key update logging" {
+test "forward TLS hybrid offer interoperates with classical server, reuse, and key update" {
     var harness: Harness = undefined;
     try harness.init();
     defer harness.deinit();

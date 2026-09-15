@@ -34,7 +34,7 @@ let
     '';
     outputHashMode = "recursive";
     outputHashAlgo = "sha256";
-    outputHash = "sha256-KYlOz/BScwrgf58y6uugfY9stkdBIXmulIn7RK0YODk=";
+    outputHash = "sha256-Dl2+4gzj1eLELcbWUlCFFqkFK/565kr4roJ/Vr0qo3k=";
   };
   package = pkgs.stdenv.mkDerivation {
     pname = "z53";
@@ -56,7 +56,7 @@ let
     postConfigure = ''
       mkdir zig-pkg
       archives=(${dependencies}/*.tar.gz)
-      test "''${#archives[@]}" -eq 6
+      test "''${#archives[@]}" -eq 7
       for archive in "''${archives[@]}"; do
         tar -xzf "$archive" -C zig-pkg
       done

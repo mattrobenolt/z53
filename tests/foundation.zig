@@ -11,18 +11,40 @@ test "TLS client starts with verified policy and caller owned buffers" {
     defer std.crypto.secureZero(u8, &reassembly);
     var output: [16645]u8 = @splat(0);
     defer std.crypto.secureZero(u8, &output);
-    var handshake: tls.ClientHandshake = .init(.{
-        .keypairs = .initWithP256(.generate(), .generate()),
+    var x25519: tls.x25519.KeyPair = .generate();
+    defer x25519.secureZero();
+    var p256: tls.p256.KeyPair = try .generate();
+    defer p256.secureZero();
+    var keypairs: tls.ClientHandshake.KeyPairs = .initWithP256(x25519, p256);
+    defer keypairs.secureZero();
+    const hybrid_groups = [_]tls.kex.NamedGroup{.x25519_mlkem768};
+    var config: tls.ClientHandshake.Config = .{
+        .keypairs = keypairs,
         .host_name = "one.one.one.one",
         .now_sec = 0,
         .random = .zero,
         .bundle = &bundle,
         .reassembly = &reassembly,
-    });
+        .hybrid = .{
+            .supported_groups = &hybrid_groups,
+            .initial_key_share = .x25519_mlkem768,
+        },
+    };
+    defer config.keypairs.secureZero();
+    try config.validate();
+    var handshake: tls.ClientHandshake = .init(config);
     defer handshake.deinit();
     const hello = try handshake.start(&output);
     try testing.expectEqual(@as(u8, 22), hello[0]);
     try testing.expect(std.mem.indexOf(u8, hello, "one.one.one.one") != null);
+    const parsed = try tls.client_hello.parse(hello[5..]);
+    try testing.expect(parsed.public_key != null);
+    try testing.expect(parsed.public_key_p256 != null);
+    try testing.expectEqual(@as(usize, 1), parsed.hybrid_key_shares.len);
+    try testing.expectEqual(
+        tls.kex.NamedGroup.x25519_mlkem768,
+        parsed.hybrid_key_shares.constSlice()[0].group,
+    );
     handshake.completeWrite();
 }
 

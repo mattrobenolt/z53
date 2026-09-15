@@ -320,6 +320,10 @@ Local resource failures return uncached SERVFAIL rather than penalize an upstrea
 TLS uses actual wall-clock certificate time and the system trust bundle.
 A bounded 1.5 MiB trust scan completes before listeners start. Empty or unreadable bundles fail startup.
 Custom Apple trust overrides are unsupported.
+
+Each ClientHello includes one `x25519_mlkem768` share. The 1,222 added wire bytes fit the existing 16,645-byte output buffer.
+Classical X25519 and P-256 shares remain for peers without hybrid support. ztls validates the hybrid policy before handshake setup.
+
 TLS takes precedence over `force_tcp` and client transport. Certificate rejection never permits plaintext fallback to the same member.
 
 TLS output is acknowledged only after complete socket transmission, including Finished and KeyUpdate responses.
