@@ -8,7 +8,17 @@ pub const engine = @import("ztls");
 
 pub const Error = error{ TransportFailure, LocalFailure };
 pub const TrustError = error{ TrustStoreTooLarge, TrustStoreLoadFailed };
-const hybrid_groups = [_]engine.kex.NamedGroup{.x25519_mlkem768};
+const hybrid_policy: engine.ClientHandshake.HybridPolicy = .{
+    .supported_groups = &.{.x25519_mlkem768},
+    .initial_key_share = .x25519_mlkem768,
+};
+
+comptime {
+    hybrid_policy.validate() catch |err|
+        @compileError("invalid z53 TLS hybrid policy: " ++ @errorName(err));
+    if (hybrid_policy.requiresP384())
+        @compileError("z53 TLS key generation does not provide P-384");
+}
 
 pub const Trust = struct {
     bundle: std.crypto.Certificate.Bundle,
@@ -68,18 +78,18 @@ pub const Connection = struct {
             .random = .init(entropy[64..96].*),
             .bundle = &trust.bundle,
             .reassembly = &self.reassembly,
-            .hybrid = .{
-                .supported_groups = &hybrid_groups,
-                .initial_key_share = .x25519_mlkem768,
-            },
+            .hybrid = hybrid_policy,
         };
         defer config.keypairs.secureZero();
-        config.validate() catch return error.LocalFailure;
         self.handshake = .init(config);
-        errdefer self.deinit();
         self.records = .init(&self.record_storage);
         self.plaintext = &.{};
-        self.queue(self.handshake.?.start(&self.output) catch return error.LocalFailure);
+        const hello = self.handshake.?.start(&self.output) catch |err| {
+            self.deinit();
+            self.failure_reason = err;
+            return classify(err);
+        };
+        self.queue(hello);
     }
 
     // ziglint-ignore: Z030 -- The vacant sentinel permits session reuse after secret erasure.

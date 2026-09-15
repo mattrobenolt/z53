@@ -7,6 +7,24 @@ const logging = @import("runtime_log.zig");
 const system = std.c;
 const wire = runtime.pipeline.wire;
 const config = runtime.pipeline.resolver.config;
+const connection_tls = runtime.forward.tls;
+
+// SPEC §§3.6, 4 — TLS setup retains the exact local start failure after cleanup.
+test "TLS setup retains start failure diagnostics" {
+    var connection: connection_tls.Connection = undefined;
+    connection.handshake = null;
+    defer if (connection.handshake != null) connection.deinit();
+
+    var trust: connection_tls.Trust = undefined;
+    trust.bundle = .empty;
+    const server_name: [254]u8 = @splat('a');
+    try testing.expectError(
+        error.LocalFailure,
+        connection.init(testing.io, &server_name, &trust),
+    );
+    try testing.expectEqual(error.ServerNameTooLong, connection.failure_reason.?);
+    try testing.expect(connection.handshake == null);
+}
 
 const Harness = struct {
     service: *runtime.Runtime,

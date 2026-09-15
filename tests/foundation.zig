@@ -15,11 +15,9 @@ test "TLS client starts with verified policy and caller owned buffers" {
     defer x25519.secureZero();
     var p256: tls.p256.KeyPair = try .generate();
     defer p256.secureZero();
-    var keypairs: tls.ClientHandshake.KeyPairs = .initWithP256(x25519, p256);
-    defer keypairs.secureZero();
     const hybrid_groups = [_]tls.kex.NamedGroup{.x25519_mlkem768};
     var config: tls.ClientHandshake.Config = .{
-        .keypairs = keypairs,
+        .keypairs = .initWithP256(x25519, p256),
         .host_name = "one.one.one.one",
         .now_sec = 0,
         .random = .zero,

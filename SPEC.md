@@ -376,6 +376,7 @@ Connections:
   A peer can select classical key exchange. A selected hybrid exchange never falls back after a provider failure.
   Post-handshake tickets are discarded. KeyUpdate responses use the established TLS engine.
   Distinguishable local crypto and buffer failures return uncached local SERVFAIL.
+  ClientHello start failures preserve their exact ztls cause.
 - Upstream queries use a fresh random query ID.
 - Upstream queries carry EDNS0 with payload size 1232. Copy the client DO
   bit and all unknown EDNS options.

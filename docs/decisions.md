@@ -322,7 +322,9 @@ A bounded 1.5 MiB trust scan completes before listeners start. Empty or unreadab
 Custom Apple trust overrides are unsupported.
 
 Each ClientHello includes one `x25519_mlkem768` share. The 1,222 added wire bytes fit the existing 16,645-byte output buffer.
-Classical X25519 and P-256 shares remain for peers without hybrid support. ztls validates the hybrid policy before handshake setup.
+Classical X25519 and P-256 shares remain for peers without hybrid support.
+z53 validates this static policy at compile time and rejects any P-384 requirement until key generation supports it.
+ClientHello start failures retain their exact ztls cause after connection state is erased.
 
 TLS takes precedence over `force_tcp` and client transport. Certificate rejection never permits plaintext fallback to the same member.
 
