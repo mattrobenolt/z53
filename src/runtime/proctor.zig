@@ -18,7 +18,7 @@ pub const Ownership = ownership.Ownership;
 
 pub const ring_entries = 512;
 pub const client_file_start = 2 * config.listeners_max;
-pub const operations_max = 290;
+pub const operations_max = 291;
 pub const mapping_bytes_max = 256 * 1024;
 pub const buffers_max = 64;
 pub const buffer_bytes = wire.message_bytes_max +
@@ -261,6 +261,14 @@ pub const Proctor = struct {
         return self.ownership[index].arm(index);
     }
 
+    /// A strictly serialized slot may reset its generation once idle: its
+    /// single operation completed, and no completion for it can be pending.
+    pub fn resetGeneration(self: *Proctor, index: u32) void {
+        assert(index < operations_max);
+        assert(self.ownership[index].state == .idle);
+        self.ownership[index].generation = 0;
+    }
+
     /// An interrupted enter returns no completion and leaves operation ownership unchanged.
     pub fn next(self: *Proctor) Error!?linux.io_uring_cqe {
         // The shared SQ head preserves unconsumed entries across an interrupted enter.
@@ -320,7 +328,7 @@ pub const Proctor = struct {
 
 // The teardown token's low 32 bits exceed operations_max, so it matches no owner slot.
 const teardown_token: u64 = std.math.maxInt(u64);
-// The worst case produces 1925 CQEs: 1024 published, 290 terminals, 290 cancellations,
+// The worst case produces 1927 CQEs: 1024 published, 291 terminals, 291 cancellations,
 // 64 UDP shots, 256 accepts, and the marker. The cap keeps headroom above that count.
 const teardown_completions_max = 2048;
 const TeardownError = error{

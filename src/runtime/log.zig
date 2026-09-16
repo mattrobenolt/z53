@@ -1,9 +1,11 @@
-//! Bounded, synchronous completion logs. Sink failures never change DNS outcomes.
+//! Bounded completion logs. Sink failures never change DNS outcomes.
+//! The runtime queues lines and delivers them through the event loop.
 const std = @import("std");
 const system = std.c;
 const Io = std.Io;
 const IpAddress = Io.net.IpAddress;
 const mem = std.mem;
+const assert = std.debug.assert;
 
 const resolver = @import("../resolver.zig");
 const FailureReason = @import("failure.zig").Reason;
@@ -12,6 +14,9 @@ const wire = resolver.wire;
 const failure_reason_bytes_max = 128;
 
 pub const line_bytes_max = 3072;
+/// SPEC §4: the delivery queue holds this many formatted lines.
+pub const queue_slots_max = 64;
+const queue_mask = queue_slots_max - 1;
 pub const Protocol = enum { udp, tcp, dot };
 pub const Query = struct {
     client: ?IpAddress,
@@ -34,12 +39,114 @@ pub const Sink = struct {
     }
 };
 
+/// One formatted line. The length precedes the content, so the queue needs
+/// no separate boundary structure.
+const Slot = struct {
+    length: u32,
+    bytes: [line_bytes_max]u8,
+};
+
 /// The event thread owns this workspace. Each synchronous sink call consumes its borrowed bytes.
 /// Sink callbacks must not call logging functions on the same logger.
 pub const Logger = struct {
     sink: Sink = .{},
     buffer: [line_bytes_max]u8 = undefined,
+
+    /// Fixed delivery queue, owned by the event thread. The counters are
+    /// monotonic, so full and empty are subtractions that never wrap.
+    queue: [queue_slots_max]Slot = undefined,
+    enqueued: u64 = 0,
+    delivered: u64 = 0,
+    write_state: enum { idle, poll, executing } = .idle,
+    /// Content bytes of the delivered line already accepted by the sink file.
+    write_offset: u32 = 0,
+
+    /// The runtime installs this sink so formatted lines enter the queue
+    /// instead of the dispatch path. The runtime then drives the writes.
+    pub fn queueSink(self: *Logger) Sink {
+        return .{ .context = self, .write = enqueueLine };
+    }
+
+    fn slot(self: *Logger, counter: u64) *Slot {
+        return &self.queue[@as(usize, @truncate(counter)) & queue_mask];
+    }
+
+    /// Copies one formatted line into the queue. SPEC §4: a full queue
+    /// discards the oldest undelivered line first. The kernel owns the
+    /// executing line, so a full queue behind it discards the incoming line.
+    pub fn enqueue(self: *Logger, line: []const u8) void {
+        assert(line.len <= line_bytes_max);
+        if (self.enqueued - self.delivered == queue_slots_max) {
+            if (self.write_state == .executing) return;
+            self.delivered += 1;
+            self.write_offset = 0;
+        }
+        const target = self.slot(self.enqueued);
+        @memcpy(target.bytes[0..line.len], line);
+        target.length = @intCast(line.len);
+        self.enqueued += 1;
+    }
+
+    /// Returns the next sink slice and marks it in flight, or null when a
+    /// write or poll is outstanding or the queue is empty.
+    pub fn beginWrite(self: *Logger) ?[]const u8 {
+        if (self.write_state != .idle) return null;
+        if (self.delivered == self.enqueued) return null;
+        self.write_state = .executing;
+        return self.remaining();
+    }
+
+    fn remaining(self: *Logger) []const u8 {
+        const current = self.slot(self.delivered);
+        assert(self.write_offset < current.length);
+        return current.bytes[self.write_offset..current.length];
+    }
+
+    /// Accepts `count` bytes written by the sink file. A partial count
+    /// leaves the remainder queued for the next submission.
+    pub fn writeAdvanced(self: *Logger, count: usize) void {
+        assert(self.write_state == .executing);
+        assert(count <= self.remaining().len);
+        self.write_offset += @intCast(count);
+        if (self.write_offset == self.slot(self.delivered).length) {
+            self.delivered += 1;
+            self.write_offset = 0;
+        }
+        self.write_state = .idle;
+    }
+
+    /// The sink file accepted nothing and is not writable. The caller arms a
+    /// writability poll and calls pollReady when it fires.
+    pub fn writeStalled(self: *Logger) void {
+        assert(self.write_state == .executing);
+        self.write_state = .poll;
+    }
+
+    pub fn pollReady(self: *Logger) void {
+        assert(self.write_state == .poll);
+        self.write_state = .idle;
+    }
+
+    /// The sink file rejected the line. SPEC §4: discard it without a DNS error.
+    pub fn writeFailed(self: *Logger) void {
+        assert(self.write_state != .idle);
+        self.delivered += 1;
+        self.write_offset = 0;
+        self.write_state = .idle;
+    }
+
+    /// No operation is outstanding. Teardown abandons the queued lines.
+    pub fn writeCanceled(self: *Logger) void {
+        assert(self.write_state != .idle);
+        self.write_offset = 0;
+        self.write_state = .idle;
+    }
 };
+
+fn enqueueLine(_: Io, context: ?*anyopaque, line: []const u8) error{WriteFailed}!void {
+    const logger: *Logger = @ptrCast(@alignCast(context.?));
+    logger.enqueue(line);
+}
 
 pub fn peer(
     storage: *const system.sockaddr.storage,

@@ -4004,3 +4004,64 @@ test "forward Darwin clock snapshot does not extend relative timers" {
         try service.proctor.next(),
     );
 }
+
+// SPEC §4: completion lines reach a piped stderr through the event loop, in
+// completion order, without delaying query dispatch.
+test "asynchronous stderr logging delivers completion lines" {
+    var harness: Harness = undefined;
+    try harness.init();
+    defer harness.deinit();
+    var pipes: [2]system.fd_t = undefined;
+    if (system.pipe(&pipes) != 0) return error.PipeFailed;
+    const saved = system.dup(2);
+    if (saved < 0) return error.DupFailed;
+    var restored = false;
+    defer if (!restored) {
+        _ = system.dup2(saved, 2);
+        _ = system.close(saved);
+        _ = system.close(pipes[1]);
+        _ = system.close(pipes[0]);
+    };
+    if (system.dup2(pipes[1], 2) < 0) return error.DupFailed;
+    // The runtime's startup places the piped stderr in nonblocking mode.
+    try harness.start();
+    const datagram = try harness.client(system.SOCK.DGRAM);
+    defer _ = system.close(datagram);
+    var input: [512]u8 = undefined;
+    var output: [512]u8 = undefined;
+    for (0..3) |index| {
+        const bytes = try query(&input, @intCast(index), "localhost.");
+        try send(datagram, bytes);
+        const length = try harness.receive(datagram, &output);
+        try testing.expectEqual(
+            @as(u16, @intCast(index)),
+            (try wire.Header.decode(output[0..length])).id,
+        );
+    }
+    const logger = &harness.service.forward.logger;
+    for (0..256) |_| {
+        if (logger.delivered == logger.enqueued) break;
+        try testing.expect(try harness.service.step());
+    }
+    try testing.expectEqual(logger.enqueued, logger.delivered);
+    // Restore the real stderr before asserting, so failures stay visible.
+    if (system.dup2(saved, 2) < 0) return error.DupFailed;
+    _ = system.close(saved);
+    _ = system.close(pipes[1]);
+    restored = true;
+    var captured: [16384]u8 = undefined;
+    var total: usize = 0;
+    while (true) {
+        const count = system.read(pipes[0], captured[total..].ptr, captured.len - total);
+        if (count < 0) return error.PipeReadFailed;
+        if (count == 0) break;
+        total += @intCast(count);
+    }
+    _ = system.close(pipes[0]);
+    const lines = captured[0..total];
+    try testing.expectEqual(@as(usize, 3), std.mem.count(u8, lines, "event=query"));
+    try testing.expectEqual(@as(usize, 3), std.mem.count(u8, lines, "src=rfc6761"));
+    try testing.expectEqual(@as(usize, 3), std.mem.count(u8, lines, "qname=\"localhost.\""));
+    try testing.expectEqual(@as(usize, 3), std.mem.count(u8, lines, "\n"));
+    try harness.stop();
+}

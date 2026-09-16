@@ -6,7 +6,7 @@ const assert = std.debug.assert;
 
 pub const Ownership = @import("ownership.zig").Ownership;
 
-pub const operations_max = 210;
+pub const operations_max = 211;
 pub const buffers_max = 64;
 
 pub const Error = error{

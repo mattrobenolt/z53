@@ -217,3 +217,83 @@ test "logging malformed query reply and failed capture sink" {
     try testing.expectEqual(0, capture.length);
     try testing.expectEqual(1, (try wire.Header.decode(&reply)).bits & 15);
 }
+
+// SPEC §4: a full queue discards the oldest undelivered lines, and delivery
+// retains completion order across physical wraparound.
+test "log queue drop-oldest saturation wraparound and drain order" {
+    var logger: log.Logger = .{};
+    var line: [32]u8 = undefined;
+    for (0..70) |index| {
+        const bytes = try std.fmt.bufPrint(&line, "line-{d:0>3}\n", .{index});
+        logger.enqueue(bytes);
+    }
+    try testing.expectEqual(@as(u64, 70), logger.enqueued);
+    try testing.expectEqual(@as(u64, 6), logger.delivered);
+    var expected: u64 = 6;
+    while (logger.beginWrite()) |slice| {
+        const bytes = try std.fmt.bufPrint(&line, "line-{d:0>3}\n", .{expected});
+        try testing.expectEqualStrings(bytes, slice);
+        logger.writeAdvanced(slice.len);
+        expected += 1;
+    }
+    try testing.expectEqual(@as(u64, 70), expected);
+    try testing.expectEqual(logger.enqueued, logger.delivered);
+    try testing.expect(logger.beginWrite() == null);
+}
+
+// SPEC §4: a partial write resumes at its offset without losing the line.
+test "log queue partial write resume" {
+    var logger: log.Logger = .{};
+    logger.enqueue("partial-line\n");
+    logger.enqueue("next-line\n");
+    const first = logger.beginWrite().?;
+    try testing.expectEqualStrings("partial-line\n", first);
+    logger.writeAdvanced(8);
+    const rest = logger.beginWrite().?;
+    try testing.expectEqualStrings("line\n", rest);
+    logger.writeAdvanced(rest.len);
+    const second = logger.beginWrite().?;
+    try testing.expectEqualStrings("next-line\n", second);
+    logger.writeAdvanced(second.len);
+    try testing.expect(logger.beginWrite() == null);
+}
+
+// SPEC §4: the executing line is exempt from discard; a stalled or failed
+// write releases its line through the poll, failure, and cancellation paths.
+test "log queue executing exemption stall failure and cancellation" {
+    var logger: log.Logger = .{};
+    var line: [16]u8 = undefined;
+    for (0..log.queue_slots_max) |index| {
+        const bytes = try std.fmt.bufPrint(&line, "l{d:0>3}\n", .{index});
+        logger.enqueue(bytes);
+    }
+    // The kernel owns the executing line, so a full queue drops the arrival.
+    const first = logger.beginWrite().?;
+    logger.enqueue("dropped\n");
+    try testing.expectEqual(@as(u64, log.queue_slots_max), logger.enqueued);
+    try testing.expectEqual(@as(u64, 0), logger.delivered);
+    logger.writeAdvanced(first.len);
+    try testing.expectEqual(@as(u64, 1), logger.delivered);
+    // A poll parks the line without pinning its bytes, so saturation evicts it.
+    const stalled = logger.beginWrite().?;
+    try testing.expectEqualStrings("l001\n", stalled);
+    logger.writeStalled();
+    try testing.expect(logger.beginWrite() == null);
+    logger.enqueue("fills\n");
+    logger.enqueue("evicts-stalled\n");
+    try testing.expectEqual(@as(u64, 2), logger.delivered);
+    logger.pollReady();
+    const second = logger.beginWrite().?;
+    try testing.expectEqualStrings("l002\n", second);
+    logger.writeFailed();
+    const third = logger.beginWrite().?;
+    try testing.expectEqualStrings("l003\n", third);
+    logger.writeAdvanced(1);
+    const remainder = logger.beginWrite().?;
+    try testing.expectEqualStrings("003\n", remainder);
+    logger.writeStalled();
+    logger.writeCanceled();
+    const repeated = logger.beginWrite().?;
+    try testing.expectEqualStrings("l003\n", repeated);
+    try testing.expectEqual(@as(u64, 3), logger.delivered);
+}

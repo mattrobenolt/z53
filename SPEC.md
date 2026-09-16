@@ -58,7 +58,7 @@ Teardown retains its independent clock and deadline.
 The Linux event thread owns these fixed resources:
 
 - 512 submission entries and 1024 completion entries.
-- 290 operation slots with completion generations.
+- 291 operation slots with completion generations.
 - 64 provided UDP buffers and 64 response slots, shared across listeners.
 - 128 TCP client slots, each with one request and one response buffer.
 - 192 registered files: 32 listener slots, 128 direct-accept slots, and 32 upstream slots.
@@ -68,6 +68,7 @@ Each direct-accepted TCP connection retrieves its peer through socket `URING_CMD
 Per-client sockaddr storage survives lookup completion under the existing operation ownership barriers.
 Upstream I/O and linked timeout pairs use operation slots 225 through 288.
 Slot 289 supplies the idle timer. Both linked completions retire before a session can rearm.
+Slot 290 drives the stderr log writer, one line at a time, with a poll rearm after EAGAIN.
 Explicit cancellation also retains each slot until its target completion and cancellation acknowledgement arrive.
 Stop batches cancellation submissions against the remaining submission capacity.
 
@@ -105,12 +106,13 @@ Periodic failures preserve the active table and mtime for the next configured ch
 
 ### 1.2 macOS client runtime bounds
 
-The macOS event thread owns one kqueue with 210 one-shot operation slots:
+The macOS event thread owns one kqueue with 211 one-shot operation slots:
 
 - 16 UDP reads and 16 TCP accepts
 - One hosts/admission timer and 128 TCP clients
 - 16 UDP writes and 32 upstream socket interests
 - One precise upstream deadline timer
+- One stderr log writer
 
 It receives one readiness event per step, so no userspace event batch survives descriptor reuse.
 Each rearm advances a non-wrapping completion generation.
@@ -512,9 +514,12 @@ DoT transitions include `tls_name`. States are `down` and `restored`. Restored t
 Attempt failures never claim a health state or a failure count.
 
 The formatter uses a fixed 3072-byte buffer and the existing parser workspace.
-No query log requires heap allocation or a background queue.
-The sink writes synchronously on the event thread. A slow stderr consumer can delay every query and upstream timeout dispatch.
-A failed or short write loses all or part of the line, without a DNS error or retry queue.
+No query log requires heap allocation. Formatted lines enter a fixed 64-line queue on the event thread, which delivers them to stderr one line at a time, in completion order.
+The runtime places stderr in nonblocking mode at startup. A partial write resumes at its offset. An `EAGAIN` write rearms a writability poll on the same loop.
+A slow stderr consumer delays log delivery only. Query and timeout dispatch continue.
+When the queue is full, the resolver discards the oldest undelivered lines first. The line whose write is executing is exempt, because the kernel owns its bytes.
+A failed write discards that line without a DNS error. A closed stderr destination terminates the process through SIGPIPE, as with synchronous writes.
+Stop discards queued undelivered lines.
 
 Config errors print the file, position, and reason, then exit with status 1.
 
@@ -840,6 +845,8 @@ If rollback is necessary, stop z53 before the previous resolver reclaims the por
 - hosts parser: valid lines, skip invalid lines, PTR synthesis.
 - Config loader: defaults, both example configs, and every validation error
   in section 5.
+- Log queue: drop-oldest saturation, executing-line exemption, partial-write
+  resume, wraparound, and cancellation.
 
 ### 9.2 Integration tests
 
@@ -865,6 +872,8 @@ in-process queries:
 - Serve stale: with the grace window on and all upstreams dead, an expired
   entry serves with TTL 30.
 - Every upstream dead: SERVFAIL, cached 5 seconds.
+- Asynchronous logging: completion lines reach a piped stderr in completion
+  order while the resolver keeps answering.
 
 ### 9.3 Fuzzing
 

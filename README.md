@@ -97,7 +97,9 @@ query name and type, response code, duration, and the answer source: cache,
 stale, hosts, or a named upstream with its transport. Failures and health
 transitions get their own events.
 
-Writes are synchronous, so a slow stderr consumer delays the resolver.
+Writes ride the event loop, so a slow stderr consumer delays log delivery
+only; a bounded queue discards the oldest undelivered lines under sustained
+backpressure.
 Field definitions and escaping rules are in [SPEC §4](SPEC.md#4-observability).
 
 ## NixOS and nix-darwin

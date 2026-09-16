@@ -47,7 +47,7 @@ const RuntimeUnitTests = struct {
         try testing.expectEqual(128, runtime.tcp.clients_max);
         try testing.expectEqual(64, runtime.proctor.buffers_max);
         try testing.expectEqual(
-            if (builtin.os.tag == .linux) 290 else 210,
+            if (builtin.os.tag == .linux) 291 else 211,
             runtime.proctor.operations_max,
         );
     }

@@ -151,7 +151,11 @@ pub const Forward = struct {
     ) (Io.RandomSecureError || tls.TrustError)!void {
         self.config = settings;
         self.io = io;
-        self.logger.sink = .{};
+        self.logger.sink = self.logger.queueSink();
+        self.logger.enqueued = 0;
+        self.logger.delivered = 0;
+        self.logger.write_state = .idle;
+        self.logger.write_offset = 0;
         self.trust.bundle = .empty;
         self.support = @splat(.unsupported);
         self.protocols = @splat(null);

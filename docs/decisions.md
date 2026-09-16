@@ -356,8 +356,32 @@ The logger reparses the original query and final response through a synchronous 
 Its retained 3072-byte buffer exposes only the current formatted prefix to the sink.
 Callbacks must not reenter the same logger.
 
-Stderr writes are synchronous. Backpressure can delay every query and timeout dispatch.
-A short or failed write loses log bytes without a DNS error or retry queue.
+Stderr writes ride the event loop rather than the dispatch path.
+The runtime installs a queue sink, so `completed`, `failure`, and `health` copy their formatted line into a fixed 64-slot queue inside the logger.
+Each slot holds one u32 length and the 3072-byte line, and monotonic counters index the slots, so full and empty are subtractions that never wrap.
+One write is in flight at a time, which preserves completion order without any queue synchronization: the producer and the consumer are the same thread.
+
+The slot layout adapts the MPSC slot ring from exosphere (`AtomicRingBuffer`).
+The atomics, futex wake, shutdown flag, and consumer thread do not transfer, because completions are the notification and `stop` is the shutdown.
+The unchecked producer `fetchAdd` does not transfer either: its consumer copies bytes out before a producer can lap it, while this consumer is the kernel, which copies at write execution.
+Anything between submission and completion is pinned, the same lifetime rule as response slots retaining output until send completion.
+Saturation therefore evicts the oldest undelivered line instead of clobbering, and the executing line is exempt because its bytes are kernel-owned.
+An EAGAIN completion unpins nothing for long: the stall lives in the poll wait, where eviction remains possible.
+
+Linux drives slot 290 with `WRITE` and a max-int offset, which selects the file position so a regular-file stderr appends rather than rewrites its start.
+An EAGAIN completion rearms a one-shot `POLL_ADD` for `POLLOUT`, and the poll completion resubmits the write.
+Startup sets `O_NONBLOCK` on stderr, which keeps failed writes out of io-wq: the kernel returns EAGAIN completions instead of parking the write in worker threads.
+The flag lives on the shared open file description. Service managers hand z53 a private pipe or socket, but an interactive shell shares its own stdio with a foreground z53, and the flag leak is a known hazard of that arrangement.
+
+The log slot is strictly serialized, so its generation resets while idle: with one operation at a time and the previous completion consumed before the next submission, no completion for the slot can be pending or in flight when ownership is idle.
+Without the reset, a resolver sustaining ten thousand queries per second would exhaust 2^31 arms in roughly two days and exit through `GenerationExhausted`.
+macOS consumes an arm only on stalls, so its log slot keeps the non-wrapping rule.
+macOS drains with inline nonblocking writes and parks on one shared `EVFILT.WRITE` after EAGAIN or EINTR, the same shape as the UDP response write filter.
+
+A partial write resumes at its offset, which is strictly better than the previous short-write loss.
+A hard error discards the in-flight line; a closed stderr keeps discarding lines without a DNS error, and EPIPE keeps its SIGPIPE termination so a dead manager restarts the service.
+Stop discards the queue, and the drain marker covers the canceled operation.
+Formatting stays on the event thread by necessity, because borrowed packet views cannot survive asynchronous work, so the steady-state win is not throughput but the tail: no dispatch ever waits on the stderr consumer.
 [Clock measurements](benchmarks/2026-09-08-clock.txt) include syscall counts and duration checks.
 
 ## Fuzz runner compatibility

@@ -20,9 +20,11 @@ const timer_slot = 2 * config.listeners_max;
 const client_start = timer_slot + 1;
 const send_start = client_start + tcp.clients_max;
 pub const upstream_start = send_start + config.listeners_max;
+pub const log_slot = upstream.timer_slot + 1;
+const stderr_fd: system.fd_t = 2;
 
 comptime {
-    assert(proctor.operations_max == upstream.timer_slot + 1);
+    assert(proctor.operations_max == log_slot + 1);
 }
 
 pub const Error = error{
@@ -113,6 +115,7 @@ pub const Runtime = struct {
         self.tick_ns = try nowNs();
         const now_s = self.tick_ns / std.time.ns_per_s;
         for (self.pipeline.zones.items) |*zone| zone.check_s = now_s;
+        nonblockingStderr();
         try self.proctor.arm(timer_slot, timer_slot, system.EVFILT.TIMER);
     }
 
@@ -165,10 +168,14 @@ pub const Runtime = struct {
             try self.sendReady(@intCast(slot - send_start));
         } else if (slot == upstream.timer_slot) {
             try self.upstreams.expired(self);
+        } else if (slot == log_slot) {
+            self.forward.logger.pollReady();
+            try self.logsDrive();
         } else {
             try self.upstreams.ready(self, @intCast(slot - upstream.operation_start));
         }
         try self.upstreams.drive(self);
+        try self.logsDrive();
         return true;
     }
 
@@ -540,6 +547,38 @@ pub const Runtime = struct {
         self.clients[index].state = .vacant;
         try self.resumeAccepts();
     }
+
+    /// Drains queued lines with inline nonblocking writes. Each iteration
+    /// completes a line or returns, so the loop is bounded by the queue.
+    fn logsDrive(self: *Runtime) Error!void {
+        const logger = &self.forward.logger;
+        while (true) {
+            const slice = logger.beginWrite() orelse return;
+            const count = system.write(stderr_fd, slice.ptr, slice.len);
+            if (count < 0) {
+                switch (std.posix.errno(count)) {
+                    // EAGAIN and EINTR park on the write filter. A writable
+                    // stderr fires it immediately, so no dispatch stalls.
+                    .AGAIN, .INTR => {
+                        logger.writeStalled();
+                        try self.armLogWrite();
+                        return;
+                    },
+                    else => logger.writeFailed(),
+                }
+                continue;
+            }
+            if (count == 0) {
+                logger.writeFailed();
+                continue;
+            }
+            logger.writeAdvanced(@intCast(count));
+        }
+    }
+
+    fn armLogWrite(self: *Runtime) Error!void {
+        try self.proctor.arm(log_slot, stderr_fd, system.EVFILT.WRITE);
+    }
 };
 
 pub fn now() error{ClockFailed}!u64 {
@@ -547,6 +586,16 @@ pub fn now() error{ClockFailed}!u64 {
     if (system.clock_gettime(system.CLOCK.MONOTONIC, &timestamp) < 0) return error.ClockFailed;
     if (timestamp.sec < 0) return error.ClockFailed;
     return @intCast(timestamp.sec);
+}
+
+/// SPEC §4: a nonblocking stderr keeps inline writes off the dispatch path.
+/// A closed stderr leaves the flag unset; its writes then fail and discard
+/// their lines.
+fn nonblockingStderr() void {
+    const flags = system.fcntl(stderr_fd, system.F.GETFL);
+    if (flags < 0) return;
+    const value: c_int = @bitCast(@as(system.O, .{ .NONBLOCK = true }));
+    if (system.fcntl(stderr_fd, system.F.SETFL, flags | value) < 0) return;
 }
 
 pub fn nowNs() error{ClockFailed}!u64 {

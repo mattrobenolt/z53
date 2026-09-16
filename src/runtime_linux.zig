@@ -19,9 +19,11 @@ const timer_slot = 2 * config.listeners_max;
 const client_start = timer_slot + 1;
 const response_start = client_start + tcp.clients_max;
 pub const upstream_start = response_start + proctor.buffers_max;
+pub const log_slot = upstream.timer_slot + 1;
+const stderr_fd: linux.fd_t = 2;
 
 comptime {
-    assert(proctor.operations_max == upstream.timer_slot + 1);
+    assert(proctor.operations_max == log_slot + 1);
 }
 
 pub const Error = error{
@@ -109,6 +111,7 @@ pub const Runtime = struct {
         self.tick_ns = try nowNs();
         const now_s = self.tick_ns / std.time.ns_per_s;
         for (self.pipeline.zones.items) |*zone| zone.check_s = now_s;
+        nonblockingStderr();
         try self.timer();
     }
 
@@ -193,11 +196,19 @@ pub const Runtime = struct {
         // A scheduler clock failure must not abort teardown's independent drain.
         if (self.state == .running) self.tick_ns = try nowNs();
         const slot: u32 = @truncate(completion.user_data);
+        if (slot == log_slot) {
+            try self.logCompleted(&completion);
+            if (self.state == .running) try self.logsDrive();
+            return true;
+        }
         if (slot >= upstream.operation_start) {
             if (slot == upstream.timer_slot) {
                 if (self.state == .running) try self.upstreams.expired(self);
             } else try self.upstreams.completed(self, &completion);
-            if (self.state == .running) try self.upstreams.drive(self);
+            if (self.state == .running) {
+                try self.upstreams.drive(self);
+                try self.logsDrive();
+            }
             return true;
         }
         if (completion.user_data & proctor.cancel_bit != 0) return true;
@@ -216,7 +227,10 @@ pub const Runtime = struct {
         } else {
             self.responses[slot - response_start].state = .free;
         }
-        if (self.state == .running) try self.upstreams.drive(self);
+        if (self.state == .running) {
+            try self.upstreams.drive(self);
+            try self.logsDrive();
+        }
         return true;
     }
 
@@ -581,6 +595,60 @@ pub const Runtime = struct {
         );
     }
 
+    fn logCompleted(self: *Runtime, completion: *const linux.io_uring_cqe) Error!void {
+        // A cancellation acknowledgement carries the slot's low bits. The
+        // target completion already released the logger, so only the kernel
+        // ownership bookkeeping remains, which proctor.next consumed.
+        if (completion.user_data & proctor.cancel_bit != 0) return;
+        const logger = &self.forward.logger;
+        switch (logger.write_state) {
+            .executing => if (completion.res > 0) {
+                logger.writeAdvanced(@intCast(completion.res));
+            } else switch (completion.err()) {
+                .AGAIN => if (self.state == .running) {
+                    logger.writeStalled();
+                    try self.armLogPoll();
+                } else logger.writeCanceled(),
+                .CANCELED => logger.writeCanceled(),
+                else => logger.writeFailed(),
+            },
+            .poll => if (completion.res > 0 and completion.res & linux.POLL.OUT != 0) {
+                logger.pollReady();
+            } else switch (completion.err()) {
+                .CANCELED => logger.writeCanceled(),
+                else => logger.writeFailed(),
+            },
+            // Ownership rejects completions for an unarmed slot, so no log
+            // completion can arrive while the logger is idle.
+            .idle => unreachable,
+        }
+    }
+
+    fn logsDrive(self: *Runtime) Error!void {
+        const logger = &self.forward.logger;
+        const slice = logger.beginWrite() orelse return;
+        const token = try self.armLog();
+        // A maxInt offset selects the file position, so a regular-file stderr
+        // appends rather than rewriting its start.
+        _ = self.proctor.ring.write(token, stderr_fd, slice, std.math.maxInt(u64)) catch
+            return error.SubmissionFailed;
+    }
+
+    fn armLogPoll(self: *Runtime) Error!void {
+        const token = try self.armLog();
+        _ = self.proctor.ring.poll_add(token, stderr_fd, linux.POLL.OUT) catch
+            return error.SubmissionFailed;
+    }
+
+    fn armLog(self: *Runtime) Error!u64 {
+        const owner = &self.proctor.ownership[log_slot];
+        // The log slot is strictly serialized: while no operation is
+        // outstanding, no completion for it can be pending or in flight, so a
+        // generation reset aliases no live token.
+        if (owner.generation == std.math.maxInt(u31)) self.proctor.resetGeneration(log_slot);
+        return self.proctor.arm(log_slot);
+    }
+
     fn closeClient(self: *Runtime, index: u16) Error!void {
         const client_value = &self.clients[index];
         client_value.state = .closing;
@@ -594,6 +662,17 @@ pub fn now() error{ClockFailed}!u64 {
     if (linux.errno(result) != .SUCCESS) return error.ClockFailed;
     if (timestamp.sec < 0) return error.ClockFailed;
     return @intCast(timestamp.sec);
+}
+
+/// SPEC §4: a nonblocking stderr returns EAGAIN completions instead of
+/// parking the write in kernel worker threads. A closed stderr leaves the
+/// flag unset; its writes then fail and discard their lines.
+fn nonblockingStderr() void {
+    const flags = linux.fcntl(stderr_fd, linux.F.GETFL, 0);
+    if (linux.errno(flags) != .SUCCESS) return;
+    const nonblocking: linux.O = .{ .NONBLOCK = true };
+    const updated = flags | @as(usize, @as(u32, @bitCast(nonblocking)));
+    if (linux.errno(linux.fcntl(stderr_fd, linux.F.SETFL, updated)) != .SUCCESS) return;
 }
 
 pub fn nowNs() error{ClockFailed}!u64 {
