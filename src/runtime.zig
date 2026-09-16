@@ -11,6 +11,8 @@ pub const Error = platform.Error;
 pub const now = platform.now;
 pub const proctor = platform.proctor;
 pub const address = platform.address;
+pub const log_slot = platform.log_slot;
+pub const upstream_timer_slot = platform.upstream_timer_slot;
 pub const nowNs = platform.nowNs;
 
 const builtin = @import("builtin");

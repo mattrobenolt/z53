@@ -4000,7 +4000,7 @@ test "forward Darwin clock snapshot does not extend relative timers" {
     try testing.expectEqual(1, system.poll(@ptrCast(&descriptor), 1, 1000));
     try testing.expectEqual(system.POLL.IN, descriptor.revents);
     try testing.expectEqual(
-        @as(?u32, runtime.proctor.operations_max - 1),
+        @as(?u32, runtime.upstream_timer_slot),
         try service.proctor.next(),
     );
 }

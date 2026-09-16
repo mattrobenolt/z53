@@ -20,6 +20,7 @@ const client_start = timer_slot + 1;
 const response_start = client_start + tcp.clients_max;
 pub const upstream_start = response_start + proctor.buffers_max;
 pub const log_slot = upstream.timer_slot + 1;
+pub const upstream_timer_slot = upstream.timer_slot;
 const stderr_fd: linux.fd_t = 2;
 
 comptime {
