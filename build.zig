@@ -11,7 +11,6 @@ pub fn build(b: *std.Build) void {
     const tls = b.dependency("ztls", .{
         .target = target,
         .optimize = optimize,
-        .@"crypto-backend" = "openssl",
     }).module("ztls");
     // Zig keeps the first library entry, so update it rather than append a duplicate.
     for (tls.link_objects.items) |*object| {

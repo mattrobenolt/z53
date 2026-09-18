@@ -5,8 +5,8 @@
     .minimum_zig_version = "0.16.0",
     .dependencies = .{
         .ztls = .{
-            .url = "git+https://github.com/mattrobenolt/ztls#4dec72170ebe7be7574bb6cb1addea3ac76ca228",
-            .hash = "ztls-0.0.0-SHHDXlK7HAD9LYot4QhFhmnfer18s6xKmSVf2hN_KKEQ",
+            .url = "git+https://github.com/mattrobenolt/ztls#05fc530bfa01906a7610e2498053b74a8afb2a2c",
+            .hash = "ztls-0.0.0-SHHDXnAgHgC02p2sqsPDnoKoST26lYB2WArRN7c3_pKT",
         },
         // These helpers never enter the executable's module graph.
         .ztest = .{
