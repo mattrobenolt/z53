@@ -186,3 +186,7 @@ Format Nix files with nixfmt.
 Evaluate module changes on all three supported systems.
 Keep host configurations outside this repository.
 This repository supplies the package and reusable modules.
+
+When a dependency pin in `build.zig.zon` changes, refresh the fixed-output closure hash and archive count in `nix/package.nix`.
+Verify dependency changes with `nix build .#z53`.
+Ordinary `zig build` commands never fetch the sandbox closure.
