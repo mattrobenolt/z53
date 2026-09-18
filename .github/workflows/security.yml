@@ -23,7 +23,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Audit workflows
-        uses: zizmorcore/zizmor-action@3dc1ecc9bcb9e94e9b2c709687979e1298497054 # v0.6.2
+        uses: zizmorcore/zizmor-action@cc914d7f3750a2d13d75c7f184a1060aa0e9d482 # v0.6.4
         with:
           advanced-security: false
           min-confidence: medium
@@ -46,7 +46,7 @@ jobs:
             access-tokens =
             accept-flake-config = false
       - name: Cache the Nix store
-        uses: DeterminateSystems/magic-nix-cache-action@908b263ff629f4cc17666315b7fd3ec127c6244d # v14
+        uses: DeterminateSystems/magic-nix-cache-action@84c0677f58dcedf3b91f8223ce36a9ea5b3c84b7 # v15
         with:
           use-flakehub: false
       - name: Check workflow syntax
