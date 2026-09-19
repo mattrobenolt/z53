@@ -189,4 +189,5 @@ This repository supplies the package and reusable modules.
 
 When a dependency pin in `build.zig.zon` changes, refresh the fixed-output closure hash and archive count in `nix/package.nix`.
 Verify dependency changes with `nix build .#z53`.
+Run `just bump-ztls` to refresh the ztls pins in `build.zig.zon`, `SPEC.md`, and `nix/package.nix` together.
 Ordinary `zig build` commands never fetch the sandbox closure.

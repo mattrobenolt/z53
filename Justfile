@@ -67,3 +67,50 @@ lint:
 [group('check')]
 check:
     nix flake check --no-write-lock-file
+
+# Refresh every ztls pin from main: the build.zig.zon revision, the SPEC.md
+# section 3 commit, and the sandbox closure hash in nix/package.nix. Safe to
+# rerun. If the archive-count check fails, update the count and rerun.
+[doc('Refresh every ztls pin from main across build.zig.zon, SPEC.md, and nix/package.nix.')]
+[group('deps')]
+bump-ztls:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    # zig resolves main to a commit and rewrites the build.zig.zon pin.
+    zig fetch --save git+https://github.com/mattrobenolt/ztls#main
+
+    commit=$(sed -n 's|.*github.com/mattrobenolt/ztls[^"#]*#\([0-9a-f]\{40\}\).*|\1|p' build.zig.zon)
+    if test "${#commit}" -ne 40; then
+        echo "no ztls commit found in build.zig.zon" >&2
+        exit 1
+    fi
+    echo "ztls commit $commit"
+
+    # SPEC.md section 3 pins the same commit and owns the only 40-hex hash.
+    pins=$(grep -oE '[0-9a-f]{40}' SPEC.md | wc -l)
+    if test "$((pins))" -ne 1; then
+        echo "SPEC.md must hold exactly one commit hash" >&2
+        exit 1
+    fi
+    sed "s/[0-9a-f]\{40\}/$commit/" SPEC.md > SPEC.md.tmp
+    mv SPEC.md.tmp SPEC.md
+
+    # A deliberately wrong closure hash makes nix print the real one.
+    sed 's|outputHash = "sha256-[^"]*";|outputHash = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";|' \
+        nix/package.nix > nix/package.nix.tmp
+    mv nix/package.nix.tmp nix/package.nix
+    log=$(nix build .#z53 2>&1 | tee /dev/stderr) || true
+    closure=$(printf '%s\n' "$log" | sed -n 's/.*got: *\(sha256-[A-Za-z0-9+/=]\{44\}\).*/\1/p')
+    if test -z "$closure"; then
+        echo "nix did not report a closure hash" >&2
+        exit 1
+    fi
+    echo "closure hash $closure"
+
+    sed "s|outputHash = \"[^\"]*\";|outputHash = \"$closure\";|" \
+        nix/package.nix > nix/package.nix.tmp
+    mv nix/package.nix.tmp nix/package.nix
+
+    # AGENTS.md: verify dependency changes with nix build .#z53.
+    nix build .#z53
