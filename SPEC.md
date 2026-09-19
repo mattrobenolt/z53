@@ -15,7 +15,7 @@ TLS `server_name` supplies certificate verification and SNI, not address resolut
 1. Language: Zig 0.16.x. The flake pins the exact toolchain revision.
 2. Targets: aarch64-linux, x86_64-linux, aarch64-darwin. No other target.
 3. Runtime dependencies: ztls and one libcrypto backend. Pin ztls at commit
-   `4dec72170ebe7be7574bb6cb1addea3ac76ca228`.
+   `960ab943f41aad4c0ffaaf32cf26ef35cca137b1`.
    The default backend is OpenSSL from nixpkgs, linked through
    pkg-config. No other runtime dependency is allowed.
 4. Use ztest and zig-benchmark as the test and benchmark helpers. Keep them

@@ -34,7 +34,7 @@ let
     '';
     outputHashMode = "recursive";
     outputHashAlgo = "sha256";
-    outputHash = "sha256-RZomQvjWGkAbdOlHYikyk2JmMSQAGkVrKsBC3hpuoA0=";
+    outputHash = "sha256-rXY+LZINJ6us86w9VkdLMLbK0nKZTVSRkqawYju3xUM=";
   };
   package = pkgs.stdenv.mkDerivation {
     pname = "z53";
