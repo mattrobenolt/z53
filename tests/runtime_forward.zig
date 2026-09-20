@@ -3316,6 +3316,7 @@ test "forward TLS reset releases pools and reconnects without runtime allocation
     harness.allocator.fail_index = allocations;
     var input: [512]u8 = undefined;
     var output: [512]u8 = undefined;
+    var descriptor_count: ?u32 = null;
     for (0..4) |round| {
         try send(client, try query(&input, @intCast(round), "reconnect.example."));
         const length: usize = try dotReceive(&harness, &peer, client, &output);
@@ -3340,11 +3341,33 @@ test "forward TLS reset releases pools and reconnects without runtime allocation
         const failed_length: usize = try harness.receive(client, &output);
         try testing.expectEqual(2, (try wire.Header.decode(output[0..failed_length])).bits & 15);
         try expectDotPools(&harness, 0);
+        const descriptors: u32 = try openDescriptorsForTest();
+        if (descriptor_count) |expected| {
+            try testing.expectEqual(expected, descriptors);
+        } else {
+            descriptor_count = descriptors;
+        }
     }
     try testing.expectEqual(4, peer.requests);
     try testing.expectEqual(allocations, harness.allocator.alloc_index);
     try testing.expect(!harness.allocator.has_induced_failure);
     try harness.stop();
+}
+
+fn openDescriptorsForTest() !u32 {
+    const path: []const u8 = if (builtin.os.tag == .linux) "/proc/self/fd" else "/dev/fd";
+    var directory: std.Io.Dir = try .openDirAbsolute(testing.io, path, .{ .iterate = true });
+    defer directory.close(testing.io);
+    var iterator: std.Io.Dir.Iterator = directory.iterate();
+    var count: u32 = 0;
+    for (0..4096) |_| {
+        _ = try iterator.next(testing.io) orelse {
+            std.debug.assert(count > 0);
+            return count - 1; // The directory handle belongs only to this measurement.
+        };
+        count += 1;
+    }
+    return error.TooManyOpenDescriptors;
 }
 
 fn expectDotPools(harness: *const Harness, expected_idle: u32) !void {
