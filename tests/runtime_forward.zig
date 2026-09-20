@@ -3297,6 +3297,73 @@ test "forward TLS hybrid offer interoperates with classical server, reuse, and k
     try harness.stop();
 }
 
+// SPEC §§1, 3.6: reset connections release TLS ownership before allocation-free session reuse.
+test "forward TLS reset releases pools and reconnects without runtime allocation" {
+    var harness: Harness = undefined;
+    try harness.init();
+    defer harness.deinit();
+    harness.upstreams[0].tls = .{ .server_name = "dns.example" };
+    harness.zones[0].max_fails = 0;
+    harness.zones[0].read_timeout_s = 10;
+    try harness.start();
+    try dotTrust(&harness);
+    var peer: DotPeer = undefined;
+    try peer.init();
+    defer peer.deinit();
+    const client: system.fd_t = try harness.client(system.SOCK.DGRAM);
+    defer _ = system.close(client);
+    const allocations: usize = harness.allocator.alloc_index;
+    harness.allocator.fail_index = allocations;
+    var input: [512]u8 = undefined;
+    var output: [512]u8 = undefined;
+    for (0..4) |round| {
+        try send(client, try query(&input, @intCast(round), "reconnect.example."));
+        const length: usize = try dotReceive(&harness, &peer, client, &output);
+        try testing.expectEqual(0, (try wire.Header.decode(output[0..length])).bits & 15);
+        try testing.expectEqual(1, (try wire.Header.decode(output[0..length])).counts[1]);
+        try testing.expectEqual(round + 1, peer.connections);
+        try expectDotPools(&harness, 1);
+        // A reset forces transport failure instead of an orderly TLS shutdown.
+        const linger: system.linger = .{ .onoff = 1, .linger = 0 };
+        try testing.expectEqual(0, system.setsockopt(
+            peer.descriptor.?,
+            system.SOL.SOCKET,
+            system.SO.LINGER,
+            &linger,
+            @sizeOf(system.linger),
+        ));
+        _ = system.close(peer.descriptor.?);
+        peer.descriptor = null;
+        peer.handshake.deinit();
+        try peer.reset();
+        try send(client, try query(&input, @intCast(100 + round), "reset.example."));
+        const failed_length: usize = try harness.receive(client, &output);
+        try testing.expectEqual(2, (try wire.Header.decode(output[0..failed_length])).bits & 15);
+        try expectDotPools(&harness, 0);
+    }
+    try testing.expectEqual(4, peer.requests);
+    try testing.expectEqual(allocations, harness.allocator.alloc_index);
+    try testing.expect(!harness.allocator.has_induced_failure);
+    try harness.stop();
+}
+
+fn expectDotPools(harness: *const Harness, expected_idle: u32) !void {
+    var idle: u32 = 0;
+    for (&harness.service.forward.sessions) |*session| {
+        try testing.expectEqual(null, session.transaction);
+        if (session.state == .idle) {
+            idle += 1;
+            try testing.expect(session.tls.handshake != null);
+        } else {
+            try testing.expectEqual(.vacant, session.state);
+            if (session.tls.handshake != null) return error.TlsOwnershipNotReleased;
+        }
+    }
+    try testing.expectEqual(expected_idle, idle);
+    for (&harness.service.forward.transactions) |*transaction|
+        try testing.expectEqual(.free, transaction.state);
+}
+
 // SPEC §3.6: CA and hostname failures are transport failures, never plaintext on the TLS member.
 test "health forward TLS native rejects wrong hostname and untrusted CA probes" {
     for ([_]enum { hostname, authority }{ .hostname, .authority }) |failure| {
