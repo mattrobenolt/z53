@@ -15,7 +15,7 @@ TLS `server_name` supplies certificate verification and SNI, not address resolut
 1. Language: Zig 0.16.x. The flake pins the exact toolchain revision.
 2. Targets: aarch64-linux, x86_64-linux, aarch64-darwin. No other target.
 3. Runtime dependencies: ztls and one libcrypto backend. Pin ztls at commit
-   `8814f1e55642a7ce73841779ca0b25e530d31ef8`.
+   `8e0be6cc6690ab3f046f22cfeb617bd0aa36d2c4`.
    The default backend is OpenSSL from nixpkgs, linked through
    pkg-config. No other runtime dependency is allowed.
 4. Use ztest and zig-benchmark as the test and benchmark helpers. Keep them
@@ -772,7 +772,7 @@ These values come from the CoreDNS 1.14.6 source tree:
 - Outputs: `packages.z53` and `packages.default` for all three systems, plus `nixosModules.default` and `darwinModules.default`.
 - The devshell supplies Zig 0.16, just, dig, ziglint, and OpenSSL through pkg-config.
 - Packages use ReleaseSafe and the baseline CPU target. Each installed output contains only `bin/z53`.
-- A fixed-output Nix fetch supplies all six manifest-pinned dependencies, including transitive lazy helpers.
+- Each manifest-pinned dependency, including transitive lazy helpers, has its own fixed-output fetcher in `nix/zon-deps.nix`, generated from `build.zig.zon`.
   Normal sandbox builds use Zig's `--system` mode without network access or a local package cache.
 - Native install checks require the OpenSSL runtime path and execute CLI validation without library-path environment overrides.
   Test private keys and verification bypasses never enter the installed package.

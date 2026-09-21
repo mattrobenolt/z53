@@ -14,28 +14,10 @@ let
       ../examples/darwin.zon
     ];
   };
-  dependencies = pkgs.stdenvNoCC.mkDerivation {
-    name = "z53-zig-dependencies";
-    src = source;
-    nativeBuildInputs = [
-      pkgs.zig_0_16
-      pkgs.git
-      pkgs.cacert
-    ];
-    dontConfigure = true;
-    dontFixup = true;
-    buildPhase = ''
-      export ZIG_GLOBAL_CACHE_DIR="$TMPDIR/zig-cache"
-      export HOME="$TMPDIR"
-      zig build --fetch=all
-    '';
-    installPhase = ''
-      cp -r "$ZIG_GLOBAL_CACHE_DIR/p" "$out"
-    '';
-    outputHashMode = "recursive";
-    outputHashAlgo = "sha256";
-    outputHash = "sha256-PsYD+hH21HxBQoj35wPPlpvgAg9SKEiX/hM09SQfrkM=";
-  };
+  # One fixed-output fetcher per manifest-pinned dependency, generated from
+  # build.zig.zon by zon2nix. Regenerate with `just bump-ztls` and commit the
+  # result with the pin change.
+  dependencies = pkgs.callPackage ./zon-deps.nix { };
   package = pkgs.stdenv.mkDerivation {
     pname = "z53";
     version = "0.0.0";
@@ -51,16 +33,8 @@ let
       "-Doptimize=ReleaseSafe"
       "-Dcpu=baseline"
       "--system"
-      "zig-pkg"
+      "${dependencies}"
     ];
-    postConfigure = ''
-      mkdir zig-pkg
-      archives=(${dependencies}/*.tar.gz)
-      test "''${#archives[@]}" -eq 7
-      for archive in "''${archives[@]}"; do
-        tar -xzf "$archive" -C zig-pkg
-      done
-    '';
     doInstallCheck = true;
     nativeInstallCheckInputs = [ pkgs.llvmPackages.bintools ];
     installCheckPhase = ''
@@ -121,10 +95,10 @@ in
       runHook preCheck
       command -v ps
       set -o pipefail
-      zig build -j2 -Doptimize=ReleaseSafe -Dcpu=baseline --system zig-pkg -Dunit-filter=TLS test-unit 2>&1 | tee foundation.log
+      zig build -j2 -Doptimize=ReleaseSafe -Dcpu=baseline --system ${dependencies} -Dunit-filter=TLS test-unit 2>&1 | tee foundation.log
       # ztest succeeds on an empty selection, so pin the promised TLS coverage.
       grep -Fx 'ztest: Running 3 tests...' foundation.log
-      zig build -j2 -Doptimize=ReleaseSafe -Dcpu=baseline --system zig-pkg test-config test-resolver test-wire test-containers test-diagnostics test-runtime-unit bench-smoke
+      zig build -j2 -Doptimize=ReleaseSafe -Dcpu=baseline --system ${dependencies} test-config test-resolver test-wire test-containers test-diagnostics test-runtime-unit bench-smoke
       runHook postCheck
     '';
   };

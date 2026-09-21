@@ -69,9 +69,10 @@ check:
     nix flake check --no-write-lock-file
 
 # Refresh every ztls pin from main: the build.zig.zon revision, the SPEC.md
-# section 3 commit, and the sandbox closure hash in nix/package.nix. Safe to
-# rerun. If the archive-count check fails, update the count and rerun.
-[doc('Refresh every ztls pin from main across build.zig.zon, SPEC.md, and nix/package.nix.')]
+# section 3 commit, and the per-dependency fetchers in nix/zon-deps.nix.
+# Requires network access: zon2nix downloads every dependency to compute its
+# Nix hash. Safe to rerun.
+[doc('Refresh every ztls pin from main across build.zig.zon, SPEC.md, and nix/zon-deps.nix.')]
 [group('deps')]
 bump-ztls:
     #!/usr/bin/env bash
@@ -96,21 +97,10 @@ bump-ztls:
     sed "s/[0-9a-f]\{40\}/$commit/" SPEC.md > SPEC.md.tmp
     mv SPEC.md.tmp SPEC.md
 
-    # A deliberately wrong closure hash makes nix print the real one.
-    sed 's|outputHash = "sha256-[^"]*";|outputHash = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";|' \
-        nix/package.nix > nix/package.nix.tmp
-    mv nix/package.nix.tmp nix/package.nix
-    log=$(nix build .#z53 2>&1 | tee /dev/stderr) || true
-    closure=$(printf '%s\n' "$log" | sed -n 's/.*got: *\(sha256-[A-Za-z0-9+/=]\{44\}\).*/\1/p')
-    if test -z "$closure"; then
-        echo "nix did not report a closure hash" >&2
-        exit 1
-    fi
-    echo "closure hash $closure"
-
-    sed "s|outputHash = \"[^\"]*\";|outputHash = \"$closure\";|" \
-        nix/package.nix > nix/package.nix.tmp
-    mv nix/package.nix.tmp nix/package.nix
+    # Regenerate the per-dependency fetchers from the manifest. The pinned
+    # zon2nix revision keeps regeneration reproducible.
+    nix run github:jcollie/zon2nix/723bddc9c51c5873965a17f922e4139d587764c1#zon2nix -- \
+        --nix=nix/zon-deps.nix build.zig.zon
 
     # AGENTS.md: verify dependency changes with nix build .#z53.
     nix build .#z53
