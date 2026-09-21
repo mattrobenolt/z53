@@ -75,15 +75,6 @@ check:
 [doc('Refresh every ztls pin from main across build.zig.zon and nix/zon-deps.nix.')]
 [group('deps')]
 bump-ztls:
-    #!/usr/bin/env bash
-    set -euo pipefail
-
-    # zig resolves main to a commit and rewrites the build.zig.zon pin.
     zig fetch --save git+https://github.com/mattrobenolt/ztls#main
-
-    # Regenerate the per-dependency fetchers from the manifest. zon2nix is a
-    # flake input; move it deliberately with `nix flake update zon2nix`.
     nix run .#zon2nix -- --nix=nix/zon-deps.nix build.zig.zon
-
-    # AGENTS.md: verify dependency changes with nix build .#z53.
     nix build .#z53
