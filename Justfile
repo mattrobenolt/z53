@@ -68,11 +68,11 @@ lint:
 check:
     nix flake check --no-write-lock-file
 
-# Refresh every ztls pin from main: the build.zig.zon revision, the SPEC.md
-# section 3 commit, and the per-dependency fetchers in nix/zon-deps.nix.
+# Refresh every ztls pin from main: the build.zig.zon revision and the
+# per-dependency fetchers in nix/zon-deps.nix.
 # Requires network access: zon2nix downloads every dependency to compute its
 # Nix hash. Safe to rerun.
-[doc('Refresh every ztls pin from main across build.zig.zon, SPEC.md, and nix/zon-deps.nix.')]
+[doc('Refresh every ztls pin from main across build.zig.zon and nix/zon-deps.nix.')]
 [group('deps')]
 bump-ztls:
     #!/usr/bin/env bash
@@ -80,22 +80,6 @@ bump-ztls:
 
     # zig resolves main to a commit and rewrites the build.zig.zon pin.
     zig fetch --save git+https://github.com/mattrobenolt/ztls#main
-
-    commit=$(sed -n 's|.*github.com/mattrobenolt/ztls[^"#]*#\([0-9a-f]\{40\}\).*|\1|p' build.zig.zon)
-    if test "${#commit}" -ne 40; then
-        echo "no ztls commit found in build.zig.zon" >&2
-        exit 1
-    fi
-    echo "ztls commit $commit"
-
-    # SPEC.md section 3 pins the same commit and owns the only 40-hex hash.
-    pins=$(grep -oE '[0-9a-f]{40}' SPEC.md | wc -l)
-    if test "$((pins))" -ne 1; then
-        echo "SPEC.md must hold exactly one commit hash" >&2
-        exit 1
-    fi
-    sed "s/[0-9a-f]\{40\}/$commit/" SPEC.md > SPEC.md.tmp
-    mv SPEC.md.tmp SPEC.md
 
     # Regenerate the per-dependency fetchers from the manifest. zon2nix is a
     # flake input; move it deliberately with `nix flake update zon2nix`.

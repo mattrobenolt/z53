@@ -189,5 +189,5 @@ This repository supplies the package and reusable modules.
 
 When a dependency pin in `build.zig.zon` changes, regenerate `nix/zon-deps.nix` and commit it with the pin change.
 Verify dependency changes with `nix build .#z53`.
-Run `just bump-ztls` to refresh the ztls pin in `build.zig.zon`, the SPEC.md section 3 commit, and the generated fetchers together.
+Run `just bump-ztls` to refresh the ztls pin in `build.zig.zon` and the generated fetchers together.
 Ordinary `zig build` commands never fetch the sandbox dependencies.
