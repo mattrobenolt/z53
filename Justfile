@@ -97,10 +97,9 @@ bump-ztls:
     sed "s/[0-9a-f]\{40\}/$commit/" SPEC.md > SPEC.md.tmp
     mv SPEC.md.tmp SPEC.md
 
-    # Regenerate the per-dependency fetchers from the manifest. The pinned
-    # zon2nix revision keeps regeneration reproducible.
-    nix run github:jcollie/zon2nix/723bddc9c51c5873965a17f922e4139d587764c1#zon2nix -- \
-        --nix=nix/zon-deps.nix build.zig.zon
+    # Regenerate the per-dependency fetchers from the manifest. zon2nix is a
+    # flake input; move it deliberately with `nix flake update zon2nix`.
+    nix run .#zon2nix -- --nix=nix/zon-deps.nix build.zig.zon
 
     # AGENTS.md: verify dependency changes with nix build .#z53.
     nix build .#z53

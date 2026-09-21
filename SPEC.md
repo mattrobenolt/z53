@@ -769,6 +769,8 @@ These values come from the CoreDNS 1.14.6 source tree:
 - Inputs: nixpkgs (`nixos-unstable`). Build the binary with the Zig 0.16
   toolchain and OpenSSL, following the ztls flake pattern for a Zig package
   that links libcrypto through pkg-config.
+  The `zon2nix` input supplies the regeneration tool for `nix/zon-deps.nix` and
+  never enters the package build.
 - Outputs: `packages.z53` and `packages.default` for all three systems, plus `nixosModules.default` and `darwinModules.default`.
 - The devshell supplies Zig 0.16, just, dig, ziglint, and OpenSSL through pkg-config.
 - Packages use ReleaseSafe and the baseline CPU target. Each installed output contains only `bin/z53`.

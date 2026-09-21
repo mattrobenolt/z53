@@ -10,6 +10,10 @@
       url = "github:mattrobenolt/nixpkgs";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    zon2nix = {
+      url = "github:jcollie/zon2nix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
   outputs =
@@ -33,7 +37,11 @@
       };
 
       perSystem =
-        { system, ... }:
+        {
+          system,
+          inputs',
+          ...
+        }:
         let
           pkgs = import nixpkgs {
             inherit system;
@@ -44,6 +52,9 @@
         {
           packages.z53 = build.package;
           packages.default = build.package;
+          # Regeneration tool for nix/zon-deps.nix. Never a build input: the
+          # package build consumes only the committed generated file.
+          packages.zon2nix = inputs'.zon2nix.packages.zon2nix;
           formatter = pkgs.nixfmt-tree;
           checks = {
             package = build.package;
