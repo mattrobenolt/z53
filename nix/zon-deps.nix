@@ -211,11 +211,11 @@ copyFarm name
       };
     }
     {
-      name = "ztls-0.0.0-SHHDXgumIgCJJsWsz8eJdgnYAQFVSk5obOMIe3JPBb2F";
+      name = "ztls-0.0.0-SHHDXqSOIwD4s3C21oPI3P9KCfMZRF2OCVUhbTgNLvps";
       path = fetchZigArtifact {
         name = "ztls";
-        url = "git+https://github.com/mattrobenolt/ztls?ref=main#8e0be6cc6690ab3f046f22cfeb617bd0aa36d2c4";
-        hash = "sha256-6T5YZnHJaK+mLcUapqL7kySgA8VXmfzsww9oysGxOM8=";
+        url = "git+https://github.com/mattrobenolt/ztls?ref=main#3894246d1d99e51b0e99d0e4f02146a983f16927";
+        hash = "sha256-bErF4B2/D8hOC8bNlixJkNzAWd3qFZkyNAIu1V9Triw=";
         unpack = true;
       };
     }
