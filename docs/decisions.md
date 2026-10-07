@@ -7,10 +7,10 @@ This document explains the implementation choices behind that contract.
 
 The runtime uses Zig 0.16 and ztls with OpenSSL through pkg-config.
 Dependency revisions are pinned in `build.zig.zon` and `flake.lock`.
-ztls carries two further pins: the commit in `SPEC.md` section 3 and the fixed-output closure hash in `nix/package.nix`, which sandbox builds fetch.
-`just bump-ztls` refreshes every ztls pin from main.
-Fixed-output derivations dedupe by output hash, so a stale declared hash substitutes the cached old closure.
-Refresh that hash whenever a Zig dependency pin changes.
+Sandbox builds fetch every pinned dependency through a fixed-output fetcher in `nix/zon-deps.nix`, generated from `build.zig.zon` by zon2nix.
+`just bump-ztls` refreshes the ztls pin from main and regenerates that file.
+Fixed-output derivations dedupe by output hash, so a stale fetcher substitutes the cached old closure.
+Regenerate `nix/zon-deps.nix` whenever a Zig dependency pin changes.
 The libcrypto declaration forces pkg-config rather than a system-library fallback.
 
 ztls provides a Sans-I/O TLS engine. The runtime owns socket operations and retains the engine's buffers between completions.
