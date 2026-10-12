@@ -261,6 +261,12 @@ pub const Pipeline = struct {
             encoder,
             &self.intermediate,
         )) |hit| return hit;
+        if (try resolver.beyondDepth(
+            request,
+            &self.config.zones[index],
+            encoder,
+            &self.intermediate,
+        )) |hit| return hit;
         return null;
     }
 
@@ -373,6 +379,82 @@ const RuntimeUnitTests = struct {
                 pipeline.init(failing.allocator(), testing.io, &settings),
             );
         }
+    }
+
+    // SPEC §3.2: the depth gate answers before the forward stage and never caches.
+    test "depth gate answers NXDOMAIN before forwarding" {
+        const pipeline = try testing.allocator.create(runtime.pipeline.Pipeline);
+        defer testing.allocator.destroy(pipeline);
+        var zones = [_]runtime.pipeline.resolver.config.Zone{.{
+            .suffix = "example.",
+            .upstreams = &.{.{ .address = "127.0.0.1:1" }},
+            .cache = .{ .capacity = 1 },
+            .max_depth = 1,
+        }};
+        const settings: runtime.pipeline.resolver.config.Config = .{ .zones = &zones };
+        try pipeline.init(testing.allocator, testing.io, &settings);
+        defer pipeline.deinit();
+        var input: [512]u8 = undefined;
+        var output: [65535]u8 = undefined;
+        var encoder: wire.Encoder = undefined;
+        var name: wire.Name = undefined;
+        try name.fromText("a.b.example.");
+        try encoder.init(&input, &.{ .id = 44, .bits = 0x100 });
+        try encoder.question(&name, .a, 1);
+        const answer = (try pipeline.answer(try encoder.finish(), &output, .{ .udp = .ipv4 }, 0)).?;
+        try testing.expectEqual(.depth, answer.source);
+        try testing.expectEqual(@as(u16, 0x8503), (try wire.Header.decode(answer.bytes)).bits);
+        try name.fromText("b.example.");
+        try encoder.init(&input, &.{ .id = 45, .bits = 0x100 });
+        try encoder.question(&name, .a, 1);
+        const forwarded = (try pipeline.answer(try encoder.finish(), &output, .tcp, 0)).?;
+        try testing.expectEqual(.servfail, forwarded.source);
+        try testing.expectEqual(
+            null,
+            pipeline.zones.items[0].cache.positive.entries.items(.bytes)[0],
+        );
+        try testing.expectEqual(
+            null,
+            pipeline.zones.items[0].cache.denial.entries.items(.bytes)[0],
+        );
+    }
+
+    // SPEC §3.2: explicit hosts data outranks the structural depth policy.
+    test "hosts answer wins over the depth gate" {
+        var temporary = testing.tmpDir(.{});
+        defer temporary.cleanup();
+        try temporary.dir.writeFile(testing.io, .{
+            .sub_path = "hosts",
+            .data = "192.0.2.9 deep.entry.example\n",
+        });
+        var path_buffer: [128]u8 = undefined;
+        const path = try std.fmt.bufPrint(
+            &path_buffer,
+            ".zig-cache/tmp/{s}/hosts",
+            .{temporary.sub_path},
+        );
+        const pipeline = try testing.allocator.create(runtime.pipeline.Pipeline);
+        defer testing.allocator.destroy(pipeline);
+        var zones = [_]runtime.pipeline.resolver.config.Zone{.{
+            .suffix = "example.",
+            .upstreams = &.{.{ .address = "127.0.0.1:1" }},
+            .cache = .{ .capacity = 1 },
+            .hosts = .{ .path = path, .reload_s = 0 },
+            .max_depth = 1,
+        }};
+        const settings: runtime.pipeline.resolver.config.Config = .{ .zones = &zones };
+        try pipeline.init(testing.allocator, testing.io, &settings);
+        defer pipeline.deinit();
+        var input: [512]u8 = undefined;
+        var output: [65535]u8 = undefined;
+        var encoder: wire.Encoder = undefined;
+        var name: wire.Name = undefined;
+        try name.fromText("deep.entry.example.");
+        try encoder.init(&input, &.{ .id = 46, .bits = 0x100 });
+        try encoder.question(&name, .a, 1);
+        const answer = (try pipeline.answer(try encoder.finish(), &output, .tcp, 0)).?;
+        try testing.expectEqual(.hosts, answer.source);
+        try testing.expectEqual(@as(u16, 0x8500), (try wire.Header.decode(answer.bytes)).bits);
     }
 
     // SPEC §3.2: unresolved forwarding answers a local failure without cache or stale insertion.

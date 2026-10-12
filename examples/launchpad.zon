@@ -15,11 +15,13 @@
             .rotate = true,
         },
         .{
-            .suffix = "ts.net.",
+            .suffix = "tail45c3.ts.net.",
             .hosts = .{ .ttl = 30 },
+            .nodata = .{.AAAA},
             .upstreams = .{
                 .{ .address = "100.100.100.100:53" },
             },
+            .max_depth = 1,
             .max_fails = 1,
             .cache = .{ .max_ttl_s = 30 },
         },

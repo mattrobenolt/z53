@@ -48,7 +48,7 @@ pub fn beforeCache(
     output: []u8,
 ) wire.Error!?Answer {
     const local = covered(&request.name) orelse return null;
-    try start(request, encoder, output);
+    try start(request, encoder, output, .noerror);
     switch (local) {
         .loopback => switch (request.kind) {
             .a => try address(encoder, &request.name, .a, &.{ 127, 0, 0, 1 }),
@@ -68,6 +68,36 @@ pub fn beforeCache(
     }
     const answer = try finish(request, encoder, .rfc6761);
     return answer;
+}
+
+/// Invoke only after beforeCache, the cache, and afterCache all miss.
+/// A qname deeper than the zone shape answers a local authoritative NXDOMAIN.
+pub fn beyondDepth(
+    request: *const Request,
+    zone: *const config.Zone,
+    encoder: *wire.Encoder,
+    output: []u8,
+) wire.Error!?Answer {
+    const maximum = zone.max_depth orelse return null;
+    var suffix: wire.Name = undefined;
+    // Validation canonicalizes every suffix, so fromText cannot fail here.
+    suffix.fromText(zone.suffix) catch unreachable;
+    if (labelsBelow(&request.name, &suffix) <= @as(usize, maximum)) return null;
+    try start(request, encoder, output, .nxdomain);
+    const answer = try finish(request, encoder, .depth);
+    return answer;
+}
+
+/// Route matched this zone's suffix at a label boundary, so the walk always finds it.
+fn labelsBelow(name: *const wire.Name, suffix: *const wire.Name) usize {
+    var count: usize = 0;
+    var offset: usize = 0;
+    while (offset < name.length) {
+        if (std.ascii.eqlIgnoreCase(name.wire()[offset..], suffix.wire())) return count;
+        offset += @as(usize, name.bytes[offset]) + 1;
+        count += 1;
+    }
+    unreachable;
 }
 
 /// Invoke only after beforeCache and the cache both miss. null means forward.
@@ -96,7 +126,7 @@ fn afterCacheInner(
 ) wire.Error!?Answer {
     for (zone.nodata) |kind| {
         if (kind.code() != request.kind) continue;
-        try start(request, encoder, output);
+        try start(request, encoder, output, .noerror);
         const answer = try finish(request, encoder, .nodata);
         return answer;
     }
@@ -106,7 +136,7 @@ fn afterCacheInner(
     var count: u16 = 0;
     for (snapshot.entries()) |*entry| {
         if (!entry.matches(&request.name, request.kind)) continue;
-        if (count == 0) try start(request, encoder, output);
+        if (count == 0) try start(request, encoder, output, .noerror);
         const offset = try record(encoder, &request.name, request.kind, settings.ttl);
         try entry.write(encoder, request.kind);
         encoder.endRecord(offset);
@@ -117,12 +147,18 @@ fn afterCacheInner(
     return answer;
 }
 
-fn start(request: *const Request, encoder: *wire.Encoder, output: []u8) wire.Error!void {
+fn start(
+    request: *const Request,
+    encoder: *wire.Encoder,
+    output: []u8,
+    rcode: wire.Rcode,
+) wire.Error!void {
     // Echo RD/CD only. Synthetic data is authoritative, never authenticated or recursive.
     const header: wire.Header = .{
         .id = request.packet.header.id,
         .bits = (request.packet.header.bits & wire.request_flags_mask) |
-            wire.Flag.mask(&.{ .response, .authoritative }),
+            wire.Flag.mask(&.{ .response, .authoritative }) |
+            @intFromEnum(rcode),
     };
     try encoder.init(output, &header);
     try encoder.question(&request.name, request.kind, request.class);
@@ -322,6 +358,63 @@ const ResolverTestsSynthetic = struct {
         const edns = (try fixture.after(&test_fixture.zone, null)).?;
         try fixture.check(&edns, 0);
         try testing.expectEqual(@as(u16, 1), fixture.response.header.counts[3]);
+    }
+
+    // SPEC §3.2; RFC 8020 §2: a deeper qname answers authoritative NXDOMAIN, never forwards.
+    test "depth gate answers NXDOMAIN beyond the limit and passes the boundary" {
+        var fixture: test_fixture.Fixture = undefined;
+        var zone = test_fixture.zone;
+        zone.suffix = "example.";
+        zone.max_depth = 1;
+        try fixture.init("example.", 28, 1);
+        try testing.expectEqual(@as(?resolver.Answer, null), try fixture.beyond(&zone));
+        try fixture.init("b.example.", 1, 1);
+        try testing.expectEqual(@as(?resolver.Answer, null), try fixture.beyond(&zone));
+        try fixture.init("a.b.example.", 1, 3);
+        const answer = (try fixture.beyond(&zone)).?;
+        try testing.expectEqual(.depth, answer.source);
+        try testing.expect(!answer.source.rotatable());
+        try testing.expect(!answer.source.cacheable());
+        try fixture.response.parse(answer.bytes);
+        try testing.expectEqual(@as(u16, 0x1234), fixture.response.header.id);
+        try testing.expectEqual(@as(u16, 0x8513), fixture.response.header.bits);
+        try testing.expectEqual(@as(u16, 0), fixture.response.header.counts[1]);
+        try testing.expectEqual(@as(u16, 0), fixture.response.header.counts[2]);
+        var cursor: usize = 12;
+        const question = try fixture.response.readQuestion(&cursor);
+        var name: wire.Name = undefined;
+        try fixture.response.name(&name, question.name);
+        try testing.expectEqualSlices(u8, fixture.request.name.wire(), name.wire());
+        try testing.expectEqual(fixture.request.kind, question.kind);
+        try testing.expectEqual(fixture.request.class, question.class);
+        zone.max_depth = 0;
+        try fixture.init("example.", 1, 1);
+        try testing.expectEqual(@as(?resolver.Answer, null), try fixture.beyond(&zone));
+        try fixture.init("b.example.", 1, 1);
+        const zero = (try fixture.beyond(&zone)).?;
+        try testing.expectEqual(.depth, zero.source);
+        zone.max_depth = null;
+        try fixture.init("a.b.c.example.", 1, 1);
+        try testing.expectEqual(@as(?resolver.Answer, null), try fixture.beyond(&zone));
+    }
+
+    // SPEC §3.2; RFC 7873 §4: the depth answer echoes EDNS payload and COOKIE only.
+    test "depth gate echoes EDNS and COOKIE" {
+        var fixture: test_fixture.Fixture = undefined;
+        var zone = test_fixture.zone;
+        zone.suffix = "example.";
+        zone.max_depth = 1;
+        const cookie = [_]u8{ 0, 10, 0, 8, 1, 2, 3, 4, 5, 6, 7, 8 };
+        try fixture.init("a.b.example.", 28, 1);
+        try fixture.edns(&(cookie ++ .{ 0xfd, 0xe8, 0, 1, 42 }));
+        const answer = (try fixture.beyond(&zone)).?;
+        try testing.expectEqual(.depth, answer.source);
+        try fixture.response.parse(answer.bytes);
+        try testing.expectEqual(@as(u16, 3), fixture.response.header.bits & 15);
+        const opt = fixture.response.records[fixture.response.opt.?];
+        try testing.expectEqual(@as(u16, 1400), opt.class);
+        try testing.expectEqual(@as(u32, 0), opt.ttl_s);
+        try testing.expectEqualSlices(u8, &cookie, answer.bytes[opt.data_start..opt.data_end]);
     }
 
     // SPEC §3.2–3.5: RFC6761 wins over AAAA suppression; numeric NODATA is supported.

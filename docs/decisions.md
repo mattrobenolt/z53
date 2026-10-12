@@ -120,6 +120,8 @@ The [scratch measurements](benchmarks/2026-09-08-scratch.txt) record the effect 
 
 ## Hosts and synthetic answers
 
+The depth gate is a synthetic-answer policy, not a forwarding feature. It exists for upstreams that serve a flat namespace and drop what they cannot answer, such as Tailscale MagicDNS with `accept-dns` off: a search-suffixed qname like `api.github.com.tail45c3.ts.net` cannot exist in the zone, and forwarding it costs a full read timeout plus a health penalty (issue #8). The gate answers authoritative NXDOMAIN instead, which also terminates client search lists where SERVFAIL would trigger retries. Cache, NODATA, and hosts answers outrank the gate, because explicit local data beats structural policy.
+
 RFC 6761 and NODATA rules match every query class. Synthetic records use class IN while the question retains its original class.
 Hosts serves IN queries only. These policies intentionally differ from CoreDNS in the cases listed in [SPEC §7.2](../SPEC.md#72-deliberate-deviations).
 

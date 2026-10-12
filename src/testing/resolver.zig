@@ -54,6 +54,10 @@ pub const Fixture = struct {
         return resolver.afterCache(&self.request, settings, table, &self.encoder, &self.output);
     }
 
+    pub fn beyond(self: *Fixture, settings: *const resolver.config.Zone) !?resolver.Answer {
+        return resolver.beyondDepth(&self.request, settings, &self.encoder, &self.output);
+    }
+
     pub fn check(self: *Fixture, answer: *const resolver.Answer, count: u16) !void {
         try self.response.parse(answer.bytes);
         try testing.expectEqual(@as(u16, 0x1234), self.response.header.id);

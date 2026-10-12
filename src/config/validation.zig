@@ -92,6 +92,14 @@ pub const Context = struct {
         if (zone.nodata.len > 256) {
             return self.fail(self.field(node, "nodata"), "nodata exceeds 256 types");
         }
+        if (zone.max_depth) |maximum| {
+            if (maximum > config.depth_labels_max) {
+                return self.fail(
+                    self.field(node, "max_depth"),
+                    "max_depth exceeds 16 labels",
+                );
+            }
+        }
         try self.duration(
             zone.health_check_interval_s,
             self.field(node, "health_check_interval_s"),

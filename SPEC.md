@@ -230,14 +230,26 @@ For every query, the stages run in this order:
 2. Cache lookup (3.7). A hit answers the query.
 3. NODATA rules (3.4). A hit answers the query.
 4. hosts (3.5). A hit answers the query.
-5. Forward (3.6). The upstream answer returns to the client.
+5. Depth gate. A hit answers the query.
+6. Forward (3.6). The upstream answer returns to the client.
+
+Depth gate rules:
+
+- A zone with `max_depth` set permits at most that many labels below its
+  suffix. A deeper qname gets an authoritative NXDOMAIN and never reaches
+  an upstream or penalizes health.
+- The answer is synthetic: AA set, RA clear, question echoed, EDNS payload
+  and COOKIE echoed, no SOA. It is not cached.
+- NXDOMAIN, not SERVFAIL, so client search lists move on instead of retrying.
+- The suffix itself is depth zero. Zero is a valid limit: only the suffix
+  name passes the gate.
 
 On the response path, the cache stores forwarded answers. Answer rotation
 (3.8) runs last, before the client sees the response.
 
 Flags on answers:
 
-- Synthetic answers (RFC 6761, NODATA, hosts) set AA and clear RA.
+- Synthetic answers (RFC 6761, NODATA, hosts, depth gate) set AA and clear RA.
 - Forwarded answers set RA. They preserve the upstream AA bit.
 - Cache hits preserve the stored flags.
 
@@ -480,7 +492,7 @@ The line includes these fields:
 - Quoted, escaped `qname`
 - Full numeric `rcode`, including the upper EDNS bits
 - Monotonic `duration_ms` with three fractional digits
-- `src=rfc6761|nodata|hosts|cache|stale|forward|servfail`
+- `src=rfc6761|nodata|depth|hosts|cache|stale|forward|servfail`
 
 Forwarded answers also include the selected upstream address and `upstream_proto=udp|tcp|dot`.
 DoT answers include `tls_name` from that selected member.
@@ -547,6 +559,7 @@ The schema defines these settings:
 | `suffix` | zone | required | Longest match wins |
 | `hosts` | zone | off | `.path`, `.ttl`, `.reload_s` |
 | `nodata` | zone | `[]` | Query types that get empty NOERROR |
+| `max_depth` | zone | off | Labels permitted below the suffix; deeper qnames get NXDOMAIN |
 | `upstreams` | zone | required | Ordered list |
 | upstream `.address` | upstream | required | Literal IP, optional port. See section 5.1 for parser compatibility. |
 | upstream `.tls.server_name` | upstream | — | Required for TLS |
@@ -576,6 +589,9 @@ Enabled zones together reserve at most 536870912 packet bytes.
 
 `nodata` accepts symbolic types, such as `.AAAA` and `.HTTPS`.
 It also accepts `.{ .number = 65280 }` for any numeric `u16` query type.
+
+`max_depth` is an optional `u16` label count below the zone suffix, at most 16.
+Zero permits only the suffix name itself.
 
 These values use `u32`:
 
@@ -647,7 +663,8 @@ Tests must parse and validate both files.
 ### 6.1 NixOS on EC2
 
 The root zone uses the EC2 VPC resolver with Cloudflare DoT fallback.
-The `ts.net.` zone uses Tailscale MagicDNS.
+The `tail45c3.ts.net.` zone uses Tailscale MagicDNS, limited to one label
+below the tailnet id, with AAAA NODATA because the network has no IPv6.
 
 ```zon
 .{
@@ -667,11 +684,13 @@ The `ts.net.` zone uses Tailscale MagicDNS.
             .rotate = true,
         },
         .{
-            .suffix = "ts.net.",
+            .suffix = "tail45c3.ts.net.",
             .hosts = .{ .ttl = 30 },
+            .nodata = .{.AAAA},
             .upstreams = .{
                 .{ .address = "100.100.100.100:53" },
             },
+            .max_depth = 1,
             .max_fails = 1,
             .cache = .{ .max_ttl_s = 30 },
         },
@@ -845,6 +864,8 @@ If rollback is necessary, stop z53 before the previous resolver reclaims the por
 - Rotation composition order.
 - RFC 6761 zone set and answers.
 - hosts parser: valid lines, skip invalid lines, PTR synthesis.
+- Depth gate: NXDOMAIN beyond the limit, pass at the limit boundary, EDNS
+  and COOKIE echo, precedence under cache, NODATA, and hosts.
 - Config loader: defaults, both example configs, and every validation error
   in section 5.
 - Log queue: drop-oldest saturation, executing-line exemption, partial-write
@@ -858,6 +879,9 @@ in-process queries:
 - hosts hit: A answer, TTL 30, AA set.
 - NODATA: AAAA query returns empty NOERROR, AA set, COOKIE echoed.
 - Zone routing: the `ts.net.`-style zone hits its own upstream.
+- Depth gate: with `max_depth` set, a deeper qname answers authoritative
+  NXDOMAIN with `src=depth` and never reaches the upstream. A qname at the
+  limit forwards. A hosts entry deeper than the limit still answers.
 - Failover: stop the first upstream. The second answers. The log shows the failed attempt and the selected fallback.
   New uncached queries skip the down primary. Down and restored transitions each produce one log line.
 - Health: owned UDP, TCP, and verified DoT fixtures prove recovery without client traffic.

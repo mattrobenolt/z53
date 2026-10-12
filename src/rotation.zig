@@ -8,6 +8,7 @@ const wire = @import("wire.zig");
 pub const Source = enum {
     rfc6761,
     nodata,
+    depth,
     hosts,
     cache,
     stale,
@@ -27,7 +28,7 @@ pub const Source = enum {
     pub fn rotatable(self: Source) bool {
         return switch (self) {
             .hosts, .cache, .stale, .forward => true,
-            .rfc6761, .nodata, .servfail => false,
+            .rfc6761, .nodata, .depth, .servfail => false,
         };
     }
 };

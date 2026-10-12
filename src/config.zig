@@ -20,6 +20,7 @@ pub const workspace_bytes_max = 4 * 1024 * 1024;
 pub const zones_max = 64;
 pub const listeners_max = 16;
 pub const upstreams_max = 16;
+pub const depth_labels_max = 16;
 pub const cache_capacity_max = 100000;
 pub const cache_entries_max = 1000000;
 pub const cache_packet_bytes_min = 64 * 1024;
@@ -95,6 +96,7 @@ pub const Zone = struct {
     suffix: []const u8,
     hosts: ?Hosts = null,
     nodata: []const QueryType = &.{},
+    max_depth: ?u16 = null,
     upstreams: []const Upstream,
     max_fails: u32 = 2,
     health_check_interval_s: f64 = 0.5,
@@ -408,10 +410,17 @@ const ConfigTests = struct {
             try equal(5, root.health_check_interval_s);
             try equal(true, root.rotate);
             const tailscale = &harness.parsed.zones[1];
-            try strings("ts.net.", tailscale.suffix);
+            if (index == 0) {
+                try strings("tail45c3.ts.net.", tailscale.suffix);
+                try equal(1, tailscale.nodata.len);
+                try equal(1, tailscale.max_depth.?);
+            } else {
+                try strings("ts.net.", tailscale.suffix);
+                try equal(0, tailscale.nodata.len);
+                try equal(null, tailscale.max_depth);
+            }
             try strings("100.100.100.100:53", tailscale.upstreams[0].address);
             try equal(1, tailscale.upstreams.len);
-            try equal(0, tailscale.nodata.len);
             try equal(@as(u32, 1) + @as(u32, @intCast(index)), tailscale.max_fails);
             try equal(30, tailscale.cache.?.max_ttl_s);
             try equal(30, tailscale.cache.?.denialMaximum());
@@ -440,6 +449,7 @@ const ConfigTests = struct {
             \\  .address = "[::1]", .tls = .{ .server_name = "localhost" }, .force_tcp = true,
             \\ } },
             \\ .nodata = .{ .A, .AAAA, .{ .number = 65280 } },
+            \\ .max_depth = 1,
             \\} } }
         );
         const zone = &harness.parsed.zones[0];
@@ -451,6 +461,7 @@ const ConfigTests = struct {
         try equal(42, zone.hosts.?.ttl);
         try equal(0, zone.hosts.?.reload_s);
         try equal(65280, @intFromEnum(zone.nodata[2].code()));
+        try equal(1, zone.max_depth.?);
         var endpoint: test_config.Endpoint = undefined;
         zone.upstreams[0].endpoint(&endpoint);
         try equal(853, endpoint.port);
@@ -530,6 +541,7 @@ const ConfigTests = struct {
             .{ ".health_check_interval_s = 86401", "exceeds 86400" },
             .{ ".hosts = .{ .path = \"\" }", "must not be empty" },
             .{ ".hosts = .{ .path = \"a\\x00b\" }", "contains NUL" },
+            .{ ".max_depth = 17", "max_depth exceeds" },
         };
         inline for (cases) |case| {
             try harness.rejects(zone_start ++ case[0] ++ zone_end, case[1]);
