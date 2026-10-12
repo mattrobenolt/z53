@@ -4,7 +4,7 @@
   fetchgit,
   fetchurl,
   fetchzip,
-  runCommandLocal,
+  runCommand,
   zig_0_16,
   zstd,
   name ? "zig-packages",
@@ -39,17 +39,11 @@ let
 
   # Every package, by the hash Zig knows it by, as Nix fetches it.
   packages = {
-    "benchmark-0.1.0-JS72VkomAQAHiEPwJB4rOn0vjLChZnQhcMqVKLPFZCQ4" = fetchZigGit {
+    "benchmark-0.1.0-JS72VhUcAQAM6gGwbJeMtNhbX7n8LQk4LIdSrRz9ljNg" = fetchZigGit {
       name = "benchmark";
       url = "https://github.com/mattrobenolt/zig-benchmark";
-      rev = "95ca5b488e2c9bfd20ea9ecd92d38dc11d5ede7d";
-      hash = "sha256-JTsa/KryXNpU722+uq95aQwi0+sYQK27hTIWyXaX3AY=";
-    };
-    "benchmark-0.1.0-JS72VhkcAQD-UUxr83rHajUlCXnJEa7pdC2orw8TWPdg" = fetchZigGit {
-      name = "benchmark";
-      url = "https://github.com/mattrobenolt/zig-benchmark";
-      rev = "d69b1c606698e8693bcbb09053ac9cf6c2196461";
-      hash = "sha256-O2Maah0PQc15Yb+feHMJnCnJeqi5C4WfRCHgrHJOloo=";
+      rev = "5572317d18d1e5b4630950658b1628b4398a84a8";
+      hash = "sha256-QduuCfvDNniXh2PJTN55IeKQUhjCFLqcqR91CllwDYM=";
     };
     "libxev-0.0.0-86vtc6BWFAAs_tGsasNfjQsxSsElhddIUnqVwGhwdnsu" = fetchZigGit {
       name = "libxev";
@@ -63,22 +57,16 @@ let
       rev = "a58514df03a5a01d1847252e36248e3cd0728014";
       hash = "sha256-4k9yE1WqPI3mfhG4svQb7ydK91PzOO5w6n+sgXZ6wpI=";
     };
-    "ztest-0.2.0-h6PBz_h1AAD8Z41oiZbR5aKo2xAzeqbuW9KIxfClUgwp" = fetchZigGit {
+    "ztest-0.2.0-h6PBz_h1AAD8Z41oiZbR5aKo2xAzeqbuW9KIxfClUgwp" = fetchzip {
       name = "ztest";
-      url = "https://github.com/mattrobenolt/ztest";
-      rev = "d1a70d1e99d4e8751d5ceddfe8dcc761e7831aad";
+      url = "https://github.com/mattrobenolt/ztest/archive/d1a70d1e99d4e8751d5ceddfe8dcc761e7831aad.tar.gz";
       hash = "sha256-R3wqILeu5gp7OE+GF5hD7AebKDB5rb7FT2SOa4573dg=";
     };
-    "ztest-0.2.0-h6PBzyKEAAC49mtm1NO2CTeniItVuL0l06TpBDMDTe19" = fetchzip {
-      name = "ztest";
-      url = "https://github.com/mattrobenolt/ztest/archive/e8a7c83a961502ff85ed82fbab06af78c81a0836.tar.gz";
-      hash = "sha256-+p5tcPFxYeLw+XB3L9GjZ05/9QLVbwMJROTPt6VpxGM=";
-    };
-    "ztls-0.0.0-SHHDXpeGIwCXW9fi53JgP-Wxn3eX6bLTVjarwaDroQ8H" = fetchZigGit {
+    "ztls-0.0.0-SHHDXpeGIwBliLSR4xNIADmvPF4TdP28vEKX3kuLInGC" = fetchZigGit {
       name = "ztls";
       url = "https://github.com/mattrobenolt/ztls";
-      rev = "80621b9f387bfa73467d9f2b4ffb109db410523c";
-      hash = "sha256-QoFVuk9x3ydygY4RCkVlJIXt4rW/u7PyHZqMWktP9XY=";
+      rev = "99e2a8eec9fef60720faa2c28e1a0a482216482e";
+      hash = "sha256-ZcCkL2tM8yKtCvOc25XeDgBnhLYb4tbJ+mCZhSba/wg=";
     };
   };
 
@@ -103,7 +91,13 @@ in
 # what the directory walk calls a file, so symlinked headers are skipped
 # without a word. Building them all in one derivation gives real files from
 # the start, without a second copy of everything.
-runCommandLocal name
+#
+# `runCommand` and not `runCommandLocal`: the result is worth taking from a
+# binary cache. Building it locally means first fetching a whole Zig, and
+# under 0.17 compiling its fetch build runner too, which is minutes on a small
+# CI machine; `runCommandLocal` forbids substituting it, so every job that
+# wants the packages builds them again even when a cache already holds them.
+runCommand name
   {
     nativeBuildInputs = [ zig_0_16 ];
     passthru = { inherit pathDependencyPackages; };

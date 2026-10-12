@@ -5,8 +5,8 @@
     .minimum_zig_version = "0.16.0",
     .dependencies = .{
         .ztls = .{
-            .url = "git+https://github.com/mattrobenolt/ztls?ref=main#80621b9f387bfa73467d9f2b4ffb109db410523c",
-            .hash = "ztls-0.0.0-SHHDXpeGIwCXW9fi53JgP-Wxn3eX6bLTVjarwaDroQ8H",
+            .url = "git+https://github.com/mattrobenolt/ztls?ref=main#99e2a8eec9fef60720faa2c28e1a0a482216482e",
+            .hash = "ztls-0.0.0-SHHDXpeGIwBliLSR4xNIADmvPF4TdP28vEKX3kuLInGC",
         },
         // These helpers never enter the executable's module graph.
         .ztest = .{
@@ -15,8 +15,8 @@
             .lazy = true,
         },
         .benchmark = .{
-            .url = "git+https://github.com/mattrobenolt/zig-benchmark#d69b1c606698e8693bcbb09053ac9cf6c2196461",
-            .hash = "benchmark-0.1.0-JS72VhkcAQD-UUxr83rHajUlCXnJEa7pdC2orw8TWPdg",
+            .url = "git+https://github.com/mattrobenolt/zig-benchmark?ref=main#5572317d18d1e5b4630950658b1628b4398a84a8",
+            .hash = "benchmark-0.1.0-JS72VhUcAQAM6gGwbJeMtNhbX7n8LQk4LIdSrRz9ljNg",
             .lazy = true,
         },
     },
