@@ -339,6 +339,8 @@ Post-handshake tickets are discarded. KeyUpdate uses the established engine.
 Session storage remains alive through completion retirement on Linux or `EV_DELETE` on macOS.
 Bounded libcrypto allocations for setup and infrequent key updates are the exceptions to the steady-state allocation rule.
 
+When every member of a zone is down, client queries attempt the sequence in order. CoreDNS 1.14.6 treats a fully down upstream set as a broken health signal and connects anyway. z53 used to answer exhausted SERVFAIL instead. That choice permanently disabled single-upstream zones behind upstreams that never answer the root-NS probe, such as Tailscale MagicDNS with `accept-dns` off (issue #8). An admitted response still restores health, so the first successful exchange recovers the zone. The all-down attempt follows the sequential policy, not CoreDNS's random reselection.
+
 Health state is separate for each configured endpoint and zone, even when addresses match.
 Counters saturate at the maximum `u32`. An admitted DNS response restores health before client encoding.
 Typed transport results determine penalties, not diagnostic strings.

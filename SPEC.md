@@ -353,7 +353,10 @@ Health:
 - Count consecutive transport failures separately for each configured endpoint and zone, even when addresses match.
 - After `max_fails` consecutive failed exchanges, mark the endpoint down. The default is 2. Counters saturate at the maximum `u32`.
 - A zero `max_fails` disables exclusion and probes.
-- Skip down endpoints in the sequence. If all members are down, use the existing exhausted, stale, or SERVFAIL policy.
+- Skip down endpoints in the sequence, unless every member is down. An
+  all-down zone attempts the sequence in order, because a fully down zone
+  presumes a broken health signal. This matches the CoreDNS 1.14.6 default.
+  Exhaustion of every attempted member returns the stale or SERVFAIL policy.
 - Only transport errors, timeouts, and TLS certificate rejection penalize health. Local resource and crypto failures do not penalize health.
 - Encoding errors and unsupported hostnames do not penalize health. Idle close, shutdown, and client cancellation do not penalize health.
 - An admitted DNS response resets the failure count and restores health, including SERVFAIL and REFUSED. No RCODE triggers failover.
@@ -897,7 +900,11 @@ in-process queries:
   returns the full answer.
 - Serve stale: with the grace window on and all upstreams dead, an expired
   entry serves with TTL 30.
-- Every upstream dead: SERVFAIL, cached 5 seconds.
+- Every upstream dead: each member is attempted in order. Exhaustion returns
+  SERVFAIL, cached 5 seconds, or stale.
+- All-down recovery: while every member is down, a client query still
+  attempts the sequence. An admitted answer restores the endpoint and logs
+  `state=restored`.
 - Asynchronous logging: completion lines reach a piped stderr in completion
   order while the resolver keeps answering.
 

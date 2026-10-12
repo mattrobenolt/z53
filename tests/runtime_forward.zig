@@ -3703,8 +3703,10 @@ test "health native UDP exclusion recovery error rcode and no probe completion l
     _ = try harness.receive(client, &output);
     try testing.expectEqual(1, harness.service.forward.health[0].failures);
     try send(client, try query(&input, 82, "uncached.example."));
+    _ = try peer.request(&harness, &upstream);
     _ = try harness.receive(client, &output);
-    try testing.expectEqual(1, logs.count("event=upstream_failure"));
+    try testing.expectEqual(2, harness.service.forward.health[0].failures);
+    try testing.expectEqual(2, logs.count("event=upstream_failure"));
     try testing.expectEqual(2, logs.count("event=query"));
     const probe = try peer.request(&harness, &upstream);
     try healthQuestion(probe);
@@ -3749,7 +3751,7 @@ fn healthRejectedDatagrams(harness: *Harness, peer: *DatagramPeer, request: []co
         try testing.expect(owner.generation > generation);
         try testing.expectEqual(.read_datagram, session.state);
         try testing.expectEqual(deadline_ns, session.deadline_ns);
-        try testing.expectEqual(1, harness.service.forward.health[0].failures);
+        try testing.expectEqual(2, harness.service.forward.health[0].failures);
     }
 }
 
@@ -3768,7 +3770,7 @@ fn healthRecovered(harness: *Harness) !void {
     return error.HealthNotRestored;
 }
 
-// SPEC §§3.6, 3.7: an all-down query retains stale bytes without another transport attempt.
+// SPEC §§3.6, 3.7: an all-down query attempts the dead member, then retains stale bytes.
 test "health native all down stale and forced TCP probe recovery reuse" {
     var harness: Harness = undefined;
     try harness.init();
@@ -3798,10 +3800,14 @@ test "health native all down stale and forced TCP probe recovery reuse" {
     try send(client, bytes);
     _ = try harness.receive(client, &output);
     try testing.expectEqual(1, harness.service.forward.health[0].failures);
+    _ = system.close(harness.peer.?);
+    harness.peer = null;
     try send(client, bytes);
+    _ = try harness.request(&upstream);
     _ = try harness.receive(client, &output);
+    try testing.expectEqual(2, harness.service.forward.health[0].failures);
     try testing.expectEqual(2, logs.count("src=stale"));
-    try testing.expectEqual(1, logs.count("event=upstream_failure"));
+    try testing.expectEqual(2, logs.count("event=upstream_failure"));
     try testing.expectEqual(stored, entry.items(.bytes)[0].?.ptr);
     _ = system.close(harness.peer.?);
     harness.peer = null;

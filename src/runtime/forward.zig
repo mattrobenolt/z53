@@ -230,11 +230,15 @@ pub const Forward = struct {
         const transaction = &self.transactions[index];
         assert(transaction.state == .ready);
         if (transaction.purpose == .client) {
-            const length = self.config.zones[transaction.zone].upstreams.len;
-            while (transaction.cursor < length) : (transaction.cursor += 1) {
-                const endpoint = transaction.zone * @as(u16, config.upstreams_max) +
-                    transaction.cursor;
-                if (!self.down(endpoint)) break;
+            // A fully down zone presumes a broken health signal, so the sequence is
+            // attempted in order instead of answering exhausted SERVFAIL locally.
+            if (!self.allDown(transaction.zone)) {
+                const length = self.config.zones[transaction.zone].upstreams.len;
+                while (transaction.cursor < length) : (transaction.cursor += 1) {
+                    const endpoint = transaction.zone * @as(u16, config.upstreams_max) +
+                        transaction.cursor;
+                    if (!self.down(endpoint)) break;
+                }
             }
         }
         if (transaction.cursor == self.config.zones[transaction.zone].upstreams.len) {
@@ -278,6 +282,16 @@ pub const Forward = struct {
         const maximum = self.config.zones[endpoint / config.upstreams_max].max_fails;
         if (maximum == 0) return false;
         return self.health[endpoint].failures >= maximum;
+    }
+
+    /// Every configured member of the zone is down. A zone without exclusion never is.
+    fn allDown(self: *const Forward, zone: u16) bool {
+        for (0..self.config.zones[zone].upstreams.len) |cursor| {
+            const endpoint = zone * @as(u16, config.upstreams_max) +
+                @as(u16, @intCast(cursor));
+            if (!self.down(endpoint)) return false;
+        }
+        return true;
     }
 
     /// Only retired transport exchanges penalize their configured endpoint.

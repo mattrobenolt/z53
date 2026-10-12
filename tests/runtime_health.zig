@@ -114,7 +114,7 @@ test "health thresholds one two zero maximum and isolated endpoint counters" {
     }
 }
 
-// SPEC §§3.6, 3.7: an all-down sequence exhausts without a random known-down retry.
+// SPEC §§3.6, 3.7: an all-down sequence attempts every member in order, then exhausts.
 test "health all down selection and local cancellation without penalties" {
     var fixture: Fixture = undefined;
     try fixture.init(1);
@@ -123,6 +123,13 @@ test "health all down selection and local cancellation without penalties" {
     fixture.failure(0, 0);
     fixture.failure(1, 0);
     const transaction = fixture.client(0);
+    const selected = forward.select(transaction, 1).?;
+    try testing.expectEqual(@as(u16, 0), forward.sessions[selected.session].endpoint);
+    try testing.expectEqual(.active, forward.transactions[transaction].state);
+    forward.transactions[transaction].state = .ready;
+    const second = forward.select(transaction, 1).?;
+    try testing.expectEqual(@as(u16, 1), forward.sessions[second.session].endpoint);
+    forward.transactions[transaction].state = .ready;
     try testing.expectEqual(null, forward.select(transaction, 1));
     try testing.expectEqual(.exhausted, forward.transactions[transaction].completion);
     for ([_]forwarding.Failure{ .local, .cancelled }) |failure| {
