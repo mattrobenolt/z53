@@ -22,6 +22,11 @@ Preserve these fixes in updates to the helper pins.
 Nix fetches dependency archives separately, then builds with Zig's `--system` mode without network access.
 Packages use ReleaseSafe and an explicit baseline CPU target, independent of the build host.
 
+Plain `zig build` outside the sandbox resolves a missing dependency over the network through Zig's own resolver, not the system resolver, and a hosted runner's DNS can fail that resolver transiently.
+[Run 38312443198](https://github.com/mattrobenolt/z53/actions/runs/38312443198) failed `just test-portable` with `NameServerFailure` while the Nix fetchers on the same runner reached github.com, and the rerun passed unchanged.
+A CI job therefore warms the zig global cache once, before the non-sandbox steps, with `just fetch`, which retries `zig build --fetch=all` three times.
+Later test, runtime, and fuzz builds then resolve every package from the cache and never touch the network.
+
 ## Configuration and routing
 
 `src/config.zig` parses typed ZON within a fixed startup workspace.

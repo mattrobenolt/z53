@@ -57,6 +57,8 @@ jobs:
           test "$(nix eval --impure --raw --expr builtins.currentSystem)" = "$EXPECTED_SYSTEM"
       - name: Build packages and run flake checks
         run: nix flake check --no-write-lock-file --print-build-logs
+      - name: Fetch the dependencies with retries
+        run: nix develop --no-write-lock-file -c just fetch
       - name: Check host trust and compile all tests
         run: nix develop --no-write-lock-file -c just test-portable
       - name: Run the native socket suite

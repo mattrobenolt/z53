@@ -68,6 +68,27 @@ lint:
 check:
     nix flake check --no-write-lock-file
 
+# Fetch every manifest dependency into the zig global cache: direct,
+# transitive, and lazy, including the test-only ones. CI runs this once per
+# job, with retries, before the non-sandbox steps; those builds then resolve
+# every package from the cache and cannot meet a runner's transient DNS
+# failure. A warm cache also serves a fresh local clone.
+[group('deps')]
+fetch:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    for attempt in 1 2 3; do
+        if zig build --fetch=all; then
+            exit 0
+        fi
+        if [[ $attempt -lt 3 ]]; then
+            echo "fetch: attempt $attempt failed, retrying in 10 seconds" >&2
+            sleep 10
+        fi
+    done
+    echo 'fetch: three attempts failed' >&2
+    exit 1
+
 # Refresh every ztls pin from main: the build.zig.zon revision and the
 # per-dependency fetchers in nix/zon-deps.nix.
 # Requires network access: zon2nix downloads every dependency to compute its
