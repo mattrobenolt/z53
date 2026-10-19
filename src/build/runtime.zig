@@ -25,7 +25,10 @@ pub fn add(
             .root_source_file = b.path("tests/runtime.zig"),
             .target = executable.root_module.resolved_target.?,
             .optimize = executable.root_module.optimize,
-            .imports = &.{.{ .name = "runtime", .module = module }},
+            .imports = &.{
+                .{ .name = "runtime", .module = module },
+                .{ .name = "stdx", .module = stdx },
+            },
             .link_libc = true,
         }),
         .test_runner = .{ .path = testingx.path("src/runner.zig"), .mode = .simple },

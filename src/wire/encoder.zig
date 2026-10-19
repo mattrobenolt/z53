@@ -1,7 +1,7 @@
 const builtin = @import("builtin");
 const fixture = @import("../testing/wire.zig");
 const std = @import("std");
-const Wyhash = std.hash.Wyhash;
+const RapidHash = @import("stdx").hash.RapidHash;
 const assert = std.debug.assert;
 
 const wire = @import("../wire.zig");
@@ -78,7 +78,7 @@ pub const Encoder = struct {
     }
 
     fn lookup(self: *Encoder, suffix: []const u8) ?u16 {
-        const hash = Wyhash.hash(0, suffix);
+        const hash = RapidHash.hash(0, suffix);
         for (0..self.dictionary.len) |probe| {
             const slot = (hash +% probe) % self.dictionary.len;
             if (!self.occupied.isSet(slot)) return null;
@@ -98,7 +98,7 @@ pub const Encoder = struct {
     }
 
     fn insert(self: *Encoder, suffix: []const u8, offset: u16) void {
-        const hash = Wyhash.hash(0, suffix);
+        const hash = RapidHash.hash(0, suffix);
         for (0..self.dictionary.len) |probe| {
             const slot = (hash +% probe) % self.dictionary.len;
             if (self.occupied.isSet(slot)) continue;
@@ -228,9 +228,9 @@ const WireTestsReuse = struct {
             "long.old.example.",
             "y.new.example.",
         }) |text| {
-            const before = std.hash.Wyhash.hash(0, std.mem.sliceAsBytes(&encoder.dictionary));
+            const before = RapidHash.hash(0, std.mem.sliceAsBytes(&encoder.dictionary));
             try encoder.init(&output, &.{});
-            const after = std.hash.Wyhash.hash(0, std.mem.sliceAsBytes(&encoder.dictionary));
+            const after = RapidHash.hash(0, std.mem.sliceAsBytes(&encoder.dictionary));
             try testing.expectEqual(before, after);
             var name: wire.Name = undefined;
             try name.fromText(text);
@@ -272,9 +272,9 @@ const WireTestsCompressionReuse = struct {
     test "compression collisions survive dirty reuse and an encoding failure" {
         var query_names: [2]wire.Name = undefined;
         try query_names[0].fromText("collision.example.");
-        try query_names[1].fromText("x7334.example.");
-        const bucket = std.hash.Wyhash.hash(0, query_names[0].wire()) % 16384;
-        try testing.expectEqual(bucket, std.hash.Wyhash.hash(0, query_names[1].wire()) % 16384);
+        try query_names[1].fromText("x295.example.");
+        const bucket = RapidHash.hash(0, query_names[0].wire()) % 16384;
+        try testing.expectEqual(bucket, RapidHash.hash(0, query_names[1].wire()) % 16384);
         var encoder: wire.Encoder = undefined;
         var output: [512]u8 = undefined;
         for (0..3) |_| {

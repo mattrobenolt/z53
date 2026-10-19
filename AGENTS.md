@@ -131,6 +131,7 @@ Record a capture for every performance claim.
 Use the project tools:
 
 - testingx for benchmarks.
+- benchstat from goperf to compare captures.
 - `perf` or Instruments for profiles.
 - `objdump -d` or `llvm-objdump` for disassembly.
 

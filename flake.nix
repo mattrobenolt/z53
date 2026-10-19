@@ -75,6 +75,7 @@
                 just
                 dig
                 nixfmt
+                goperf
                 python3
                 unixtools.ps
                 actionlint

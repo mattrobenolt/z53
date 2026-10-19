@@ -160,6 +160,9 @@ A successful replacement removes a matching key from the other bank.
 Keys include framed labels, class, type, and the DO bit.
 Names compare case-insensitively. Framed labels prevent binary dots or zero bytes from aliasing separators.
 Fingerprints use only initialized key bytes. Exact equality resolves collisions.
+RapidHash V3 from stdx replaces Wyhash in the fingerprint, the encoder dictionary, and test checksums.
+The [RapidHash capture](benchmarks/2026-10-19-rapidhash.txt) records the trade: raw hashing is faster for common short keys, the cache path pays 0.72% geomean, and one synthetic full-miss index key lands in a different probe cluster.
+The change removes the second 64-bit hash implementation from the binary.
 
 Each bank has a preallocated `std.HashMapUnmanaged(u32, void, IndexContext, 80)` index of slot numbers.
 The context reads fingerprints from the columns without copies of full keys.

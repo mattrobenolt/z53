@@ -2,6 +2,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const runtime = @import("runtime");
 const testing = std.testing;
+const RapidHash = @import("stdx").hash.RapidHash;
 const listen_port = @import("listen_port.zig");
 const logging = @import("runtime_log.zig");
 const system = std.c;
@@ -1901,9 +1902,9 @@ const LinuxPair = struct {
                 .offset = session.offset,
                 .length = session.length,
                 .deadline_ns = session.deadline_ns,
-                .input_hash = std.hash.Wyhash.hash(0, &session.input),
-                .output_hash = std.hash.Wyhash.hash(0, session.output[0..session.length]),
-                .client_hash = std.hash.Wyhash.hash(0, &self.service.clients[0].output),
+                .input_hash = RapidHash.hash(0, &session.input),
+                .output_hash = RapidHash.hash(0, session.output[0..session.length]),
+                .client_hash = RapidHash.hash(0, &self.service.clients[0].output),
             };
         }
 
@@ -1913,8 +1914,8 @@ const LinuxPair = struct {
             try testing.expectEqual(before.offset, session.offset);
             try testing.expectEqual(before.length, session.length);
             try testing.expectEqual(before.deadline_ns, session.deadline_ns);
-            try testing.expectEqual(before.input_hash, std.hash.Wyhash.hash(0, &session.input));
-            try testing.expectEqual(before.output_hash, std.hash.Wyhash.hash(
+            try testing.expectEqual(before.input_hash, RapidHash.hash(0, &session.input));
+            try testing.expectEqual(before.output_hash, RapidHash.hash(
                 0,
                 session.output[0..session.length],
             ));
@@ -1926,7 +1927,7 @@ const LinuxPair = struct {
             try testing.expectEqual(.active, self.service.forward.transactions[0].state);
             try testing.expectEqual(1, self.service.forward.transactions[0].cursor);
             try testing.expectEqual(.waiting, self.service.clients[0].phase);
-            try testing.expectEqual(before.client_hash, std.hash.Wyhash.hash(
+            try testing.expectEqual(before.client_hash, RapidHash.hash(
                 0,
                 &self.service.clients[0].output,
             ));
@@ -2065,7 +2066,7 @@ const LinuxPair = struct {
             try testing.expectEqual(.waiting, service.clients[0].phase);
             try testing.expectEqual(
                 before.client_hash,
-                std.hash.Wyhash.hash(0, &service.clients[0].output),
+                RapidHash.hash(0, &service.clients[0].output),
             );
             try testing.expectEqual(0, logs.count("event=query"));
             try fixture.empty();
@@ -3870,14 +3871,14 @@ test "health native pending UDP probe stop retains buffers and counters" {
     const transaction = session.transaction.?;
     const generation = session.generation;
     const output_length = @as(u32, wire.integer(u16, session.output[0..2])) + 2;
-    const hash = std.hash.Wyhash.hash(0, session.output[0..output_length]);
+    const hash = RapidHash.hash(0, session.output[0..output_length]);
     try harness.stop();
     try testing.expect(!harness.service.proctor.pending());
     try testing.expectEqual(1, harness.service.forward.health[0].failures);
     try testing.expectEqual(transaction, harness.service.forward.health[0].probe.?);
     try testing.expectEqual(.active, harness.service.forward.transactions[transaction].state);
     try testing.expectEqual(generation, session.generation);
-    try testing.expectEqual(hash, std.hash.Wyhash.hash(0, session.output[0..output_length]));
+    try testing.expectEqual(hash, RapidHash.hash(0, session.output[0..output_length]));
     try testing.expectEqual(1, logs.count("event=query"));
     try testing.expectEqual(1, logs.count("event=upstream_failure"));
     harness.release();

@@ -3,7 +3,7 @@
 const builtin = @import("builtin");
 const test_fixture = @import("../testing/cache.zig");
 const std = @import("std");
-const Wyhash = std.hash.Wyhash;
+const RapidHash = @import("stdx").hash.RapidHash;
 const assert = std.debug.assert;
 const Allocator = std.mem.Allocator;
 
@@ -41,7 +41,7 @@ pub const Key = struct {
         std.mem.writeInt(u16, canonical[length + 2 ..][0..2], self.class, .little);
         canonical[length + 4] = @intFromEnum(self.dnssec);
         // Zero marks a vacant slot, so a hashed zero becomes one. Key equality resolves collisions.
-        const value = Wyhash.hash(0, canonical[0 .. length + metadata_bytes]);
+        const value = RapidHash.hash(0, canonical[0 .. length + metadata_bytes]);
         return if (value == 0) 1 else value;
     }
 

@@ -1,6 +1,7 @@
 //! Bounded DNS views. Input storage must remain immutable while a Packet lives.
 const std = @import("std");
 const builtin = @import("builtin");
+const RapidHash = @import("stdx").hash.RapidHash;
 
 const equivalent_module = @import("testing/equivalent.zig");
 const fixture = @import("testing/wire.zig");
@@ -459,7 +460,7 @@ const WireTestsExtra = struct {
         builder.record(&.{0}, 41, .additional, &.{});
         var packet: wire.Packet = undefined;
         try packet.parse(try builder.finish());
-        const original = std.hash.Wyhash.hash(0, packet.bytes);
+        const original = RapidHash.hash(0, packet.bytes);
         packet.records[0].ttl_s = 5;
         var workspace: wire.rewrite.Workspace = undefined;
         var output: [65535]u8 = undefined;
@@ -468,7 +469,7 @@ const WireTestsExtra = struct {
         try decoded.parse(result);
         try testing.expectEqual(5, decoded.records[0].ttl_s);
         try testing.expectEqual(30, decoded.records[1].ttl_s);
-        try testing.expectEqual(original, std.hash.Wyhash.hash(0, packet.bytes));
+        try testing.expectEqual(original, RapidHash.hash(0, packet.bytes));
     }
 
     // RFC 1035 §4.1.4: longest legal backward pointer chains terminate without recursion.

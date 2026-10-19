@@ -51,6 +51,7 @@ Available modes:
 
 The benchmark uses testingx and ReleaseSafe. Counts and capacities are bounded.
 Trial runs calibrate each case to a 100 ms budget; smoke runs eight fixed iterations.
+The devshell provides `benchstat` from goperf to compare captures.
 Setup occurs before the timer. Directly seeded cases do not measure production cache population.
 
 ## Measurement boundaries
