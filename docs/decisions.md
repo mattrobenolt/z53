@@ -16,8 +16,9 @@ The libcrypto declaration forces pkg-config rather than a system-library fallbac
 tls provides a Sans-I/O TLS engine. The runtime owns socket operations and retains the engine's buffers between completions.
 testingx is a lazy, test-only dependency for the test runner and the benchmark harness.
 Trial benchmarks calibrate each case to a 100 ms budget, and smoke runs eight fixed iterations.
-stdx supplies the fixed-capacity buffer used by the wire and runtime work lists.
-The direct stdx pin matches the commit that tls pins, so the build contains one copy.
+stdx supplies the fixed-capacity buffer and the big-endian wire writer.
+The direct stdx pin is ahead of the one tls pins because `wire.Writer` landed after the tls pin.
+The build therefore carries two stdx modules until tls bumps.
 
 Nix fetches dependency archives separately, then builds with Zig's `--system` mode without network access.
 Packages use ReleaseSafe and an explicit baseline CPU target, independent of the build host.

@@ -1077,7 +1077,7 @@ const ResolverTestsCachePackets = struct {
             .section = .answer,
         });
         const padding: [test_fixture.wire.message_bytes_max]u8 = @splat(0);
-        try fixture.encoder.bytes(padding[0 .. padding.len - fixture.encoder.cursor]);
+        try fixture.encoder.bytes(padding[0 .. padding.len - fixture.encoder.written().len]);
         fixture.encoder.endRecord(offset);
         const result = try fixture.forward(0);
         try testing.expectEqual(.stored, result.insertion);

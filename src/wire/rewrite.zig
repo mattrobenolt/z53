@@ -88,7 +88,7 @@ pub const Workspace = struct {
                 try self.encoder.record(packet, &packet.records[index]);
             }
         }
-        self.encoder.output = output[0..capacity];
+        self.encoder.extend(output[0..capacity]);
         if (opt) |value| try writeOpt(&self.encoder, &value);
         return self.encoder.finish();
     }

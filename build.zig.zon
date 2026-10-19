@@ -8,11 +8,11 @@
             .url = "git+https://github.com/baskingspot/tls?ref=main#a2e6066983b73a96141b779e0c109f097401aa1f",
             .hash = "tls-0.0.0-nf2MKJdWIwCWn9-xOTBOD-gg1Lmnhc9MA5dkHRxAD_nZ",
         },
-        // The tls package imports stdx, so the pin matches the commit that tls
-        // pins. A direct import keeps z53 on the same copy.
+        // tls pins an older stdx. z53 uses wire.Writer, which landed later,
+        // so this pin is ahead until tls bumps. Collapse the two then.
         .stdx = .{
-            .url = "git+https://github.com/baskingspot/stdx#7c37f9a1043f5c5ed781a9b245e41962db8ac5cf",
-            .hash = "stdx-0.0.0-CcWegqfyCAB4ibRs0SyRmJobf6SL2wyZpBM2i2iZMs_3",
+            .url = "git+https://github.com/baskingspot/stdx#268253b94c05b68a1cf915b71556743b86d87c0a",
+            .hash = "stdx-0.0.0-CcWegmBsCQCBUW4JKdUgVmjbbq3qNk0-jtnjsYvGNlGB",
         },
         // The runner and benchmark helper never enter the executable's module graph.
         .testingx = .{

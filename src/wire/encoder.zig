@@ -1,7 +1,9 @@
 const builtin = @import("builtin");
 const fixture = @import("../testing/wire.zig");
 const std = @import("std");
-const RapidHash = @import("stdx").hash.RapidHash;
+const stdx = @import("stdx");
+const wirex = stdx.wire;
+const RapidHash = stdx.hash.RapidHash;
 const assert = std.debug.assert;
 
 const wire = @import("../wire.zig");
@@ -10,8 +12,7 @@ const names = wire.names;
 /// Output and input must not overlap. Any error invalidates this encoder.
 /// Every compression entry refers to the current output, never the input.
 pub const Encoder = struct {
-    output: []u8,
-    cursor: usize,
+    writer: wirex.Writer(.big),
     header: wire.Header,
     dictionary: [names.compression_targets_max]u16,
     occupied: names.ScratchSet(names.compression_targets_max),
@@ -20,8 +21,8 @@ pub const Encoder = struct {
 
     pub fn init(self: *Encoder, output: []u8, header: *const wire.Header) wire.Error!void {
         if (output.len < wire.header_bytes) return error.NoSpace;
-        self.output = output[0..@min(output.len, wire.message_bytes_max)];
-        self.cursor = wire.header_bytes;
+        self.writer = .init(output[0..@min(output.len, wire.message_bytes_max)]);
+        self.writer.advanceAssumeCapacity(wire.header_bytes);
         self.header = header.*;
         self.header.counts = @splat(0);
         self.occupied.init();
@@ -30,20 +31,26 @@ pub const Encoder = struct {
     }
 
     pub fn finish(self: *Encoder) wire.Error![]const u8 {
-        try self.header.encode(self.output);
-        return self.output[0..self.cursor];
+        try self.header.encode(self.writer.buffer);
+        return self.writer.constBuffered();
+    }
+
+    pub fn written(self: *const Encoder) []const u8 {
+        return self.writer.constBuffered();
+    }
+
+    /// Extend the capacity after a truncated pass reserved bytes at the end.
+    pub fn extend(self: *Encoder, output: []u8) void {
+        assert(output.len >= self.writer.constBuffered().len);
+        self.writer.buffer = output[0..@min(output.len, wire.message_bytes_max)];
     }
 
     pub fn bytes(self: *Encoder, value: []const u8) wire.Error!void {
-        if (value.len > self.output.len - self.cursor) return error.NoSpace;
-        @memcpy(self.output[self.cursor..][0..value.len], value);
-        self.cursor += value.len;
+        self.writer.appendSlice(value) catch return error.NoSpace;
     }
 
     pub fn number(self: *Encoder, comptime T: type, value: T) wire.Error!void {
-        var buffer: [@sizeOf(T)]u8 = undefined;
-        wire.put(T, &buffer, value);
-        try self.bytes(&buffer);
+        self.writer.append(T, value) catch return error.NoSpace;
     }
 
     pub fn name(
@@ -52,7 +59,7 @@ pub const Encoder = struct {
         compression: names.Compression,
     ) wire.Error!void {
         try value.validate();
-        const start = self.cursor;
+        const start = self.writer.constBuffered().len;
         var index: usize = 0;
         while (index + 1 < value.length) {
             if (compression == .allowed) {
@@ -86,9 +93,9 @@ pub const Encoder = struct {
             var expanded: wire.Name = undefined;
             _ = names.decode(
                 &expanded,
-                self.output,
+                self.writer.buffer,
                 offset,
-                self.cursor,
+                self.writer.constBuffered().len,
                 &self.boundaries,
                 .allowed,
             ) catch continue;
@@ -135,16 +142,17 @@ pub const Encoder = struct {
         try self.number(u16, @intFromEnum(value.kind));
         try self.number(u16, value.class);
         try self.number(u32, value.ttl_s);
-        const offset = self.cursor;
-        try self.number(u16, 0);
+        const offset = self.writer.constBuffered().len;
+        _ = self.writer.reserve(2) catch return error.NoSpace;
         self.header.counts[@intFromEnum(value.section)] += 1;
         return offset;
     }
 
     pub fn endRecord(self: *Encoder, length_offset: usize) void {
-        assert(length_offset + 2 <= self.cursor);
-        const length: u16 = @intCast(self.cursor - length_offset - 2);
-        wire.put(u16, self.output[length_offset..][0..2], length);
+        const output = self.writer.buffered();
+        assert(length_offset + 2 <= output.len);
+        const length: u16 = @intCast(output.len - length_offset - 2);
+        wire.put(u16, output[length_offset..][0..2], length);
     }
 
     pub fn record(self: *Encoder, packet: *wire.Packet, value: *const wire.Record) wire.Error!void {

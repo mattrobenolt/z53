@@ -1531,7 +1531,7 @@ test "forward native query encoding failure is uncached without attempts" {
     };
     const offset = try encoder.beginRecord(&name, &record);
     const padding: [65535]u8 = @splat(0);
-    try encoder.bytes(padding[0 .. 65535 - encoder.cursor]);
+    try encoder.bytes(padding[0 .. 65535 - encoder.written().len]);
     encoder.endRecord(offset);
     const bytes = try encoder.finish();
     try wire.framePrefix(&input, bytes.len);
