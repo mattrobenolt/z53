@@ -1,8 +1,8 @@
 # Contributor instructions
 
 z53 is a loopback DNS caching forwarder in Zig 0.16.
-It uses io_uring on Linux, kqueue on macOS, and ztls for DNS-over-TLS.
-Runtime dependencies are ztls and one libcrypto backend, with OpenSSL as the default.
+It uses io_uring on Linux, kqueue on macOS, and tls for DNS-over-TLS.
+Runtime dependencies are tls and stdx, plus one libcrypto backend, with OpenSSL as the default.
 The supported targets are aarch64-linux, x86_64-linux, and aarch64-darwin.
 
 ## Scope and specification
@@ -85,7 +85,7 @@ Prioritize safety, then performance, then developer convenience.
 
 ### Reusable buffers
 
-Use `ArrayBuffer(T, N)` from `src/array_buffer.zig` for fixed append-only collections.
+Use `stdx.buffer.Array(T, N)` for fixed append-only collections.
 Derive capacity and index types from the buffer type.
 Use `clear()` to reset retained storage, not assignment of `.empty`.
 Use checked append methods for input-derived lengths.
@@ -130,7 +130,7 @@ Record a capture for every performance claim.
 
 Use the project tools:
 
-- zig-benchmark for benchmarks.
+- testingx for benchmarks.
 - `perf` or Instruments for profiles.
 - `objdump -d` or `llvm-objdump` for disassembly.
 
@@ -177,8 +177,8 @@ Cover error paths.
 Reproduce a defect before the fix, or use a mutation that makes the regression fail at its intended assertion.
 Restore the source and rerun the test after a mutation.
 Record the result in the commit or issue comment.
-Use ztest for unit-test output and zig-benchmark for benchmarks.
-Keep both dependencies lazy and test-only in `build.zig.zon`.
+Use testingx for unit-test output and benchmarks.
+Keep it lazy and test-only in `build.zig.zon`.
 
 ## Nix
 
@@ -189,5 +189,5 @@ This repository supplies the package and reusable modules.
 
 When a dependency pin in `build.zig.zon` changes, regenerate `nix/zon-deps.nix` and commit it with the pin change.
 Verify dependency changes with `nix build .#z53`.
-Run `just bump-ztls` to refresh the ztls pin in `build.zig.zon` and the generated fetchers together.
+Run `just bump-deps` to refresh the tls, stdx, and testingx pins in `build.zig.zon` and the generated fetchers together.
 Ordinary `zig build` commands never fetch the sandbox dependencies.

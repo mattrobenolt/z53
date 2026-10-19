@@ -7,7 +7,7 @@ const assert = std.debug.assert;
 const DefaultCsprng = std.Random.DefaultCsprng;
 const time = std.time;
 
-const ArrayBuffer = @import("../array_buffer.zig").ArrayBuffer;
+const buffer = @import("stdx").buffer;
 pub const log = @import("log.zig");
 const ownership = @import("ownership.zig");
 const FailureReason = @import("failure.zig").Reason;
@@ -23,7 +23,7 @@ pub const endpoints_max = config.zones_max * config.upstreams_max;
 pub const probes_max = 2;
 pub const storage_bytes_max = 12 * 1024 * 1024;
 
-const ProbeEndpoints = ArrayBuffer(u16, endpoints_max);
+const ProbeEndpoints = buffer.Array(u16, endpoints_max);
 
 pub const Transport = enum { udp, tcp, tls };
 

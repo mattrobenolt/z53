@@ -21,7 +21,7 @@ restart bind failures are still under investigation in
   required; there is no epoll fallback.
 - aarch64-darwin.
 
-The build uses Zig 0.16, ztls, and OpenSSL through pkg-config. The Nix flake
+The build uses Zig 0.16, tls, and OpenSSL through pkg-config. The Nix flake
 pins the toolchain and every dependency.
 
 ## Quick start

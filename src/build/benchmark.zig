@@ -4,20 +4,21 @@ pub fn addSmoke(
     b: *std.Build,
     target: *const std.Build.ResolvedTarget,
     tls: *std.Build.Module,
+    stdx: *std.Build.Module,
+    testingx: *std.Build.Dependency,
     test_step: *std.Build.Step,
     test_compile: *std.Build.Step,
 ) void {
     const smoke = b.step("bench-smoke", "Run eight iterations of each DNS benchmark");
     // Benchmarks always build ReleaseSafe, independently of the daemon build options.
-    const dependency = b.lazyDependency("benchmark", .{
-        .target = target.*,
-        .optimize = .ReleaseSafe,
-    }) orelse return;
     const pipeline = b.createModule(.{
         .root_source_file = b.path("src/runtime.zig"),
         .target = target.*,
         .optimize = .ReleaseSafe,
-        .imports = &.{.{ .name = "ztls", .module = tls }},
+        .imports = &.{
+            .{ .name = "tls", .module = tls },
+            .{ .name = "stdx", .module = stdx },
+        },
     });
     const options: std.Build.ExecutableOptions = .{
         .name = "dns-benchmark",
@@ -27,7 +28,7 @@ pub fn addSmoke(
             .optimize = .ReleaseSafe,
             .link_libc = true,
             .imports = &.{
-                .{ .name = "benchmark", .module = dependency.module("benchmark") },
+                .{ .name = "testingx", .module = testingx.module("testingx") },
                 .{ .name = "pipeline", .module = pipeline },
             },
         }),

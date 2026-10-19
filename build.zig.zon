@@ -4,19 +4,20 @@
     .fingerprint = 0xbbc69734fb0074ce, // Changing this has security and trust implications.
     .minimum_zig_version = "0.16.0",
     .dependencies = .{
-        .ztls = .{
-            .url = "git+https://github.com/mattrobenolt/ztls?ref=main#99e2a8eec9fef60720faa2c28e1a0a482216482e",
-            .hash = "ztls-0.0.0-SHHDXpeGIwBliLSR4xNIADmvPF4TdP28vEKX3kuLInGC",
+        .tls = .{
+            .url = "git+https://github.com/baskingspot/tls?ref=main#a2e6066983b73a96141b779e0c109f097401aa1f",
+            .hash = "tls-0.0.0-nf2MKJdWIwCWn9-xOTBOD-gg1Lmnhc9MA5dkHRxAD_nZ",
         },
-        // These helpers never enter the executable's module graph.
-        .ztest = .{
-            .url = "git+https://github.com/mattrobenolt/ztest#d1a70d1e99d4e8751d5ceddfe8dcc761e7831aad",
-            .hash = "ztest-0.2.0-h6PBz_h1AAD8Z41oiZbR5aKo2xAzeqbuW9KIxfClUgwp",
-            .lazy = true,
+        // The tls package imports stdx, so the pin matches the commit that tls
+        // pins. A direct import keeps z53 on the same copy.
+        .stdx = .{
+            .url = "git+https://github.com/baskingspot/stdx#7c37f9a1043f5c5ed781a9b245e41962db8ac5cf",
+            .hash = "stdx-0.0.0-CcWegqfyCAB4ibRs0SyRmJobf6SL2wyZpBM2i2iZMs_3",
         },
-        .benchmark = .{
-            .url = "git+https://github.com/mattrobenolt/zig-benchmark?ref=main#5572317d18d1e5b4630950658b1628b4398a84a8",
-            .hash = "benchmark-0.1.0-JS72VhUcAQAM6gGwbJeMtNhbX7n8LQk4LIdSrRz9ljNg",
+        // The runner and benchmark helper never enter the executable's module graph.
+        .testingx = .{
+            .url = "git+https://github.com/baskingspot/testingx#c9b81a4bbf8a41f1317dc0f158ba851cebdae491",
+            .hash = "testingx-0.0.0-ib95-4WvAgDlIY73PBF6aDm9FBntyPof0zrluXvyz-v5",
             .lazy = true,
         },
     },

@@ -1,7 +1,7 @@
 const builtin = @import("builtin");
 const std = @import("std");
 const fixture = @import("../testing/wire.zig");
-const ArrayBuffer = @import("../array_buffer.zig").ArrayBuffer;
+const buffer = @import("stdx").buffer;
 const wire = @import("../wire.zig");
 
 pub const Edns = struct {
@@ -41,7 +41,7 @@ pub const Settings = struct {
 /// One synchronous workspace, owned by the event thread. No query heap use.
 pub const Workspace = struct {
     encoder: wire.Encoder,
-    order: ArrayBuffer(u16, wire.records_max),
+    order: buffer.Array(u16, wire.records_max),
     seen: wire.names.ScratchSet(wire.records_max),
 
     pub fn rewrite(

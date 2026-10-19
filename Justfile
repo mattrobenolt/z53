@@ -89,13 +89,15 @@ fetch:
     echo 'fetch: three attempts failed' >&2
     exit 1
 
-# Refresh every ztls pin from main: the build.zig.zon revision and the
+# Refresh the baskingspot pins from main: the build.zig.zon revisions and the
 # per-dependency fetchers in nix/zon-deps.nix.
 # Requires network access: zon2nix downloads every dependency to compute its
 # Nix hash. Safe to rerun.
-[doc('Refresh every ztls pin from main across build.zig.zon and nix/zon-deps.nix.')]
+[doc('Refresh the tls, stdx, and testingx pins across build.zig.zon and nix/zon-deps.nix.')]
 [group('deps')]
-bump-ztls:
-    zig fetch --save git+https://github.com/mattrobenolt/ztls#main
+bump-deps:
+    zig fetch --save git+https://github.com/baskingspot/tls#main
+    zig fetch --save git+https://github.com/baskingspot/stdx#main
+    zig fetch --save git+https://github.com/baskingspot/testingx#main
     nix run .#zon2nix -- --nix=nix/zon-deps.nix build.zig.zon
     nix build .#z53

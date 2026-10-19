@@ -724,7 +724,7 @@ comptime {
 const FuzzTests = struct {
     const testing = std.testing;
 
-    // SPEC §9.3: bounded Smith storage follows the pinned ztls fuzz pattern.
+    // SPEC §9.3: bounded Smith storage follows the pinned tls fuzz pattern.
     test "fuzz DNS decoder and safe rewrites" {
         try testing.fuzz({}, fuzzOne, .{ .corpus = &.{ "\x00" ** 12, "\xff" ** 32 } });
     }

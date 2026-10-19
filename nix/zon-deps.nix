@@ -51,22 +51,23 @@ let
       rev = "7497c85dfc3ae5141308944f2cd47c836772c300";
       hash = "sha256-UnJ/L/IA2pgWQ5MY+w+RDlyg56asNKHTp86SARWoESU=";
     };
-    "txtar-0.2.0-RyJLBG6HAACtIWvLB_sjlVl2CpaGh2sB0lN--cLsPg52" = fetchZigGit {
-      name = "txtar";
-      url = "https://github.com/mattrobenolt/txtar";
-      rev = "a58514df03a5a01d1847252e36248e3cd0728014";
-      hash = "sha256-4k9yE1WqPI3mfhG4svQb7ydK91PzOO5w6n+sgXZ6wpI=";
+    "stdx-0.0.0-CcWegqfyCAB4ibRs0SyRmJobf6SL2wyZpBM2i2iZMs_3" = fetchZigGit {
+      name = "stdx";
+      url = "https://github.com/baskingspot/stdx";
+      rev = "7c37f9a1043f5c5ed781a9b245e41962db8ac5cf";
+      hash = "sha256-laXt4A3Ly08pCPGFJLOQBDhbNTDryCO0B8QaHnMoMRk=";
     };
-    "ztest-0.2.0-h6PBz_h1AAD8Z41oiZbR5aKo2xAzeqbuW9KIxfClUgwp" = fetchzip {
-      name = "ztest";
-      url = "https://github.com/mattrobenolt/ztest/archive/d1a70d1e99d4e8751d5ceddfe8dcc761e7831aad.tar.gz";
-      hash = "sha256-R3wqILeu5gp7OE+GF5hD7AebKDB5rb7FT2SOa4573dg=";
+    "testingx-0.0.0-ib95-4WvAgDlIY73PBF6aDm9FBntyPof0zrluXvyz-v5" = fetchZigGit {
+      name = "testingx";
+      url = "https://github.com/baskingspot/testingx";
+      rev = "c9b81a4bbf8a41f1317dc0f158ba851cebdae491";
+      hash = "sha256-4S4cOBfxzxIHm28T1KOhXTu/dhtmPFdLJ0ht2hBUPKs=";
     };
-    "ztls-0.0.0-SHHDXpeGIwBliLSR4xNIADmvPF4TdP28vEKX3kuLInGC" = fetchZigGit {
-      name = "ztls";
-      url = "https://github.com/mattrobenolt/ztls";
-      rev = "99e2a8eec9fef60720faa2c28e1a0a482216482e";
-      hash = "sha256-ZcCkL2tM8yKtCvOc25XeDgBnhLYb4tbJ+mCZhSba/wg=";
+    "tls-0.0.0-nf2MKJdWIwCWn9-xOTBOD-gg1Lmnhc9MA5dkHRxAD_nZ" = fetchZigGit {
+      name = "tls";
+      url = "https://github.com/baskingspot/tls";
+      rev = "a2e6066983b73a96141b779e0c109f097401aa1f";
+      hash = "sha256-fy4IXZ7DbnErwNAUrfv7GiVuOFyT4jjvRpuYl+3NCp0=";
     };
   };
 

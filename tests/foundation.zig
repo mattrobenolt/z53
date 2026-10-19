@@ -1,7 +1,7 @@
 const std = @import("std");
 const testing = std.testing;
 
-const tls = @import("ztls");
+const tls = @import("tls");
 
 // SPEC §3.6: compile and run the pinned, caller-owned ClientHello API.
 test "TLS client starts with verified policy and caller owned buffers" {

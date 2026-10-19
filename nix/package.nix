@@ -15,7 +15,7 @@ let
     ];
   };
   # One fixed-output fetcher per manifest-pinned dependency, generated from
-  # build.zig.zon by zon2nix. Regenerate with `just bump-ztls` and commit the
+  # build.zig.zon by zon2nix. Regenerate with `just bump-deps` and commit the
   # result with the pin change.
   dependencies = pkgs.callPackage ./zon-deps.nix { };
   package = pkgs.stdenv.mkDerivation {
@@ -96,9 +96,9 @@ in
       command -v ps
       set -o pipefail
       zig build -j2 -Doptimize=ReleaseSafe -Dcpu=baseline --system ${dependencies} -Dunit-filter=TLS test-unit 2>&1 | tee foundation.log
-      # ztest succeeds on an empty selection, so pin the promised TLS coverage.
-      grep -Fx 'ztest: Running 3 tests...' foundation.log
-      zig build -j2 -Doptimize=ReleaseSafe -Dcpu=baseline --system ${dependencies} test-config test-resolver test-wire test-containers test-diagnostics test-runtime-unit bench-smoke
+      # testingx succeeds on an empty selection, so pin the promised TLS coverage.
+      grep -Fx 'testingx: Running 3 tests...' foundation.log
+      zig build -j2 -Doptimize=ReleaseSafe -Dcpu=baseline --system ${dependencies} test-config test-resolver test-wire test-diagnostics test-runtime-unit bench-smoke
       runHook postCheck
     '';
   };

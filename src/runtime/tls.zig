@@ -4,7 +4,7 @@ const std = @import("std");
 const Io = std.Io;
 const assert = std.debug.assert;
 
-pub const engine = @import("ztls");
+pub const engine = @import("tls");
 
 pub const Error = error{ TransportFailure, LocalFailure };
 pub const TrustError = error{ TrustStoreTooLarge, TrustStoreLoadFailed };

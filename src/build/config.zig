@@ -3,7 +3,8 @@ const std = @import("std");
 pub fn add(
     b: *std.Build,
     executable: *std.Build.Step.Compile,
-    ztest: *std.Build.Dependency,
+    stdx: *std.Build.Module,
+    testingx: *std.Build.Dependency,
     all: *std.Build.Step,
     compile: *std.Build.Step,
 ) void {
@@ -11,19 +12,18 @@ pub fn add(
         .root_source_file = b.path("src/config.zig"),
         .target = executable.root_module.resolved_target.?,
         .optimize = executable.root_module.optimize,
+        .imports = &.{.{ .name = "stdx", .module = stdx }},
     });
     const options: std.Build.TestOptions = .{
         .root_module = module,
         .filters = &.{"ConfigTests."},
-        .test_runner = .{ .path = ztest.path("src/test_runner.zig"), .mode = .simple },
+        .test_runner = .{ .path = testingx.path("src/runner.zig"), .mode = .simple },
     };
     options.root_module.link_libc = true;
     compile.dependOn(&b.addTest(options).step);
     const run = b.addRunArtifact(b.addTest(options));
     run.setCwd(b.path("."));
     run.has_side_effects = true;
-    run.setEnvironmentVariable("ZTEST_VERBOSE", "1");
-    run.setEnvironmentVariable("ZTEST_PLAIN", "1");
     const step = b.step("test-config", "Run typed configuration and suffix routing tests");
     step.dependOn(&run.step);
     all.dependOn(step);

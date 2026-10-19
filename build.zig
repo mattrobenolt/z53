@@ -8,10 +8,14 @@ const runtime = @import("src/build/runtime.zig");
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
-    const tls = b.dependency("ztls", .{
+    const tls = b.dependency("tls", .{
         .target = target,
         .optimize = optimize,
-    }).module("ztls");
+    }).module("tls");
+    const stdx = b.dependency("stdx", .{
+        .target = target,
+        .optimize = optimize,
+    }).module("stdx");
     // Zig keeps the first library entry, so update it rather than append a duplicate.
     for (tls.link_objects.items) |*object| {
         switch (object.*) {
@@ -27,7 +31,10 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("src/main.zig"),
             .target = target,
             .optimize = optimize,
-            .imports = &.{.{ .name = "ztls", .module = tls }},
+            .imports = &.{
+                .{ .name = "tls", .module = tls },
+                .{ .name = "stdx", .module = stdx },
+            },
         }),
     };
     const executable = b.addExecutable(executable_options);
@@ -38,13 +45,18 @@ pub fn build(b: *std.Build) void {
     b.step("check", "Check compilation without linking").dependOn(
         &b.addExecutable(executable_options).step,
     );
-    addTests(b, executable, tls);
+    addTests(b, executable, tls, stdx);
 }
 
-fn addTests(b: *std.Build, executable: *std.Build.Step.Compile, tls: *std.Build.Module) void {
-    const test_step = b.step("test", "Run every ztest suite");
+fn addTests(
+    b: *std.Build,
+    executable: *std.Build.Step.Compile,
+    tls: *std.Build.Module,
+    stdx: *std.Build.Module,
+) void {
+    const test_step = b.step("test", "Run every unit test suite");
     const test_compile = b.step("test-compile", "Check unit test compilation without linking");
-    const ztest = b.lazyDependency("ztest", .{}) orelse return;
+    const testingx = b.lazyDependency("testingx", .{}) orelse return;
     const target = executable.root_module.resolved_target.?;
     const unit_step = b.step("test-unit", "Run dependency API and startup tests");
     test_step.dependOn(unit_step);
@@ -56,27 +68,26 @@ fn addTests(b: *std.Build, executable: *std.Build.Step.Compile, tls: *std.Build.
             .root_source_file = b.path("tests/foundation.zig"),
             .target = target,
             .optimize = executable.root_module.optimize,
-            .imports = &.{.{ .name = "ztls", .module = tls }},
+            .imports = &.{.{ .name = "tls", .module = tls }},
         }),
-        .test_runner = .{ .path = ztest.path("src/test_runner.zig"), .mode = .simple },
+        .test_runner = .{ .path = testingx.path("src/runner.zig"), .mode = .simple },
     };
     options.root_module.link_libc = true;
     test_compile.dependOn(&b.addTest(options).step);
     const run_tests = b.addRunArtifact(b.addTest(options));
     run_tests.has_side_effects = true;
-    run_tests.setEnvironmentVariable("ZTEST_VERBOSE", "1");
-    run_tests.setEnvironmentVariable("ZTEST_PLAIN", "1");
     unit_step.dependOn(&run_tests.step);
-    addSupportTests(b, executable, ztest, test_step, test_compile);
-    runtime.add(b, executable, ztest, test_step, test_compile);
-    config.add(b, executable, ztest, test_step, test_compile);
-    resolver.add(b, executable, ztest, test_step, test_compile);
-    benchmark.addSmoke(b, &target, tls, test_step, test_compile);
+    addSupportTests(b, executable, testingx, test_step, test_compile);
+    runtime.add(b, executable, stdx, testingx, test_step, test_compile);
+    config.add(b, executable, stdx, testingx, test_step, test_compile);
+    resolver.add(b, executable, stdx, testingx, test_step, test_compile);
+    benchmark.addSmoke(b, &target, tls, stdx, testingx, test_step, test_compile);
     wire.add(
         b,
         &target,
         executable.root_module.optimize.?,
-        ztest,
+        stdx,
+        testingx,
         test_step,
         test_compile,
     );
@@ -85,12 +96,11 @@ fn addTests(b: *std.Build, executable: *std.Build.Step.Compile, tls: *std.Build.
 fn addSupportTests(
     b: *std.Build,
     executable: *std.Build.Step.Compile,
-    ztest: *std.Build.Dependency,
+    testingx: *std.Build.Dependency,
     all: *std.Build.Step,
     compile: *std.Build.Step,
 ) void {
     const suites = .{
-        .{ "test-containers", "src/array_buffer.zig", "Run inline container tests" },
         .{ "test-diagnostics", "src/runtime/failure.zig", "Run inline diagnostic tests" },
     };
     inline for (suites) |suite| {
@@ -100,18 +110,16 @@ fn addSupportTests(
                 .target = executable.root_module.resolved_target.?,
                 .optimize = executable.root_module.optimize,
                 .imports = &.{.{
-                    .name = "ztls",
-                    .module = executable.root_module.import_table.get("ztls").?,
+                    .name = "tls",
+                    .module = executable.root_module.import_table.get("tls").?,
                 }},
                 .link_libc = true,
             }),
-            .test_runner = .{ .path = ztest.path("src/test_runner.zig"), .mode = .simple },
+            .test_runner = .{ .path = testingx.path("src/runner.zig"), .mode = .simple },
         };
         compile.dependOn(&b.addTest(options).step);
         const run = b.addRunArtifact(b.addTest(options));
         run.has_side_effects = true;
-        run.setEnvironmentVariable("ZTEST_VERBOSE", "1");
-        run.setEnvironmentVariable("ZTEST_PLAIN", "1");
         const step = b.step(suite[0], suite[2]);
         step.dependOn(&run.step);
         all.dependOn(step);

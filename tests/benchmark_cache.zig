@@ -1,6 +1,6 @@
 //! SPEC §§1.3, 3.7, 9.4: cache scaling with identical timed production boundaries.
 const std = @import("std");
-const benchmark = @import("benchmark");
+const testingx = @import("testingx");
 const pipeline = @import("pipeline").pipeline;
 const wire = pipeline.wire;
 const resolver = pipeline.resolver;
@@ -23,7 +23,7 @@ const Case = enum {
     insert_evict,
 };
 
-pub fn run(init: *const std.process.Init, mode: Mode, smoke: enum { short, trials }) !void {
+pub fn add(b: *testingx.B, mode: Mode) !void {
     inline for (capacities) |capacity| {
         inline for (comptime std.meta.tags(Case)) |case| {
             const group: Mode = switch (case) {
@@ -37,26 +37,10 @@ pub fn run(init: *const std.process.Init, mode: Mode, smoke: enum { short, trial
                 .insert_evict => .churn,
                 else => .cache,
             };
-            if (mode == group) {
-                const iterations = if (case == .index_full_first)
-                    100000
-                else
-                    @max(128, @divTrunc(10000000, capacity));
-                const spec = [_]benchmark.Spec{.{
-                    .name = comptime std.fmt.comptimePrint(
-                        "{s}/capacity={d}",
-                        .{ @tagName(case), capacity },
-                    ),
-                    .func = Runner(capacity, case).run,
-                }};
-                if (!try benchmark.runBenchmarks(init.gpa, &spec, .{
-                    .io = init.io,
-                    .emit_environment = false,
-                    .benchmem = true,
-                    .benchtime = .{ .count = if (smoke == .short) 8 else iterations },
-                    .count = if (smoke == .short) 1 else 3,
-                })) return error.BenchmarkFailed;
-            }
+            if (mode == group) try b.add(
+                comptime std.fmt.comptimePrint("{s}/capacity={d}", .{ @tagName(case), capacity }),
+                Runner(capacity, case).run,
+            );
         }
     }
 }
@@ -72,7 +56,7 @@ const Fixture = struct {
     keys: [256]Key,
     expected: [256]?u32,
 
-    fn init(self: *Fixture, timer: *benchmark.B, capacity: u32, case: Case) !void {
+    fn init(self: *Fixture, timer: *testingx.B, capacity: u32, case: Case) !void {
         self.zones = .{.{
             .suffix = ".",
             .upstreams = &.{.{ .address = "127.0.0.1:9" }},
@@ -81,7 +65,7 @@ const Fixture = struct {
         self.settings = .{ .zones = &self.zones };
         self.service = try timer.allocator.create(pipeline.Pipeline);
         errdefer timer.allocator.destroy(self.service);
-        try self.service.init(timer.allocator, timer.timer.io, &self.settings);
+        try self.service.init(timer.allocator, timer.io, &self.settings);
         errdefer self.service.deinit();
         const occupancy = switch (case) {
             .index_empty_miss => 0,
@@ -202,7 +186,7 @@ fn encode(
 
 fn Runner(comptime capacity: u32, comptime case: Case) type {
     return struct {
-        fn run(timer: *benchmark.B) !void {
+        fn run(timer: *testingx.B) !void {
             const fixture = try timer.allocator.create(Fixture);
             defer timer.allocator.destroy(fixture);
             try fixture.init(timer, capacity, case);
@@ -227,35 +211,35 @@ fn Runner(comptime capacity: u32, comptime case: Case) type {
     };
 }
 
-fn indexLoop(timer: *benchmark.B, fixture: *Fixture) !void {
+fn indexLoop(timer: *testingx.B, fixture: *Fixture) !void {
     const bank = &fixture.service.zones.items[0].cache.positive;
     var index: u32 = 0;
     var found: ?u32 = null;
     while (try timer.loop()) {
-        found = bank.find(benchmark.blackBox(&fixture.keys[index % 256]));
-        benchmark.keepAlive(found);
+        found = bank.find(timer.blackBox(&fixture.keys[index % 256]));
+        timer.keepAlive(found);
         index += 1;
     }
     if (found != fixture.expected[(index - 1) % 256]) return error.WrongIndex;
 }
 
-fn lookupLoop(comptime case: Case, timer: *benchmark.B, fixture: *Fixture) !void {
+fn lookupLoop(comptime case: Case, timer: *testingx.B, fixture: *Fixture) !void {
     const service = fixture.service;
     const cache = &service.zones.items[0].cache;
     const bytes = service.request_packet.bytes;
     var result: ?resolver.Answer = null;
     while (try timer.loop()) {
         result = if (case == .pipeline_positive_last)
-            try service.answer(benchmark.blackBox(bytes), &fixture.output, .{ .udp = .ipv4 }, 101)
+            try service.answer(timer.blackBox(bytes), &fixture.output, .{ .udp = .ipv4 }, 101)
         else
             try cache.lookup(
-                benchmark.blackBox(&fixture.request),
+                timer.blackBox(&fixture.request),
                 101,
                 &service.cache_workspace,
                 &fixture.output,
             );
-        benchmark.keepAlive(result);
-        if (result) |answer| benchmark.keepAlive(answer.bytes);
+        timer.keepAlive(result);
+        if (result) |answer| timer.keepAlive(answer.bytes);
     }
     if (case == .lookup_sparse_miss) {
         if (result != null) return error.UnexpectedHit;
@@ -272,7 +256,7 @@ fn lookupLoop(comptime case: Case, timer: *benchmark.B, fixture: *Fixture) !void
 
 const ChurnInput = struct { name: wire.Name, bytes: [128]u8, length: u16 };
 
-fn churnLoop(timer: *benchmark.B, fixture: *Fixture, capacity: u32) !void {
+fn churnLoop(timer: *testingx.B, fixture: *Fixture, capacity: u32) !void {
     const cache = &fixture.service.zones.items[0].cache;
     const workspace = &fixture.service.cache_workspace;
     const count = @min(capacity + 1, @max(128, @divTrunc(10000000, capacity)));
@@ -289,13 +273,13 @@ fn churnLoop(timer: *benchmark.B, fixture: *Fixture, capacity: u32) !void {
         const input = &inputs[index % count];
         fixture.request.name = input.name;
         result = try cache.forward(
-            benchmark.blackBox(&fixture.request),
+            timer.blackBox(&fixture.request),
             input.bytes[0..input.length],
             101,
             workspace,
             &fixture.output,
         );
-        benchmark.keepAlive(result.answer.bytes);
+        timer.keepAlive(result.answer.bytes);
         index += 1;
     }
     if (result.insertion != .stored) return error.InsertionFailed;
@@ -305,16 +289,14 @@ fn churnLoop(timer: *benchmark.B, fixture: *Fixture, capacity: u32) !void {
 }
 
 pub fn profile(init: *const std.process.Init) !void {
-    const spec = [_]benchmark.Spec{.{
-        .name = "ProfilePipelinePositiveLast10000",
-        .func = Runner(10000, .pipeline_positive_last).run,
-    }};
-    if (!try benchmark.runBenchmarks(init.gpa, &spec, .{
-        .io = init.io,
+    var suite = testingx.B.init(init.gpa, init.io, .{
         .benchtime = .{ .count = 50000 },
         .count = 1,
         .benchmem = true,
-    })) return error.BenchmarkFailed;
+    });
+    defer suite.deinit();
+    try suite.add("ProfilePipelinePositiveLast10000", Runner(10000, .pipeline_positive_last).run);
+    if (!try suite.finish()) return error.BenchmarkFailed;
 }
 
 pub fn layout(allocator: std.mem.Allocator) !void {

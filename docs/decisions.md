@@ -5,19 +5,19 @@ This document explains the implementation choices behind that contract.
 
 ## Dependencies and build
 
-The runtime uses Zig 0.16 and ztls with OpenSSL through pkg-config.
+The runtime uses Zig 0.16 and tls with OpenSSL through pkg-config.
 Dependency revisions are pinned in `build.zig.zon` and `flake.lock`.
 Sandbox builds fetch every pinned dependency through a fixed-output fetcher in `nix/zon-deps.nix`, generated from `build.zig.zon` by zon2nix.
-`just bump-ztls` refreshes the ztls pin from main and regenerates that file.
+`just bump-deps` refreshes the tls, stdx, and testingx pins from main and regenerates that file.
 Fixed-output derivations dedupe by output hash, so a stale fetcher substitutes the cached old closure.
 Regenerate `nix/zon-deps.nix` whenever a Zig dependency pin changes.
 The libcrypto declaration forces pkg-config rather than a system-library fallback.
 
-ztls provides a Sans-I/O TLS engine. The runtime owns socket operations and retains the engine's buffers between completions.
-ztest and zig-benchmark are lazy, test-only dependencies.
-Their pins include an [elapsed-time correction for ztest](https://github.com/mattrobenolt/ztest/pull/2) and [Zig 0.16 I/O support for zig-benchmark](https://github.com/mattrobenolt/zig-benchmark/pull/2).
-
-Preserve these fixes in updates to the helper pins.
+tls provides a Sans-I/O TLS engine. The runtime owns socket operations and retains the engine's buffers between completions.
+testingx is a lazy, test-only dependency for the test runner and the benchmark harness.
+Trial benchmarks calibrate each case to a 100 ms budget, and smoke runs eight fixed iterations.
+stdx supplies the fixed-capacity buffer used by the wire and runtime work lists.
+The direct stdx pin matches the commit that tls pins, so the build contains one copy.
 
 Nix fetches dependency archives separately, then builds with Zig's `--system` mode without network access.
 Packages use ReleaseSafe and an explicit baseline CPU target, independent of the build host.
@@ -117,7 +117,7 @@ The first write clears a backing word before publication. Reads consult the map 
 The compression dictionary uses the same validity rule, with exact suffix comparisons.
 `Packet.name` inspects existing provenance without a private bitmap copy.
 
-`ArrayBuffer` holds fixed append-only storage and its active length.
+`stdx.buffer.Array` holds fixed append-only storage and its active length.
 `clear()` resets the length, not the backing array.
 Checked append methods reject external lengths before writes or narrow casts.
 Unchecked appends require a capacity proof. Stream cursors and kernel-owned buffers retain separate lifetime models.
@@ -335,7 +335,7 @@ Custom Apple trust overrides are unsupported.
 Each ClientHello includes one `x25519_mlkem768` share. The 1,222 added wire bytes fit the existing 16,645-byte output buffer.
 Classical X25519 and P-256 shares remain for peers without hybrid support.
 z53 validates this static policy at compile time and rejects any P-384 requirement until key generation supports it.
-ClientHello start failures retain their exact ztls cause after connection state is erased.
+ClientHello start failures retain their exact tls cause after connection state is erased.
 
 TLS takes precedence over `force_tcp` and client transport. Certificate rejection never permits plaintext fallback to the same member.
 

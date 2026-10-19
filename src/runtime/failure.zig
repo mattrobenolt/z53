@@ -1,6 +1,6 @@
 const std = @import("std");
 const testing = std.testing;
-const engine = @import("ztls");
+const engine = @import("tls");
 
 pub const Reason = union(enum) {
     transport_failure,

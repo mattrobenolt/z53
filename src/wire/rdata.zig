@@ -3,7 +3,7 @@ const std = @import("std");
 const equivalent_module = @import("../testing/equivalent.zig");
 const equivalent = equivalent_module.equivalent;
 const fixture = @import("../testing/wire.zig");
-const ArrayBuffer = @import("../array_buffer.zig").ArrayBuffer;
+const buffer = @import("stdx").buffer;
 const wire = @import("../wire.zig");
 const names = wire.names;
 
@@ -29,7 +29,7 @@ const srv_fields_bytes = 3 * @sizeOf(u16);
 const naptr_fields_bytes = 2 * @sizeOf(u16);
 
 pub const Parts = struct {
-    items: ArrayBuffer(Part, parts_max),
+    items: buffer.Array(Part, parts_max),
 
     fn add(self: *Parts, part: Part) void {
         // Every supported layout fits within parts_max; NAPTR is the largest at five parts.

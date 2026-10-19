@@ -14,12 +14,12 @@ TLS `server_name` supplies certificate verification and SNI, not address resolut
 
 1. Language: Zig 0.16.x. The flake pins the exact toolchain revision.
 2. Targets: aarch64-linux, x86_64-linux, aarch64-darwin. No other target.
-3. Runtime dependencies: ztls and one libcrypto backend. The exact ztls
-   revision is pinned in `build.zig.zon`.
+3. Runtime dependencies: tls and stdx, plus one libcrypto backend. The exact
+   tls revision is pinned in `build.zig.zon`.
    The default backend is OpenSSL from nixpkgs, linked through
    pkg-config. No other runtime dependency is allowed.
-4. Use ztest and zig-benchmark as the test and benchmark helpers. Keep them
-   lazy and test-only in `build.zig.zon`, following the ztls pattern.
+4. Use testingx as the test and benchmark helper. Keep it lazy and test-only
+   in `build.zig.zon`, following the tls pattern.
 5. I/O model: Linux builds require kernel 7.0.0 or newer and use io_uring
    for socket events. There is no epoll fallback and no feature probing.
    Every io_uring feature named in this document exists on that kernel.
@@ -34,7 +34,7 @@ TLS `server_name` supplies certificate verification and SNI, not address resolut
    `/etc/z53/z53.zon`. The `-c` flag overrides the path.
 8. No in-process reload. The service manager restarts the process after a
    config change.
-9. ztls is pre-alpha. Bump the pin deliberately. Never bump it silently.
+9. The tls API is not frozen. Bump the pin deliberately. Never bump it silently.
 10. Performance is a design goal. The steady-state query path performs zero
     heap allocations. Static buffers, pools, or an arena per query.
     Bounded libcrypto allocations for connection setup and infrequent key
@@ -378,7 +378,7 @@ Connections:
   Configurable per zone.
 - One in-flight query per upstream connection. No pipelining toward the
   upstream.
-- TLS: ztls client handshake, SNI from `server_name`, chain and hostname
+- TLS: tls client handshake, SNI from `server_name`, chain and hostname
   verification against the system trust store. Trust follows Zig's system
   bundle scan. Custom Apple trust overrides are unsupported.
   A handshake failure is a transport failure.
@@ -393,7 +393,7 @@ Connections:
   A peer can select classical key exchange. A selected hybrid exchange never falls back after a provider failure.
   Post-handshake tickets are discarded. KeyUpdate responses use the established TLS engine.
   Distinguishable local crypto and buffer failures return uncached local SERVFAIL.
-  ClientHello start failures preserve their exact ztls cause.
+  ClientHello start failures preserve their exact tls cause.
 - Upstream queries use a fresh random query ID.
 - Upstream queries carry EDNS0 with payload size 1232. Copy the client DO
   bit and all unknown EDNS options.
@@ -789,7 +789,7 @@ These values come from the CoreDNS 1.14.6 source tree:
 ### 8.1 Flake
 
 - Inputs: nixpkgs (`nixos-unstable`). Build the binary with the Zig 0.16
-  toolchain and OpenSSL, following the ztls flake pattern for a Zig package
+  toolchain and OpenSSL, following the tls flake pattern for a Zig package
   that links libcrypto through pkg-config.
   The `zon2nix` input supplies the regeneration tool for `nix/zon-deps.nix` and
   never enters the package build.
@@ -891,7 +891,7 @@ in-process queries:
   Root probes retain RD, transport selection, identity admission, and the original deadline after rejection.
   Fake-clock tests cover thresholds 1, 2, 0, and maximum `u32`, with endpoint and zone isolation.
   Pressure defers probes fairly without client-buffer reuse. Stop retains pending probes without a health penalty.
-- DoT: run an in-process DoT upstream with the ztls server role and a
+- DoT: run an in-process DoT upstream with the tls server role and a
   self-signed CA. z53 must resolve through it. A wrong CA must fail the
   handshake and count toward `max_fails`.
 - Cache: a repeated query answers from cache. The log shows `src=cache`.
@@ -910,7 +910,7 @@ in-process queries:
 
 ### 9.3 Fuzzing
 
-The wire decoder must have a fuzz target. The ztls fuzz pattern applies.
+The wire decoder must have a fuzz target. The tls fuzz pattern applies.
 
 ### 9.4 Benchmarks
 
@@ -918,7 +918,7 @@ Benchmarks cover the wire codec, the suffix matcher, and the real resolver/cache
 Cache baselines distinguish index scans, response delivery, and insertion with eviction.
 Captures record capacity, occupancy, hit position, build mode, and timed boundaries.
 Directly seeded fixtures must identify their setup policy. They do not measure production cache population.
-zig-benchmark supplies the in-process harness. Commit a capture for any performance claim.
+testingx supplies the in-process harness. Commit a capture for any performance claim.
 End-to-end comparisons use dnsperf against owned loopback resolvers and an owned upstream.
 These comparisons record build flags, CPU affinity, cache occupancy, query concurrency, and log destinations.
 The production resolver and public upstreams receive no benchmark traffic.
