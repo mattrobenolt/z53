@@ -1,0 +1,51 @@
+# stdx bit_set.Scratch versus z53's local ScratchSet
+
+Environment: aarch64-linux, Neoverse-V3, Zig 0.16.0, ReleaseSafe, native CPU,
+stdx `4e82330`. The local implementation is the one z53 carried before the stdx
+update; the two share the same dirty-word logic.
+
+Method: alternating binaries, five runs per mode, three 100 ms trials per case,
+compared with `benchstat` from goperf. All other code was identical.
+
+## Cache delivery
+
+```text
+                                       │    sec/op    │   sec/op     vs base
+lookup_positive_last/capacity=128         237.0n ± 1%   239.0n ± 3%  +0.84% (p=0.013 n=15)
+lookup_denial_last/capacity=128           428.0n ± 1%   429.0n ± 0%       ~ (p=0.857 n=15)
+lookup_sparse_miss/capacity=128           36.00n ± 8%   36.00n ± 8%       ~ (p=0.864 n=15)
+pipeline_positive_last/capacity=128       637.0n ± 1%   657.0n ± 2%  +3.14% (p=0.000 n=15)
+lookup_positive_last/capacity=1024        233.0n ± 0%   245.0n ± 3%  +5.15% (p=0.000 n=15)
+lookup_denial_last/capacity=1024          429.0n ± 0%   429.0n ± 1%       ~ (p=0.637 n=15)
+lookup_sparse_miss/capacity=1024          36.00n ± 8%   36.00n ± 8%       ~ (p=0.743 n=15)
+pipeline_positive_last/capacity=1024      633.0n ± 0%   653.0n ± 1%  +3.16% (p=0.000 n=15)
+lookup_positive_last/capacity=10000       233.0n ± 1%   245.0n ± 4%  +5.15% (p=0.005 n=15)
+lookup_denial_last/capacity=10000         430.0n ± 1%   430.0n ± 0%       ~ (p=0.641 n=15)
+lookup_sparse_miss/capacity=10000         38.00n ± 8%   38.00n ± 8%       ~ (p=1.000 n=15)
+pipeline_positive_last/capacity=10000     633.0n ± 0%   651.0n ± 1%  +2.84% (p=0.000 n=15)
+lookup_positive_last/capacity=100000      233.0n ± 0%   244.0n ± 4%  +4.72% (p=0.002 n=15)
+lookup_denial_last/capacity=100000        431.0n ± 1%   428.0n ± 1%  -0.70% (p=0.016 n=15)
+lookup_sparse_miss/capacity=100000        36.00n ± 8%   37.00n ± 5%       ~ (p=0.579 n=15)
+pipeline_positive_last/capacity=100000    633.0n ± 1%   652.0n ± 1%  +3.00% (p=0.000 n=15)
+geomean                                   219.6n        223.7n       +1.88%
+```
+
+## Inline patch
+
+Changing only `fn wordIsSet` to `inline fn wordIsSet` in the stdx source
+recovered the difference:
+
+```text
+                                       │    sec/op    │    sec/op     vs base
+lookup_positive_last/capacity=1024        258.0n ± 1%   248.0n ± 4%  -3.88% (p=0.018 n=15)
+pipeline_positive_last/capacity=1024      694.0n ± 2%   671.0n ± 2%  -3.31% (p=0.003 n=15)
+lookup_positive_last/capacity=100000      257.0n ± 12%  245.0n ± 2%  -4.67% (p=0.002 n=15)
+pipeline_positive_last/capacity=100000    686.0n ± 3%   659.0n ± 5%  -3.94% (p=0.009 n=15)
+geomean                                   239.4n        233.1n        -2.65%
+```
+
+## Reading
+
+The `Scratch` methods instantiate in the consumer, but the private `wordIsSet`
+helper does not inline across the module boundary. z53 keeps its local
+`src/wire/bit_set.zig` until baskingspot/stdx#16 fixes that.

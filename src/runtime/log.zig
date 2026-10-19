@@ -7,6 +7,7 @@ const IpAddress = Io.net.IpAddress;
 const mem = std.mem;
 const assert = std.debug.assert;
 
+const timex = @import("stdx").time;
 const resolver = @import("../resolver.zig");
 const FailureReason = @import("failure.zig").Reason;
 const wire = resolver.wire;
@@ -318,20 +319,13 @@ pub fn health(
 }
 
 fn timestamp(writer: *Io.Writer, unix_ms: i64) Io.Writer.Error!void {
-    if (unix_ms < 0) return writer.writeAll("timestamp=unknown");
-    if (unix_ms > 253402300799999) return writer.writeAll("timestamp=unknown");
-    const seconds: std.time.epoch.EpochSeconds = .{ .secs = @intCast(@divFloor(unix_ms, 1000)) };
-    const day = seconds.getEpochDay();
-    const year = day.calculateYearDay();
-    const month = year.calculateMonthDay();
-    const clock = seconds.getDaySeconds();
-    try writer.print("{d:0>4}-{d:0>2}-{d:0>2}T{d:0>2}:{d:0>2}:{d:0>2}.{d:0>3}Z", .{
-        year.year,
-        @intFromEnum(month.month),
-        month.day_index + 1,
-        clock.getHoursIntoDay(),
-        clock.getMinutesIntoHour(),
-        clock.getSecondsIntoMinute(),
-        @as(u16, @intCast(@mod(unix_ms, 1000))),
-    });
+    const timestamp_ns: i96 = @as(i96, unix_ms) * std.time.ns_per_ms;
+    timex.writeRfc3339(
+        writer,
+        .fromNanoseconds(timestamp_ns),
+        .milliseconds,
+    ) catch |err| switch (err) {
+        error.TimestampOutOfRange => return writer.writeAll("timestamp=unknown"),
+        else => |other| return other,
+    };
 }

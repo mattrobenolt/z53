@@ -57,7 +57,6 @@ pub const Entry = struct {
     key: Key = undefined,
     fingerprint: u64 = 0,
     bytes: ?[]u8 = null,
-    packet_class: u8 = 0,
     inserted_s: u64 = 0,
     lifetime_s: u32 = 0,
     category: enum { answer, failure } = .answer,
@@ -145,10 +144,7 @@ pub const Bank = struct {
     pub fn remove(self: *Bank, storage: *packets.Storage, index: u32) void {
         self.unlink(index);
         self.removeIndex(index);
-        storage.destroy(
-            self.entries.items(.bytes)[index].?,
-            self.entries.items(.packet_class)[index],
-        );
+        storage.destroy(self.entries.items(.bytes)[index].?);
         self.entries.set(index, .{});
     }
 

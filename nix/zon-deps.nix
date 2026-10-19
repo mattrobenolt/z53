@@ -51,11 +51,11 @@ let
       rev = "7497c85dfc3ae5141308944f2cd47c836772c300";
       hash = "sha256-UnJ/L/IA2pgWQ5MY+w+RDlyg56asNKHTp86SARWoESU=";
     };
-    "stdx-0.0.0-CcWegmBsCQCBUW4JKdUgVmjbbq3qNk0-jtnjsYvGNlGB" = fetchZigGit {
+    "stdx-0.0.0-CcWeguTuCQAr2Ry9Mjg84Sl4TkkEXC71yayEjZXkjThJ" = fetchZigGit {
       name = "stdx";
       url = "https://github.com/baskingspot/stdx";
-      rev = "268253b94c05b68a1cf915b71556743b86d87c0a";
-      hash = "sha256-8KjwqsI5QKf2VZe6MO1ecQaPalrno70y5gP+tUVl6KA=";
+      rev = "4e82330bda83839b84aa86c3212b30f2d6dfddef";
+      hash = "sha256-6ELKNXnhk90HgV38EJyEs0IUhZX4PigH+KR1wyH7adk=";
     };
     "stdx-0.0.0-CcWegqfyCAB4ibRs0SyRmJobf6SL2wyZpBM2i2iZMs_3" = fetchZigGit {
       name = "stdx";

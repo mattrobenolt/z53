@@ -1,5 +1,6 @@
 const std = @import("std");
 const Io = std.Io;
+const HostPort = @import("stdx").net.HostPort;
 
 pub const Endpoint = struct {
     host: []const u8,
@@ -14,39 +15,15 @@ pub const Endpoint = struct {
         errdefer target.* = undefined;
         if (address.len == 0) return error.InvalidAddress;
         if (address.len > 320) return error.InvalidAddress;
+        const parsed = HostPort.parse(address, port_default) catch return error.InvalidAddress;
         if (address[0] == '[') {
-            const close = std.mem.indexOfScalar(u8, address, ']') orelse
-                return error.InvalidAddress;
-            const host = address[1..close];
-            _ = Io.net.Ip6Address.parse(host, 0) catch return error.InvalidAddress;
-            if (close + 1 == address.len) {
-                target.* = .{ .host = host, .port = port_default };
-                return;
-            }
-            if (address[close + 1] != ':') return error.InvalidAddress;
-            target.* = .{ .host = host, .port = try parsePort(address[close + 2 ..]) };
-            return;
+            _ = Io.net.Ip6Address.parse(parsed.host, 0) catch return error.InvalidAddress;
+        } else {
+            try validateHost(parsed.host);
         }
-        const colon = std.mem.indexOfScalar(u8, address, ':') orelse address.len;
-        const host = address[0..colon];
-        try validateHost(host);
-        const port = if (colon == address.len)
-            port_default
-        else
-            try parsePort(address[colon + 1 ..]);
-        target.* = .{ .host = host, .port = port };
+        target.* = .{ .host = parsed.host, .port = parsed.port };
     }
 };
-
-fn parsePort(text: []const u8) error{InvalidAddress}!u16 {
-    if (text.len == 0) return error.InvalidAddress;
-    for (text) |byte| {
-        if (!std.ascii.isDigit(byte)) return error.InvalidAddress;
-    }
-    const port = std.fmt.parseInt(u16, text, 10) catch return error.InvalidAddress;
-    if (port == 0) return error.InvalidAddress;
-    return port;
-}
 
 pub fn validateHost(host: []const u8) error{InvalidAddress}!void {
     if (host.len == 0) return error.InvalidAddress;

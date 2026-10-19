@@ -227,7 +227,6 @@ pub const Cache = struct {
         const other = if (selected.bank == .positive) &self.denial else &self.positive;
         const index = bank.slot(key);
         const old = other.find(key);
-        const packet_class = packets.class(bytes.len);
         // Reuse only the destination victim or this key in the other bank.
         // Rewrites already succeeded. Nothing can fail after a block transfer.
         const owned = self.reuse(bank, index, bytes.len) orelse
@@ -245,7 +244,6 @@ pub const Cache = struct {
         bank.put(index, &.{
             .key = key.*,
             .bytes = owned,
-            .packet_class = packet_class,
             .inserted_s = now_s,
             .lifetime_s = selected.lifetime_s,
             .category = if (selected.category == .answer) .answer else .failure,
@@ -254,12 +252,9 @@ pub const Cache = struct {
     }
 
     fn reuse(self: *Cache, bank: *store.Bank, index: u32, length: usize) ?[]u8 {
-        _ = bank.entries.items(.bytes)[index] orelse return null;
-        if (bank.entries.items(.packet_class)[index] != packets.class(length)) return null;
-        const owned = bank.take(index);
-        self.packet_storage.live_bytes -= @intCast(owned.len);
-        self.packet_storage.live_bytes += @intCast(length);
-        return owned.ptr[0..length];
+        const owned = bank.entries.items(.bytes)[index] orelse return null;
+        if (packets.class(owned.len) != packets.class(length)) return null;
+        return self.packet_storage.reuse(bank.take(index), length);
     }
 };
 
@@ -893,31 +888,31 @@ const ResolverTestsCachePackets = struct {
         for (packets.sizes, 0..) |size, index| {
             const low = if (index == 0) 1 else packets.sizes[index - 1] + 1;
             const high = @min(size, test_fixture.wire.message_bytes_max);
-            for ([_]u32{ low, high }) |length| {
-                try testing.expectEqual(index, packets.class(length));
+            for ([_]usize{ low, high }) |length| {
+                try testing.expectEqual(@as(u8, @intCast(index)), packets.class(length).?);
                 const first = try storage.create(length);
                 @memset(first, 42);
                 const address = first.ptr;
-                const used = storage.fixed.end_index;
-                storage.destroy(first, @intCast(index));
+                const used = storage.consumedBytes();
+                storage.destroy(first);
                 const second = try storage.create(length);
                 try testing.expectEqual(address, second.ptr);
-                try testing.expectEqual(used, storage.fixed.end_index);
-                try testing.expectEqual(length, storage.live_bytes);
-                try testing.expectEqual(size, storage.live_class_bytes);
-                storage.destroy(second, @intCast(index));
-                try testing.expectEqual(0, storage.live_bytes);
-                try testing.expectEqual(0, storage.live_class_bytes);
+                try testing.expectEqual(used, storage.consumedBytes());
+                try testing.expectEqual(length, storage.liveBytes());
+                try testing.expectEqual(size, storage.liveClassBytes());
+                storage.destroy(second);
+                try testing.expectEqual(0, storage.liveBytes());
+                try testing.expectEqual(0, storage.liveClassBytes());
             }
         }
         try testing.expect(!allocator.has_induced_failure);
         try testing.expectEqual(1, allocator.allocations);
-        try testing.expect(storage.fixed.end_index <= storage.fixed.buffer.len);
+        try testing.expect(storage.consumedBytes() <= storage.reservedBytes());
     }
 
     fn fill(storage: *packets.Storage) !void {
         // The minimum block size bounds successful allocations by backing_bytes / 64.
-        for (0..storage.fixed.buffer.len / 64 + 1) |_| {
+        for (0..storage.reservedBytes() / 64 + 1) |_| {
             _ = storage.create(64) catch return;
         }
         return error.UnboundedStorage;
@@ -932,11 +927,11 @@ const ResolverTestsCachePackets = struct {
         const address = first.ptr;
         try fill(&storage);
         try testing.expectError(error.OutOfMemory, storage.create(64));
-        storage.destroy(first, 0);
+        storage.destroy(first);
         try testing.expectError(error.OutOfMemory, storage.create(65535));
         const reused = try storage.create(64);
         try testing.expectEqual(address, reused.ptr);
-        storage.destroy(reused, 0);
+        storage.destroy(reused);
     }
 
     // SPEC §§3.7, 3.9: byte exhaustion returns the valid answer and preserves the stale packet.
@@ -1082,8 +1077,8 @@ const ResolverTestsCachePackets = struct {
         const result = try fixture.forward(0);
         try testing.expectEqual(.stored, result.insertion);
         try testing.expectEqual(65535, result.answer.bytes.len);
-        try testing.expectEqual(65535, fixture.cache.packet_storage.live_bytes);
-        try testing.expectEqual(65536, fixture.cache.packet_storage.live_class_bytes);
+        try testing.expectEqual(65535, fixture.cache.packet_storage.liveBytes());
+        try testing.expectEqual(65536, fixture.cache.packet_storage.liveClassBytes());
         const hit = (try fixture.lookup(1)).?;
         try testing.expectEqual(65535, hit.bytes.len);
         try fixture.ttl(&hit, 59);
@@ -1099,7 +1094,7 @@ const ResolverTestsCachePackets = struct {
         try cache.init(allocator.allocator(), &zone);
         defer cache.deinit();
         try testing.expectEqual(0, allocator.allocations);
-        try testing.expectEqual(0, cache.packet_storage.fixed.buffer.len);
+        try testing.expectEqual(0, cache.packet_storage.reservedBytes());
         try testing.expect(!allocator.has_induced_failure);
     }
 };

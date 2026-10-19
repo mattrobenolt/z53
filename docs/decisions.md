@@ -16,9 +16,11 @@ The libcrypto declaration forces pkg-config rather than a system-library fallbac
 tls provides a Sans-I/O TLS engine. The runtime owns socket operations and retains the engine's buffers between completions.
 testingx is a lazy, test-only dependency for the test runner and the benchmark harness.
 Trial benchmarks calibrate each case to a 100 ms budget, and smoke runs eight fixed iterations.
-stdx supplies the fixed-capacity buffer and the big-endian wire writer.
-The direct stdx pin is ahead of the one tls pins because `wire.Writer` landed after the tls pin.
+stdx supplies the fixed-capacity buffer, the size-class packet pool, the host:port split, the RFC 3339 formatter, and the big-endian wire reader and writer.
+The direct stdx pin is ahead of the one tls pins because those modules landed after the tls pin.
 The build therefore carries two stdx modules until tls bumps.
+The local `src/wire/bit_set.zig` remains until stdx inlines `bit_set.Scratch`'s word read.
+The published Scratch measured 2.6% to 5% slower on the cache path ([capture](benchmarks/2026-10-19-stdx-bitset.txt), [stdx#16](https://github.com/baskingspot/stdx/issues/16)).
 
 Nix fetches dependency archives separately, then builds with Zig's `--system` mode without network access.
 Packages use ReleaseSafe and an explicit baseline CPU target, independent of the build host.

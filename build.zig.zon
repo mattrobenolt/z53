@@ -11,8 +11,8 @@
         // tls pins an older stdx. z53 uses wire.Writer, which landed later,
         // so this pin is ahead until tls bumps. Collapse the two then.
         .stdx = .{
-            .url = "git+https://github.com/baskingspot/stdx#268253b94c05b68a1cf915b71556743b86d87c0a",
-            .hash = "stdx-0.0.0-CcWegmBsCQCBUW4JKdUgVmjbbq3qNk0-jtnjsYvGNlGB",
+            .url = "git+https://github.com/baskingspot/stdx#4e82330bda83839b84aa86c3212b30f2d6dfddef",
+            .hash = "stdx-0.0.0-CcWeguTuCQAr2Ry9Mjg84Sl4TkkEXC71yayEjZXkjThJ",
         },
         // The runner and benchmark helper never enter the executable's module graph.
         .testingx = .{

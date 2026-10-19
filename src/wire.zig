@@ -2,6 +2,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const RapidHash = @import("stdx").hash.RapidHash;
+const wirex = @import("stdx").wire;
 
 const equivalent_module = @import("testing/equivalent.zig");
 const fixture = @import("testing/wire.zig");
@@ -145,18 +146,21 @@ pub const Header = struct {
 
     pub fn decode(data: []const u8) Error!Header {
         if (data.len < header_bytes) return error.Truncated;
-        var header: Header = .{ .id = integer(u16, data[0..2]), .bits = integer(u16, data[2..4]) };
-        for (&header.counts, 0..) |*count, index| {
-            count.* = integer(u16, data[4 + index * 2 ..][0..2]);
-        }
+        var reader: wirex.Reader(.big) = .init(data);
+        var header: Header = .{
+            .id = reader.assumeRead(u16),
+            .bits = reader.assumeRead(u16),
+        };
+        for (&header.counts) |*count| count.* = reader.assumeRead(u16);
         return header;
     }
 
     pub fn encode(self: *const Header, data: []u8) Error!void {
         if (data.len < header_bytes) return error.NoSpace;
-        put(u16, data[0..2], self.id);
-        put(u16, data[2..4], self.bits);
-        for (self.counts, 0..) |count, index| put(u16, data[4 + index * 2 ..][0..2], count);
+        var writer: wirex.Writer(.big) = .init(data);
+        writer.appendAssumeCapacity(u16, self.id);
+        writer.appendAssumeCapacity(u16, self.bits);
+        for (self.counts) |count| writer.appendAssumeCapacity(u16, count);
     }
 
     pub fn opcode(self: *const Header) u4 {

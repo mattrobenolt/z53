@@ -133,7 +133,6 @@ const Fixture = struct {
             bank.put(@intCast(index), &.{
                 .key = .{ .name = name, .kind = .a, .class = 1, .dnssec = .ordinary },
                 .bytes = try self.service.zones.items[0].cache.packet_storage.copy(bytes),
-                .packet_class = resolver.cache.packets.class(bytes.len),
                 .inserted_s = 100,
                 .lifetime_s = 300,
             });
@@ -203,10 +202,10 @@ fn Runner(comptime capacity: u32, comptime case: Case) type {
                 else => try lookupLoop(case, timer, fixture),
             }
             const storage = &fixture.service.zones.items[0].cache.packet_storage;
-            try timer.reportMetric(@floatFromInt(storage.fixed.buffer.len), "packet-reserved-B");
-            try timer.reportMetric(@floatFromInt(storage.fixed.end_index), "pool-consumed-B");
-            try timer.reportMetric(@floatFromInt(storage.live_bytes), "packet-live-B");
-            try timer.reportMetric(@floatFromInt(storage.live_class_bytes), "class-live-B");
+            try timer.reportMetric(@floatFromInt(storage.reservedBytes()), "packet-reserved-B");
+            try timer.reportMetric(@floatFromInt(storage.consumedBytes()), "pool-consumed-B");
+            try timer.reportMetric(@floatFromInt(storage.liveBytes()), "packet-live-B");
+            try timer.reportMetric(@floatFromInt(storage.liveClassBytes()), "class-live-B");
         }
     };
 }
@@ -346,8 +345,8 @@ fn packetCapacity(allocator: std.mem.Allocator) !void {
         std.debug.print(
             "default backing={d} class={d} blocks={d} live={d} rounded={d} consumed={d}\n",
             .{
-                budget,             size,                     count,
-                storage.live_bytes, storage.live_class_bytes, storage.fixed.end_index,
+                budget,              size,                     count,
+                storage.liveBytes(), storage.liveClassBytes(), storage.consumedBytes(),
             },
         );
     }

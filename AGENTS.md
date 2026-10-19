@@ -86,6 +86,7 @@ Prioritize safety, then performance, then developer convenience.
 ### Reusable buffers
 
 Use `stdx.buffer.Array(T, N)` for fixed append-only collections.
+Keep `src/wire/bit_set.zig` until stdx's scratch bitset inlines its word read.
 Derive capacity and index types from the buffer type.
 Use `clear()` to reset retained storage, not assignment of `.empty`.
 Use checked append methods for input-derived lengths.
