@@ -51,11 +51,11 @@ let
       rev = "7497c85dfc3ae5141308944f2cd47c836772c300";
       hash = "sha256-UnJ/L/IA2pgWQ5MY+w+RDlyg56asNKHTp86SARWoESU=";
     };
-    "stdx-0.0.0-CcWeguTuCQAr2Ry9Mjg84Sl4TkkEXC71yayEjZXkjThJ" = fetchZigGit {
+    "stdx-0.0.0-CcWegvv6CQAFdPAwICp41zpWk_LmExyRUUqmvSutrYkh" = fetchZigGit {
       name = "stdx";
       url = "https://github.com/baskingspot/stdx";
-      rev = "4e82330bda83839b84aa86c3212b30f2d6dfddef";
-      hash = "sha256-6ELKNXnhk90HgV38EJyEs0IUhZX4PigH+KR1wyH7adk=";
+      rev = "585c76b3cfa8d019ca88fc8e8fabb33b4a55967c";
+      hash = "sha256-46N/HXjyhE5rF9L047k6Igw+XkvRAKy8Ue/CSIhlpXQ=";
     };
     "stdx-0.0.0-CcWegqfyCAB4ibRs0SyRmJobf6SL2wyZpBM2i2iZMs_3" = fetchZigGit {
       name = "stdx";
@@ -63,11 +63,11 @@ let
       rev = "7c37f9a1043f5c5ed781a9b245e41962db8ac5cf";
       hash = "sha256-laXt4A3Ly08pCPGFJLOQBDhbNTDryCO0B8QaHnMoMRk=";
     };
-    "testingx-0.0.0-ib95-92sAgAkUFr8FJ30O3H07rhemfWpAGBmG9lwFGIY" = fetchZigGit {
+    "testingx-0.1.0-ib95-4yvAgCerRCKZ02L8rFsbIaI0AHfKcDt49uvCnYR" = fetchZigGit {
       name = "testingx";
       url = "https://github.com/baskingspot/testingx";
-      rev = "06447f7c3db34227ef53cdcd12592cd704c633dc";
-      hash = "sha256-P6gdtLL/Zyjf+ZTMDuIv3p/gpCkfluuMWuxXdjXagkY=";
+      rev = "c8c03a671fbe2701a0d0ff71fd427443124b2018";
+      hash = "sha256-Kje83jjtKz34pBWYu6udNkk8ZW9he3Y9zyCOiwGAevc=";
     };
     "testingx-0.0.0-ib95-4WvAgDlIY73PBF6aDm9FBntyPof0zrluXvyz-v5" = fetchZigGit {
       name = "testingx";

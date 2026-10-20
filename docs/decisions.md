@@ -20,8 +20,10 @@ stdx supplies the fixed-capacity buffer, the size-class packet pool, the host:po
 The direct stdx pin is ahead of the one tls pins because those modules landed after the tls pin.
 The build therefore carries two stdx modules until tls bumps.
 The scratch bitset is `stdx.bit_set.Scratch`.
-The published Scratch measured 2.6% to 5% slower on the cache path because `wordIsSet` does not inline ([capture](benchmarks/2026-10-19-stdx-bitset.txt)).
-The regression is accepted until [stdx#16](https://github.com/baskingspot/stdx/issues/16) lands.
+`wordIsSet` is inline in stdx `585c76b`, but the public methods still do not inline at z53's call sites.
+The positive lookup path is 4% to 7% slower; the cache geomean is within 0.2% because sparse misses improve ([capture](benchmarks/2026-10-19-stdx-bitset.txt)).
+Marking `isSet`, `set`, and `clear` inline recovers the difference.
+The regression is accepted until stdx inlines those methods ([stdx#16](https://github.com/baskingspot/stdx/issues/16)).
 
 Nix fetches dependency archives separately, then builds with Zig's `--system` mode without network access.
 Packages use ReleaseSafe and an explicit baseline CPU target, independent of the build host.

@@ -44,8 +44,42 @@ pipeline_positive_last/capacity=100000    686.0n ± 3%   659.0n ± 5%  -3.94% (p
 geomean                                   239.4n        233.1n        -2.65%
 ```
 
+## Follow-up: stdx 585c76b
+
+`585c76b` makes `wordIsSet` inline. Against z53's local bitset the positive
+lookup path is still slower, while sparse misses improve:
+
+```text
+                                       │   sec/op    │   sec/op     vs base
+lookup_positive_last/capacity=1024       233.0n ± 1%   250.0n ± 2%  +7.30% (p=0.002 n=15)
+lookup_positive_last/capacity=10000      233.0n ± 0%   247.0n ± 1%  +6.01% (p=0.003 n=15)
+pipeline_positive_last/capacity=1024     638.0n ± 0%   655.0n ± 2%  +2.66% (p=0.016 n=15)
+lookup_sparse_miss/capacity=1024         39.00n ± 3%   36.00n ± 3%  -7.69% (p=0.003 n=15)
+geomean                                  224.4n        224.8n       +0.15%
+```
+
+Against `4e82330`, the `wordIsSet` change alone is within noise:
+
+```text
+geomean                                  224.1n        224.8n       +0.31%
+```
+
+Marking the public `clear`, `isSet`, and `set` methods `inline` as well
+recovers the difference:
+
+```text
+                                       │    sec/op    │   sec/op     vs base
+lookup_positive_last/capacity=1024        245.0n ± 0%   235.0n ± 0%  -4.08% (p=0.000 n=15)
+pipeline_positive_last/capacity=1024      656.0n ± 0%   633.0n ± 1%  -3.51% (p=0.000 n=15)
+lookup_sparse_miss/capacity=1024          39.00n ± 3%   36.00n ± 3%  -7.69% (p=0.007 n=15)
+geomean                                   228.8n        220.2n       -3.75%
+```
+
+That build is also slightly better than the old local bitset: geomean
+`224.4n` to `220.2n`, with the positive lookup path within 0.9%.
+
 ## Reading
 
-The `Scratch` methods instantiate in the consumer, but the private `wordIsSet`
-helper does not inline across the module boundary. z53 adopts `Scratch` and
-accepts the regression until baskingspot/stdx#16 fixes that.
+The private `wordIsSet` inline is not enough at z53's call sites. The public
+methods need the same treatment. z53 accepts the current `585c76b` cost until
+that lands; the alternative is another local copy of the type.
