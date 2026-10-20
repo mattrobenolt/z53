@@ -39,47 +39,28 @@ let
 
   # Every package, by the hash Zig knows it by, as Nix fetches it.
   packages = {
-    "benchmark-0.1.0-JS72VhUcAQAM6gGwbJeMtNhbX7n8LQk4LIdSrRz9ljNg" = fetchZigGit {
-      name = "benchmark";
-      url = "https://github.com/mattrobenolt/zig-benchmark";
-      rev = "5572317d18d1e5b4630950658b1628b4398a84a8";
-      hash = "sha256-QduuCfvDNniXh2PJTN55IeKQUhjCFLqcqR91CllwDYM=";
-    };
     "libxev-0.0.0-86vtc6BWFAAs_tGsasNfjQsxSsElhddIUnqVwGhwdnsu" = fetchZigGit {
       name = "libxev";
       url = "https://github.com/mitchellh/libxev";
       rev = "7497c85dfc3ae5141308944f2cd47c836772c300";
       hash = "sha256-UnJ/L/IA2pgWQ5MY+w+RDlyg56asNKHTp86SARWoESU=";
     };
-    "stdx-0.0.0-CcWegvv6CQAFdPAwICp41zpWk_LmExyRUUqmvSutrYkh" = fetchZigGit {
+    "stdx-0.0.0-CcWegm0xCgCN4VjaT2zvjvJ1L4zHgQFl4Xi7rhjQNfxj" = fetchZigGit {
       name = "stdx";
       url = "https://github.com/baskingspot/stdx";
-      rev = "585c76b3cfa8d019ca88fc8e8fabb33b4a55967c";
-      hash = "sha256-46N/HXjyhE5rF9L047k6Igw+XkvRAKy8Ue/CSIhlpXQ=";
+      rev = "bf1e8b2b01fa7b096826886e109ff43106f1a7c7";
+      hash = "sha256-8+S7HLHlS4XSbXO1VbodOYQsolFPbUXUCdqUa8SEbnk=";
     };
-    "stdx-0.0.0-CcWegqfyCAB4ibRs0SyRmJobf6SL2wyZpBM2i2iZMs_3" = fetchZigGit {
-      name = "stdx";
-      url = "https://github.com/baskingspot/stdx";
-      rev = "7c37f9a1043f5c5ed781a9b245e41962db8ac5cf";
-      hash = "sha256-laXt4A3Ly08pCPGFJLOQBDhbNTDryCO0B8QaHnMoMRk=";
-    };
-    "testingx-0.1.0-ib95-4yvAgCerRCKZ02L8rFsbIaI0AHfKcDt49uvCnYR" = fetchZigGit {
+    "testingx-0.1.1-ib95-6ivAgB3rCWLHww0C7edG1NLC71y1p1wogPV0Djf" = fetchzip {
       name = "testingx";
-      url = "https://github.com/baskingspot/testingx";
-      rev = "c8c03a671fbe2701a0d0ff71fd427443124b2018";
-      hash = "sha256-Kje83jjtKz34pBWYu6udNkk8ZW9he3Y9zyCOiwGAevc=";
+      url = "https://github.com/baskingspot/testingx/archive/refs/tags/v0.1.1.tar.gz";
+      hash = "sha256-29d7BEgbU7hrIphmNrYcnpRP1GBj8yKzrPuj4qXdxCk=";
     };
-    "testingx-0.0.0-ib95-4WvAgDlIY73PBF6aDm9FBntyPof0zrluXvyz-v5" = fetchZigGit {
-      name = "testingx";
-      url = "https://github.com/baskingspot/testingx";
-      rev = "c9b81a4bbf8a41f1317dc0f158ba851cebdae491";
-      hash = "sha256-4S4cOBfxzxIHm28T1KOhXTu/dhtmPFdLJ0ht2hBUPKs=";
-    };
-    "tls-0.0.0-nf2MKJdWIwCWn9-xOTBOD-gg1Lmnhc9MA5dkHRxAD_nZ" = fetchZigGit {
+    "tls-0.0.0-nf2MKI1MIwDK-9g25UhvHJKVktKXCn_rGCT-AhU3eaxP" = fetchZigGit {
       name = "tls";
       url = "https://github.com/baskingspot/tls";
-      rev = "a2e6066983b73a96141b779e0c109f097401aa1f";
-      hash = "sha256-fy4IXZ7DbnErwNAUrfv7GiVuOFyT4jjvRpuYl+3NCp0=";
+      rev = "95c3d5722803c400d6aa0f2703f7ae27bc9cb576";
+      hash = "sha256-Ml8FbcRi6j3rkMpML5yDPsdoh16hNFgFTBqpudgmKhk=";
     };
   };
 

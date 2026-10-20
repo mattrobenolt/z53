@@ -98,6 +98,6 @@ fetch:
 bump-deps:
     zig fetch --save git+https://github.com/baskingspot/tls#main
     zig fetch --save git+https://github.com/baskingspot/stdx#main
-    zig fetch --save git+https://github.com/baskingspot/testingx#main
+    zig fetch --save https://github.com/baskingspot/testingx/archive/refs/tags/v0.1.1.tar.gz
     nix run .#zon2nix -- --nix=nix/zon-deps.nix build.zig.zon
     nix build .#z53

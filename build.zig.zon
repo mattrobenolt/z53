@@ -5,19 +5,19 @@
     .minimum_zig_version = "0.16.0",
     .dependencies = .{
         .tls = .{
-            .url = "git+https://github.com/baskingspot/tls?ref=main#a2e6066983b73a96141b779e0c109f097401aa1f",
-            .hash = "tls-0.0.0-nf2MKJdWIwCWn9-xOTBOD-gg1Lmnhc9MA5dkHRxAD_nZ",
+            .url = "git+https://github.com/baskingspot/tls?ref=main#95c3d5722803c400d6aa0f2703f7ae27bc9cb576",
+            .hash = "tls-0.0.0-nf2MKI1MIwDK-9g25UhvHJKVktKXCn_rGCT-AhU3eaxP",
         },
         // tls pins an older stdx. z53 uses wire.Writer, which landed later,
         // so this pin is ahead until tls bumps. Collapse the two then.
         .stdx = .{
-            .url = "git+https://github.com/baskingspot/stdx#585c76b3cfa8d019ca88fc8e8fabb33b4a55967c",
-            .hash = "stdx-0.0.0-CcWegvv6CQAFdPAwICp41zpWk_LmExyRUUqmvSutrYkh",
+            .url = "git+https://github.com/baskingspot/stdx?ref=main#bf1e8b2b01fa7b096826886e109ff43106f1a7c7",
+            .hash = "stdx-0.0.0-CcWegm0xCgCN4VjaT2zvjvJ1L4zHgQFl4Xi7rhjQNfxj",
         },
         // The runner and benchmark helper never enter the executable's module graph.
         .testingx = .{
-            .url = "git+https://github.com/baskingspot/testingx#c9b81a4bbf8a41f1317dc0f158ba851cebdae491",
-            .hash = "testingx-0.0.0-ib95-4WvAgDlIY73PBF6aDm9FBntyPof0zrluXvyz-v5",
+            .url = "https://github.com/baskingspot/testingx/archive/refs/tags/v0.1.1.tar.gz",
+            .hash = "testingx-0.1.1-ib95-6ivAgB3rCWLHww0C7edG1NLC71y1p1wogPV0Djf",
             .lazy = true,
         },
     },
