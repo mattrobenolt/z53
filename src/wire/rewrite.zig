@@ -101,7 +101,7 @@ pub const Workspace = struct {
         if (settings.order.len != 0) {
             if (settings.order.len != packet.record_count) return error.InvalidOrder;
         }
-        self.seen.init();
+        self.seen.clear();
         self.order.clear();
         var previous: wire.Section = .question;
         for (0..packet.record_count) |position| {

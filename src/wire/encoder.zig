@@ -25,7 +25,7 @@ pub const Encoder = struct {
         self.writer.advanceAssumeCapacity(wire.header_bytes);
         self.header = header.*;
         self.header.counts = @splat(0);
-        self.occupied.init();
+        self.occupied.clear();
         self.boundaries.init();
         self.section = .question;
     }
@@ -188,7 +188,7 @@ const WireTestsReuse = struct {
             var bits: wire.names.ScratchSet(capacity) = undefined;
             bits.bits = .initFull();
             const original = bits.bits;
-            bits.init();
+            bits.clear();
             for (0..capacity) |index| try testing.expect(!bits.isSet(index));
             try testing.expectEqualSlices(u64, &original.masks, &bits.bits.masks);
             // Each first write must replace the dirty word, including its neighboring bits.
@@ -199,7 +199,7 @@ const WireTestsReuse = struct {
                     try testing.expectEqual(index == offset, bits.isSet(index));
                 }
             }
-            bits.init();
+            bits.clear();
             for (0..capacity) |index| try testing.expect(!bits.isSet(index));
             bits.set(capacity - 1);
             try testing.expect(bits.isSet(capacity - 1));

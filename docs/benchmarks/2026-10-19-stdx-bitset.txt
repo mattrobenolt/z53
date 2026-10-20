@@ -47,5 +47,5 @@ geomean                                   239.4n        233.1n        -2.65%
 ## Reading
 
 The `Scratch` methods instantiate in the consumer, but the private `wordIsSet`
-helper does not inline across the module boundary. z53 keeps its local
-`src/wire/bit_set.zig` until baskingspot/stdx#16 fixes that.
+helper does not inline across the module boundary. z53 adopts `Scratch` and
+accepts the regression until baskingspot/stdx#16 fixes that.

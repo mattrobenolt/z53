@@ -5,7 +5,7 @@ const equivalent_module = @import("../testing/equivalent.zig");
 const equivalent = equivalent_module.equivalent;
 const std = @import("std");
 
-pub const ScratchSet = @import("bit_set.zig").ScratchSet;
+pub const ScratchSet = @import("stdx").bit_set.Scratch;
 
 pub const Error = error{
     Truncated,
@@ -31,8 +31,8 @@ pub const Boundaries = struct {
     opaque_bytes: ScratchSet(65536),
 
     pub fn init(self: *Boundaries) void {
-        self.labels.init();
-        self.opaque_bytes.init();
+        self.labels.clear();
+        self.opaque_bytes.clear();
     }
 
     pub fn isSet(self: *const Boundaries, index: usize) bool {
