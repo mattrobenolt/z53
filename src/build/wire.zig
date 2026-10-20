@@ -32,14 +32,15 @@ pub fn add(
     step.dependOn(&gate.step);
     all.dependOn(step);
     const fuzz_step = b.step("fuzz", "Fuzz DNS decode and rewrite with --fuzz");
-    addFuzz(b, target, optimize, fuzz_step, "fuzz DNS decoder");
-    addFuzz(b, target, optimize, fuzz_step, "fuzz structured DNS");
+    addFuzz(b, target, optimize, stdx, fuzz_step, "fuzz DNS decoder");
+    addFuzz(b, target, optimize, stdx, fuzz_step, "fuzz structured DNS");
 }
 
 fn addFuzz(
     b: *std.Build,
     target: *const std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
+    stdx: *std.Build.Module,
     step: *std.Build.Step,
     filter: []const u8,
 ) void {
@@ -55,6 +56,7 @@ fn addFuzz(
             .target = target.*,
             .optimize = optimize,
             .link_libc = true,
+            .imports = &.{.{ .name = "stdx", .module = stdx }},
         }),
     });
     // Zig's default runner supplies the fuzz server protocol.
