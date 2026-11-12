@@ -159,3 +159,6 @@ Raw logs preserve their original commands and environment paths.
 | [Scratch reuse, 2026-09-08](2026-09-08-scratch.txt) | Retained buffers, generated-code fixes, CPU-target comparison |
 | [Runtime changes, 2026-09-08](2026-09-08-runtime.txt) | Health enumeration, logger reuse, hash index, aged churn |
 | [Scheduler clock, 2026-09-08](2026-09-08-clock.txt) | Syscall counts, fresh query durations, paired throughput |
+| [RapidHash, 2026-10-19](2026-10-19-rapidhash.txt) | RapidHash V3 against Wyhash across cache and pipeline cases |
+| [stdx bitset, 2026-10-19](2026-10-19-stdx-bitset.txt) | stdx bit_set.Scratch against the local ScratchSet |
+| [Zone routing, 2026-11-12](2026-11-12-route.txt) | Parsed wire-name table against parsing the suffix per query |
