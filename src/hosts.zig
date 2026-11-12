@@ -52,18 +52,21 @@ pub const Entry = struct {
     }
 };
 
+/// The entry list borrows the snapshot storage the Store allocates once.
+const EntryList = @import("stdx").buffer.Slice(Entry);
+
 pub const Table = struct {
-    list: std.ArrayList(Entry) = .empty,
+    list: EntryList = .empty,
 
     pub fn entries(self: *const Table) []const Entry {
-        return self.list.items;
+        return self.list.constSlice();
     }
 
     /// A failed parse invalidates this table only; the Store's active snapshot stays valid.
     fn parse(self: *Table, source: []const u8) Error!void {
-        assert(self.list.capacity <= entries_max);
+        assert(self.list.buffer.len <= entries_max);
         // Retain entry storage instead of poisoning it before the next parse.
-        self.list.items.len = 0;
+        self.list.clear();
         if (source.len > source_bytes_max) return error.SourceTooLarge;
         var lines = std.mem.splitScalar(u8, source, '\n');
         while (lines.next()) |text| try self.line(text);
@@ -93,7 +96,7 @@ pub const Table = struct {
         while (tokens.next()) |text_name| {
             parseName(&name, text_name) catch unreachable;
             if (self.contains(&name, &reverse)) continue;
-            self.list.appendBounded(.{
+            self.list.append(.{
                 .name = name,
                 .reverse = reverse,
                 .address = address,
@@ -127,8 +130,8 @@ pub const Store = struct {
             assert(first_end <= @intFromPtr(second.ptr));
         } else assert(second_end <= @intFromPtr(first.ptr));
         self.* = .{ .tables = .{
-            .{ .list = .initBuffer(first) },
-            .{ .list = .initBuffer(second) },
+            .{ .list = .init(first) },
+            .{ .list = .init(second) },
         } };
     }
 
@@ -137,13 +140,13 @@ pub const Store = struct {
         self.* = .{ .tables = .{ .{}, .{} } };
         errdefer self.deinit(allocator);
         for (&self.tables) |*snapshot| {
-            snapshot.list = try .initCapacity(allocator, entries_max);
+            snapshot.list = .init(try allocator.alloc(Entry, entries_max));
         }
     }
 
     /// Release only storage from initCapacity. The init method borrows its buffers.
     pub fn deinit(self: *Store, allocator: std.mem.Allocator) void {
-        for (&self.tables) |*snapshot| snapshot.list.deinit(allocator);
+        for (&self.tables) |*snapshot| allocator.free(snapshot.list.buffer);
         self.* = undefined;
     }
 
@@ -641,7 +644,7 @@ const ResolverTestsOwnership = struct {
         try store.initCapacity(allocator);
         defer store.deinit(allocator);
         for (&store.tables) |*snapshot| {
-            try testing.expectEqual(@as(usize, entries_max), snapshot.list.capacity);
+            try testing.expectEqual(@as(usize, entries_max), snapshot.list.buffer.len);
             try testing.expectEqual(@as(usize, 0), snapshot.entries().len);
         }
     }
