@@ -5,9 +5,6 @@ const mem = std.mem;
 
 const config = @import("../config.zig");
 
-// Zig's bundled libc/include/any-darwin-any/netinet6/in6.h defines IPV6_V6ONLY.
-// std.c.IPV6 is void on Darwin in Zig 0.16, so define the ABI constant here.
-const IPV6_V6ONLY = 27; // ziglint-ignore: Z006
 pub const Error = error{ UnresolvedListener, SocketFailed, BindFailed, ListenFailed };
 
 pub const Address = struct {
@@ -53,7 +50,7 @@ pub const Address = struct {
         errdefer _ = system.close(descriptor);
         try prepare(descriptor);
         if (self.storage.family == system.AF.INET6)
-            try option(descriptor, system.IPPROTO.IPV6, IPV6_V6ONLY);
+            try option(descriptor, system.IPPROTO.IPV6, system.IPV6.V6ONLY);
         if (kind == system.SOCK.STREAM) {
             // Keep the Linux restart policy: address reuse, never port reuse.
             try option(descriptor, system.SOL.SOCKET, system.SO.REUSEADDR);

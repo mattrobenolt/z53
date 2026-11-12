@@ -54,7 +54,7 @@ pub fn main(init: std.process.Init) !void {
 fn message(output: []u8, index: u16, kind: enum { query, response }) ![]const u8 {
     var text: [64]u8 = undefined;
     var name: wire.Name = undefined;
-    try name.fromText(try std.fmt.bufPrint(&text, "host{d}.bench.example.", .{index}));
+    try name.fromText(try std.mem.print(&text, "host{d}.bench.example.", .{index}));
     var encoder: wire.Encoder = undefined;
     try encoder.init(output, &.{ .id = index, .bits = if (kind == .query) 0x100 else 0x8180 });
     try encoder.question(&name, .a, 1);
@@ -94,7 +94,7 @@ fn route(timer: *testingx.B) !void {
     const upstreams = [_]config.Upstream{.{ .address = "127.0.0.1:9" }};
     for (&zones, &suffixes, 0..) |*zone, *suffix, index| {
         zone.* = .{
-            .suffix = try std.fmt.bufPrint(suffix, "zone{d}.example.", .{index}),
+            .suffix = try std.mem.print(suffix, "zone{d}.example.", .{index}),
             .upstreams = &upstreams,
             .cache = null,
         };
@@ -105,14 +105,17 @@ fn route(timer: *testingx.B) !void {
     var names: [2]wire.Name = undefined;
     try names[0].fromText("host.ZONE63.Example.");
     try names[1].fromText("other.zone62.example.");
+    // Both fixtures route to their own zone, checked per iteration so the
+    // result cannot depend on which iteration the timer stops on.
+    const expected = [_]u16{ 63, 62 };
     var index: u32 = 0;
-    var selected: ?u16 = null;
     while (try timer.loop()) {
-        selected = config.route(timer.blackBox(&settings), &names[index % 2]);
+        const slot = index % 2;
+        const selected = config.route(timer.blackBox(&settings), &names[slot]);
         timer.keepAlive(selected);
+        if (selected != expected[slot]) return error.WrongZone;
         index += 1;
     }
-    if (selected != 62) return error.WrongZone;
 }
 
 fn cacheOne(timer: *testingx.B) !void {

@@ -261,7 +261,7 @@ pub const Forward = struct {
         };
         const selected = self.selectSession(endpoint, transport, now_ns) orelse {
             if (transaction.purpose == .probe)
-                self.probe_retry_ns = now_ns + 10 * std.time.ns_per_ms;
+                self.probe_retry_ns = now_ns + 10 * time.ns_per_ms;
             transaction.completion = .local_failure;
             transaction.state = .deliver;
             return null;
@@ -357,7 +357,7 @@ pub const Forward = struct {
             if (health.probe != null) continue;
             if (now_ns < health.due_ns) continue;
             if (self.selectSession(endpoint, self.protocols[endpoint].?, now_ns) == null) {
-                self.probe_retry_ns = now_ns + 10 * std.time.ns_per_ms;
+                self.probe_retry_ns = now_ns + 10 * time.ns_per_ms;
                 return null;
             }
             for (&self.transactions, 0..) |*transaction, index| {

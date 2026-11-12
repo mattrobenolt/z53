@@ -20,7 +20,7 @@ const timer_slot = 2 * config.listeners_max;
 const client_start = timer_slot + 1;
 const send_start = client_start + tcp.clients_max;
 pub const upstream_start = send_start + config.listeners_max;
-pub const log_slot = upstream.timer_slot + 1;
+pub const log_slot = upstream_timer_slot + 1;
 pub const upstream_timer_slot = upstream.timer_slot;
 const stderr_fd: system.fd_t = 2;
 
@@ -167,7 +167,7 @@ pub const Runtime = struct {
             try self.clientReady(@intCast(slot - client_start));
         } else if (slot < upstream.operation_start) {
             try self.sendReady(@intCast(slot - send_start));
-        } else if (slot == upstream.timer_slot) {
+        } else if (slot == upstream_timer_slot) {
             try self.upstreams.expired(self);
         } else if (slot == log_slot) {
             self.forward.logger.pollReady();
@@ -292,7 +292,7 @@ pub const Runtime = struct {
         if (builtin.is_test) {
             self.test_send_attempts += 1;
             if (self.test_send_errno) |value| {
-                system._errno().* = @intFromEnum(value);
+                system._errno().* = @backingInt(value);
                 return -1;
             }
         }

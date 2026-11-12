@@ -18,7 +18,7 @@ in
 pkgs.runCommand "z53-style-checks"
   {
     nativeBuildInputs = [
-      pkgs.zig_0_16
+      pkgs.zig_0_17
       pkgs.ziglint
       pkgs.nixfmt
       pkgs.just

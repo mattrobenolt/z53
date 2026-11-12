@@ -25,7 +25,7 @@ pub const Fixture = struct {
         try expanded.fromText(name);
         const header: wire.Header = .{ .id = 0x1234, .bits = 0x01b0 };
         try self.encoder.init(&self.input, &header);
-        try self.encoder.question(&expanded, @enumFromInt(kind), class);
+        try self.encoder.question(&expanded, @fromBackingInt(@intCast(kind)), class);
         const bytes = try self.encoder.finish();
         try self.query.parse(bytes);
         try self.request.init(&self.query);

@@ -34,7 +34,7 @@ test "TLS client starts with verified policy and caller owned buffers" {
     defer handshake.deinit();
     const hello = try handshake.start(&output);
     try testing.expectEqual(@as(u8, 22), hello[0]);
-    try testing.expect(std.mem.indexOf(u8, hello, "one.one.one.one") != null);
+    try testing.expect(std.mem.find(u8, hello, "one.one.one.one") != null);
     const parsed = try tls.client_hello.parse(hello[5..]);
     try testing.expect(parsed.public_key != null);
     try testing.expect(parsed.public_key_p256 != null);
@@ -73,7 +73,7 @@ test "TLS oversized record rejects before payload arrives" {
     try testing.expectError(error.RecordTooLarge, records.next());
 }
 
-// SPEC §3.6: the system trust scan uses Zig 0.16's Io and real timestamp API.
+// SPEC §3.6: the system trust scan uses the Io real-time clock.
 test "system trust bundle loads public roots" {
     const allocator = testing.allocator;
     const io = testing.io;

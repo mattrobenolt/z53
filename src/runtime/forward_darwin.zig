@@ -352,7 +352,7 @@ pub const Driver = struct {
         );
         if (result < 0) return .{ .syscall = posix.errno(result) };
         if (length != @sizeOf(c_int)) return .{ .syscall = .INVAL };
-        return .{ .socket = @enumFromInt(failure) };
+        return .{ .socket = @fromBackingInt(@intCast(failure)) };
     }
 };
 

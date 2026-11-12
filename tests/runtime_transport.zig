@@ -17,7 +17,7 @@ const Harness = struct {
         // bind(0) ports can be re-issued to another process before the server
         // binds them; reserve outside the ephemeral range instead.
         const chosen = try listen_port.reserve(&self.address, "127.0.0.1");
-        self.listen[0] = try std.fmt.bufPrint(&self.text, "127.0.0.1:{d}", .{chosen});
+        self.listen[0] = try std.mem.print(&self.text, "127.0.0.1:{d}", .{chosen});
         self.zones = .{.{
             .suffix = ".",
             .cache = null,
@@ -100,7 +100,7 @@ fn queryName(output: []u8, text: []const u8, kind: u16) ![]const u8 {
     var name: wire.Name = undefined;
     try name.fromText(text);
     try encoder.init(output, &.{ .id = 345, .bits = 0x100 });
-    try encoder.question(&name, @enumFromInt(kind), 1);
+    try encoder.question(&name, @fromBackingInt(@intCast(kind)), 1);
     return encoder.finish();
 }
 
@@ -239,7 +239,7 @@ test "native hosts reload timer failure retry and disabled checks" {
     var temporary = testing.tmpDir(.{});
     defer temporary.cleanup();
     var path_buffer: [128]u8 = undefined;
-    const path = try std.fmt.bufPrint(
+    const path = try std.mem.print(
         &path_buffer,
         ".zig-cache/tmp/{s}/hosts",
         .{temporary.sub_path},
@@ -293,7 +293,7 @@ test "native hosts UDP limit TCP full response and malformed datagrams" {
     var temporary = testing.tmpDir(.{});
     defer temporary.cleanup();
     var path_buffer: [128]u8 = undefined;
-    const path = try std.fmt.bufPrint(
+    const path = try std.mem.print(
         &path_buffer,
         ".zig-cache/tmp/{s}/hosts",
         .{temporary.sub_path},
@@ -324,7 +324,7 @@ test "native hosts UDP limit TCP full response and malformed datagrams" {
     try testing.expect(!(try wire.Header.decode(response)).has(.truncated));
     try testing.expectEqual(80, (try wire.Header.decode(response)).counts[1]);
     try send(datagram, &.{1});
-    try send(datagram, &(.{0} ** 12));
+    try send(datagram, &@as([12]u8, @splat(0)));
     const malformed = try harness.receive(datagram, &output);
     try testing.expectEqual(1, (try wire.Header.decode(output[0..malformed])).bits & 15);
     // Deinit itself cancels outstanding accept, receive, timer, and client operations.

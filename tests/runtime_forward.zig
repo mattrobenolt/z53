@@ -54,10 +54,10 @@ const Harness = struct {
         // range instead.
         const chosen = try listen_port.reserve(&self.address, "127.0.0.1");
         @memset(&self.text, 0); // listen uses sliceTo for the sentinel scan.
-        _ = try std.fmt.bufPrint(&self.text, "127.0.0.1:{d}", .{chosen});
+        _ = try std.mem.print(&self.text, "127.0.0.1:{d}", .{chosen});
         const upstream_chosen = try listen_port.reserve(&self.upstream_address, "127.0.0.1");
         @memset(&self.upstream_text, 0);
-        _ = try std.fmt.bufPrint(&self.upstream_text, "127.0.0.1:{d}", .{upstream_chosen});
+        _ = try std.mem.print(&self.upstream_text, "127.0.0.1:{d}", .{upstream_chosen});
         self.listener = try self.upstream_address.bind(system.SOCK.STREAM);
         self.listen = .{std.mem.sliceTo(&self.text, 0)};
         self.upstreams = .{
@@ -307,7 +307,7 @@ fn endpoint(address: *runtime.address.Address, output: *[64]u8) !system.fd_t {
     if (system.getsockname(descriptor, @ptrCast(&address.storage), &address.length) < 0)
         return error.AddressFailed;
     @memset(output, 0);
-    _ = try std.fmt.bufPrint(output, "127.0.0.1:{d}", .{std.mem.bigToNative(u16, ip.port)});
+    _ = try std.mem.print(output, "127.0.0.1:{d}", .{std.mem.bigToNative(u16, ip.port)});
     return descriptor;
 }
 
@@ -759,7 +759,7 @@ test "forward native refusal or deadline advances configured endpoint" {
         system.getsockname(reserved, @ptrCast(&unavailable.storage), &unavailable.length),
     );
     var text: [64]u8 = undefined;
-    harness.upstreams[0].address = try std.fmt.bufPrint(&text, "127.0.0.1:{d}", .{
+    harness.upstreams[0].address = try std.mem.print(&text, "127.0.0.1:{d}", .{
         std.mem.bigToNative(u16, ip.port),
     });
     harness.zones[0].upstreams = &harness.upstreams;
@@ -997,7 +997,7 @@ fn expansionAnswer(output: []u8, request: []const u8) ![]const u8 {
     }
     const record: wire.Record = .{
         .owner = 0,
-        .kind = @enumFromInt(65400),
+        .kind = @fromBackingInt(@intCast(65400)),
         .class = 1,
         .ttl_s = 30,
         .data_start = 0,
@@ -1484,7 +1484,7 @@ const Darwin = struct {
             @ptrCast(&harness.upstream_address.storage),
             &harness.upstream_address.length,
         ));
-        harness.upstreams[0].address = try std.fmt.bufPrint(&harness.upstream_text, "[::1]:{d}", .{
+        harness.upstreams[0].address = try std.mem.print(&harness.upstream_text, "[::1]:{d}", .{
             std.mem.bigToNative(u16, ip.port),
         });
         try harness.start();
@@ -1522,7 +1522,7 @@ test "forward native query encoding failure is uncached without attempts" {
     try encoder.question(&name, .a, 1);
     const record: wire.Record = .{
         .owner = 0,
-        .kind = @enumFromInt(65400),
+        .kind = @fromBackingInt(@intCast(65400)),
         .class = 1,
         .ttl_s = 0,
         .data_start = 0,
@@ -1706,7 +1706,8 @@ const FragmentReader = struct {
 
 // SPEC §3.9: deterministic one-byte reads split both prefix and body without a timing dependency.
 test "forward peer reader fragmented prefix body and queued frames" {
-    const frames = [_]u8{ 0, 12 } ++ [_]u8{1} ** 12 ++ [_]u8{ 0, 12 } ++ [_]u8{2} ** 12;
+    const frames = [_]u8{ 0, 12 } ++ @as([12]u8, @splat(1)) ++ [_]u8{ 0, 12 } ++
+        @as([12]u8, @splat(2));
     var reader: FragmentReader = .{ .bytes = &frames, .fragment_bytes_max = 1 };
     var output: [64]u8 = undefined;
     const first = peerFrame(&reader, &output) catch null;
@@ -1722,7 +1723,8 @@ test "forward peer reader fragmented prefix body and queued frames" {
 
 // SPEC §3.9: a reader limits each receive even when two complete frames are available.
 test "forward peer reader coalesced frames remain queued" {
-    const frames = [_]u8{ 0, 12 } ++ [_]u8{1} ** 12 ++ [_]u8{ 0, 12 } ++ [_]u8{2} ** 12;
+    const frames = [_]u8{ 0, 12 } ++ @as([12]u8, @splat(1)) ++ [_]u8{ 0, 12 } ++
+        @as([12]u8, @splat(2));
     var reader: FragmentReader = .{ .bytes = &frames, .fragment_bytes_max = frames.len };
     var output: [64]u8 = undefined;
     const first = peerFrame(&reader, &output) catch null;
@@ -2126,7 +2128,7 @@ const LinuxPair = struct {
     }
 
     fn negative(value: linux.E) i32 {
-        return -@as(i32, @intFromEnum(value));
+        return -@as(i32, @backingInt(value));
     }
 
     // SPEC §§1.1, 1.3: connect success advances once after a non-expired timeout retires.
@@ -3019,7 +3021,7 @@ test "health forward UDP native timeout advances to TCP fallback logging" {
     try logs.contains("upstream_proto=udp reason=\"timeout\"");
     try logs.contains("upstream_proto=tcp");
     var selected: [128]u8 = undefined;
-    try logs.contains(try std.fmt.bufPrint(
+    try logs.contains(try std.mem.print(
         &selected,
         "src=forward upstream={s} upstream_proto=tcp",
         .{harness.upstreams[1].address},
@@ -3100,7 +3102,7 @@ test "forward UDP datagram boundaries and partial send rejection" {
     try testing.expectEqual(2, session.offset);
 }
 
-const tls = runtime.forward.tls.engine;
+const tls = connection_tls.engine;
 const DotPeer = struct {
     descriptor: ?system.fd_t = null,
     handshake: tls.ServerHandshake,
@@ -3133,7 +3135,7 @@ const DotPeer = struct {
         defer p256.secureZero();
         var keypairs: tls.ServerHandshake.KeyPairs = .initWithP256(x25519, p256);
         defer keypairs.secureZero();
-        self.handshake = .init(.{
+        self.handshake = .init(.{}, .{
             .keypairs = keypairs,
             .random = .zero,
         });
@@ -3465,8 +3467,8 @@ test "forward TLS native authentication failure advances configured sequence log
     try logs.contains("tls_name=\"wrong.example\" reason=\"CertificateHostMismatch\"");
     try logs.contains("src=forward");
     try logs.contains("tls_name=\"dns.example\"");
-    try testing.expect(std.mem.indexOf(u8, logs.bytes(), "event=upstream_failure").? <
-        std.mem.indexOf(u8, logs.bytes(), "event=query").?);
+    try testing.expect(std.mem.find(u8, logs.bytes(), "event=upstream_failure").? <
+        std.mem.find(u8, logs.bytes(), "event=query").?);
     try harness.stop();
 }
 
@@ -3497,10 +3499,10 @@ test "forward TLS selection cannot downgrade TCP clients" {
 
 // RFC 8446 §4.4: partial socket writes cannot acknowledge pending handshake output.
 test "forward TLS partial write retains engine acknowledgement and rejects overrun" {
-    const connection = try testing.allocator.create(runtime.forward.tls.Connection);
+    const connection = try testing.allocator.create(connection_tls.Connection);
     defer testing.allocator.destroy(connection);
     connection.handshake = null;
-    const trust = try testing.allocator.create(runtime.forward.tls.Trust);
+    const trust = try testing.allocator.create(connection_tls.Trust);
     defer testing.allocator.destroy(trust);
     trust.bundle = .empty;
     try connection.init(testing.io, "dns.example", trust);
@@ -3647,7 +3649,7 @@ test "cache stress native full cache mixed concurrent clients and upstream reuse
 
 fn stressQuery(output: []u8, id: u16, key: u16) ![]const u8 {
     var text: [64]u8 = undefined;
-    return query(output, id, try std.fmt.bufPrint(&text, "key{d}.stress.example.", .{key}));
+    return query(output, id, try std.mem.print(&text, "key{d}.stress.example.", .{key}));
 }
 
 fn stressAnswer(packet: *wire.Packet, bytes: []const u8, id: u16, key: u16) !void {
@@ -3662,7 +3664,7 @@ fn stressAnswer(packet: *wire.Packet, bytes: []const u8, id: u16, key: u16) !voi
     var name: wire.Name = undefined;
     try packet.name(&name, question.name);
     try testing.expectEqualSlices(u8, request[12 .. request.len - 4], name.wire());
-    try testing.expectEqual(1, @intFromEnum(question.kind));
+    try testing.expectEqual(1, @backingInt(question.kind));
     try testing.expectEqual(1, question.class);
     const record = packet.records[0];
     try testing.expect(record.ttl_s > 0);
@@ -4064,7 +4066,7 @@ test "logging clock snapshot does not replace completion time" {
     try service.deliverForwards();
     try testing.expectEqual(1, logs.count("event=query"));
     const marker = "duration_ms=";
-    const offset = (std.mem.indexOf(u8, logs.bytes(), marker) orelse
+    const offset = (std.mem.find(u8, logs.bytes(), marker) orelse
         return error.DurationMissing) + marker.len;
     const duration = std.mem.sliceTo(logs.bytes()[offset..], ' ');
     const elapsed_ms = try std.fmt.parseFloat(f64, duration);

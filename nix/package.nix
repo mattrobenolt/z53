@@ -24,7 +24,7 @@ let
     src = source;
     strictDeps = true;
     nativeBuildInputs = [
-      pkgs.zig_0_16.hook
+      pkgs.zig_0_17.hook
       pkgs.pkg-config
     ];
     buildInputs = [ pkgs.openssl ];
@@ -79,7 +79,7 @@ in
   portable = package.overrideAttrs {
     pname = "z53-portable-checks";
     nativeBuildInputs = [
-      pkgs.zig_0_16.hook
+      pkgs.zig_0_17.hook
       pkgs.pkg-config
       pkgs.python3
       pkgs.unixtools.ps

@@ -37,9 +37,9 @@ pub const Key = struct {
         for (self.name.wire(), canonical[0..length]) |byte, *target| {
             target.* = std.ascii.toLower(byte);
         }
-        std.mem.writeInt(u16, canonical[length..][0..2], @intFromEnum(self.kind), .little);
+        std.mem.writeInt(u16, canonical[length..][0..2], @backingInt(self.kind), .little);
         std.mem.writeInt(u16, canonical[length + 2 ..][0..2], self.class, .little);
-        canonical[length + 4] = @intFromEnum(self.dnssec);
+        canonical[length + 4] = @backingInt(self.dnssec);
         // Zero marks a vacant slot, so a hashed zero becomes one. Key equality resolves collisions.
         const value = RapidHash.hash(0, canonical[0 .. length + metadata_bytes]);
         return if (value == 0) 1 else value;
@@ -223,7 +223,7 @@ const ResolverTestsCacheIndex = struct {
 
     fn keyInit(key: *Key, index: u16) !void {
         var text: [32]u8 = undefined;
-        try key.name.fromText(try std.fmt.bufPrint(&text, "key{d}.example.", .{index}));
+        try key.name.fromText(try std.mem.print(&text, "key{d}.example.", .{index}));
         key.kind = .a;
         key.class = 1;
         key.dnssec = .ordinary;

@@ -83,7 +83,7 @@ pub const Workspace = struct {
         if (cutoff < self.order.len) {
             cutoff = try self.wholeSets(packet, cutoff);
             try self.start(packet, output[0 .. capacity - reserve], settings);
-            self.encoder.header.bits |= @intFromEnum(wire.Flag.truncated);
+            self.encoder.header.bits |= @backingInt(wire.Flag.truncated);
             for (self.order.constSlice()[0..cutoff]) |index| {
                 try self.encoder.record(packet, &packet.records[index]);
             }
@@ -113,7 +113,7 @@ pub const Workspace = struct {
             if (self.seen.isSet(index)) return error.InvalidOrder;
             self.seen.set(index);
             const record = &packet.records[index];
-            if (@intFromEnum(record.section) < @intFromEnum(previous)) return error.InvalidOrder;
+            if (@backingInt(record.section) < @backingInt(previous)) return error.InvalidOrder;
             previous = record.section;
             if (record.kind == .opt) continue;
             // Packet validation bounds the complete list, including omitted OPT records.

@@ -382,5 +382,5 @@ pub const Driver = struct {
 
 fn completionError(result: i32) linux.E {
     assert(result < 0);
-    return @enumFromInt(-result);
+    return @fromBackingInt(@intCast(-result));
 }

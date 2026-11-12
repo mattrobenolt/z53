@@ -163,7 +163,7 @@ test "health probe root RD fresh secure ID admission rcodes and restoration" {
         try testing.expect(packet.header.has(.recursion_desired));
         var request: runtime.pipeline.resolver.Request = undefined;
         try request.init(packet);
-        try testing.expectEqual(2, @intFromEnum(request.kind));
+        try testing.expectEqual(2, @backingInt(request.kind));
         try testing.expectEqualSlices(u8, &.{0}, request.name.bytes[0..request.name.length]);
         const deadline_ns = session.deadline_ns;
         @memcpy(session.input[0..session.length], session.output[0..session.length]);
@@ -365,7 +365,7 @@ test "health candidate list admits the complete endpoint capacity" {
     var zones: [config.zones_max]config.Zone = undefined;
     for (&zones, 0..) |*zone, index| {
         zone.* = .{
-            .suffix = try std.fmt.bufPrint(&suffixes[index], "zone{d}.", .{index}),
+            .suffix = try std.mem.print(&suffixes[index], "zone{d}.", .{index}),
             .upstreams = &upstreams,
         };
     }

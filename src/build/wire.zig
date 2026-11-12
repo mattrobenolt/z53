@@ -45,14 +45,11 @@ fn addFuzz(
     filter: []const u8,
 ) void {
     const fuzz = b.addTest(.{
-        // The default x86 backend emits no fuzz coverage instrumentation in Zig 0.16.
+        // Fuzz coverage needs the LLVM backend; the default x86 backend emits none.
         .use_llvm = true,
         .filters = &.{filter},
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/wire.zig"),
-            // Zig 0.16's fuzz error printer passes builtin.StackTrace to debug.StackTrace.
-            // Only disable returned-error traces here; safety and panic traces stay on.
-            .error_tracing = false,
             .target = target.*,
             .optimize = optimize,
             .link_libc = true,

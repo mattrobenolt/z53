@@ -5,7 +5,7 @@ This document explains the implementation choices behind that contract.
 
 ## Dependencies and build
 
-The runtime uses Zig 0.16 and tls with OpenSSL through pkg-config.
+The runtime uses Zig 0.17 and tls with OpenSSL through pkg-config.
 Dependency revisions are pinned in `build.zig.zon` and `flake.lock`.
 Sandbox builds fetch every pinned dependency through a fixed-output fetcher in `nix/zon-deps.nix`, generated from `build.zig.zon` by zon2nix.
 `just bump-deps` refreshes the tls, stdx, and testingx pins from main and regenerates that file.
@@ -408,10 +408,9 @@ Formatting stays on the event thread by necessity, because borrowed packet views
 
 ## Fuzz runner compatibility
 
-The pinned Zig default fuzz runner uses a stack-trace API that changed in Zig 0.16.
-Returned-error tracing is disabled only for fuzz roots. Runtime safety and panic traces remain enabled.
+The pinned Zig default fuzz runner supplies the fuzz protocol, so fuzz roots keep the default runner.
 Raw and structured targets run in separate binaries so each receives its full iteration budget.
-Fuzz builds select LLVM because the default x86 backend emits no coverage instrumentation in Zig 0.16.
+Fuzz builds select LLVM because the default x86 backend emits no coverage instrumentation.
 `scripts/fuzz.sh` creates `tmp/libfuzzer.log` and `f/in0` inside its isolated cache before either process starts.
 These shared files avoid the [Darwin first-creation race in `openat(O_CREAT)`](https://github.com/golang/go/issues/81246).
 The bounded runner uses one process per target. Only `in0` faces simultaneous first creation.

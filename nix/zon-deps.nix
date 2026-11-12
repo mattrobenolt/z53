@@ -39,28 +39,20 @@ let
 
   # Every package, by the hash Zig knows it by, as Nix fetches it.
   packages = {
-    "libxev-0.0.0-86vtc6BWFAAs_tGsasNfjQsxSsElhddIUnqVwGhwdnsu" = fetchZigGit {
-      name = "libxev";
-      url = "https://github.com/mitchellh/libxev";
-      rev = "7497c85dfc3ae5141308944f2cd47c836772c300";
-      hash = "sha256-UnJ/L/IA2pgWQ5MY+w+RDlyg56asNKHTp86SARWoESU=";
-    };
-    "stdx-0.0.0-CcWegm0xCgCN4VjaT2zvjvJ1L4zHgQFl4Xi7rhjQNfxj" = fetchZigGit {
+    "stdx-0.4.0-CcWeghttDwCzAvxm24NX7RL-Wb3ZSqZoHSJDNh6aFzuK" = fetchzip {
       name = "stdx";
-      url = "https://github.com/baskingspot/stdx";
-      rev = "bf1e8b2b01fa7b096826886e109ff43106f1a7c7";
-      hash = "sha256-8+S7HLHlS4XSbXO1VbodOYQsolFPbUXUCdqUa8SEbnk=";
+      url = "https://baskingspot.dev/stdx/v0.4.0.tar.gz";
+      hash = "sha256-vNenw1GmORzLQvCc2ymD+NLlygi6KHcf6iTsBmxcksw=";
     };
-    "testingx-0.1.1-ib95-6ivAgB3rCWLHww0C7edG1NLC71y1p1wogPV0Djf" = fetchzip {
+    "testingx-0.4.0-ib95-2JkAwDVM639ma-akYafT4bdewLfpFaAEnLBzQXG" = fetchzip {
       name = "testingx";
-      url = "https://github.com/baskingspot/testingx/archive/refs/tags/v0.1.1.tar.gz";
-      hash = "sha256-29d7BEgbU7hrIphmNrYcnpRP1GBj8yKzrPuj4qXdxCk=";
+      url = "https://baskingspot.dev/testingx/v0.4.0.tar.gz";
+      hash = "sha256-fDHT/Ntpng8kgBtBpr1PdX2O14HxI5pnDj19pbQYZvI=";
     };
-    "tls-0.0.0-nf2MKI1MIwDK-9g25UhvHJKVktKXCn_rGCT-AhU3eaxP" = fetchZigGit {
+    "tls-0.4.1-nf2MKAeKKAAXtjhIUTb-AUO-pR7fe324iJHaphwpKhaC" = fetchzip {
       name = "tls";
-      url = "https://github.com/baskingspot/tls";
-      rev = "95c3d5722803c400d6aa0f2703f7ae27bc9cb576";
-      hash = "sha256-Ml8FbcRi6j3rkMpML5yDPsdoh16hNFgFTBqpudgmKhk=";
+      url = "https://baskingspot.dev/tls/v0.4.1.tar.gz";
+      hash = "sha256-UWIpMO4WF8Pkk4/PwE+fwdoAmLMUPHIAZpGjfVEW0Y0=";
     };
   };
 

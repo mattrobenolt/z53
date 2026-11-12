@@ -41,7 +41,7 @@ pub fn addSmoke(
     smoke.dependOn(&run.step);
     test_step.dependOn(&run.step);
     const baseline = b.addRunArtifact(executable);
-    if (b.args) |arguments| baseline.addArgs(arguments);
+    baseline.addPassthruArgs();
     baseline.has_side_effects = true;
     b.step("bench", "Run bounded DNS baselines (ReleaseSafe)").dependOn(&baseline.step);
     b.step("bench-build", "Install the ReleaseSafe DNS benchmark for perf").dependOn(

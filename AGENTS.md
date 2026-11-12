@@ -1,6 +1,6 @@
 # Contributor instructions
 
-z53 is a loopback DNS caching forwarder in Zig 0.16.
+z53 is a loopback DNS caching forwarder in Zig 0.17.
 It uses io_uring on Linux, kqueue on macOS, and tls for DNS-over-TLS.
 Runtime dependencies are tls and stdx, plus one libcrypto backend, with OpenSSL as the default.
 The supported targets are aarch64-linux, x86_64-linux, and aarch64-darwin.

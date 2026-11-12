@@ -2,22 +2,21 @@
     .name = .z53,
     .version = "0.0.0",
     .fingerprint = 0xbbc69734fb0074ce, // Changing this has security and trust implications.
-    .minimum_zig_version = "0.16.0",
+    .minimum_zig_version = "0.17.0",
     .dependencies = .{
         .tls = .{
-            .url = "git+https://github.com/baskingspot/tls?ref=main#95c3d5722803c400d6aa0f2703f7ae27bc9cb576",
-            .hash = "tls-0.0.0-nf2MKI1MIwDK-9g25UhvHJKVktKXCn_rGCT-AhU3eaxP",
+            .url = "https://baskingspot.dev/tls/v0.4.1.tar.gz",
+            .hash = "tls-0.4.1-nf2MKAeKKAAXtjhIUTb-AUO-pR7fe324iJHaphwpKhaC",
         },
-        // tls pins an older stdx. z53 uses wire.Writer, which landed later,
-        // so this pin is ahead until tls bumps. Collapse the two then.
+        // The same stdx release tls pins, so both resolve to one package.
         .stdx = .{
-            .url = "git+https://github.com/baskingspot/stdx?ref=main#bf1e8b2b01fa7b096826886e109ff43106f1a7c7",
-            .hash = "stdx-0.0.0-CcWegm0xCgCN4VjaT2zvjvJ1L4zHgQFl4Xi7rhjQNfxj",
+            .url = "https://baskingspot.dev/stdx/v0.4.0.tar.gz",
+            .hash = "stdx-0.4.0-CcWeghttDwCzAvxm24NX7RL-Wb3ZSqZoHSJDNh6aFzuK",
         },
         // The runner and benchmark helper never enter the executable's module graph.
         .testingx = .{
-            .url = "https://github.com/baskingspot/testingx/archive/refs/tags/v0.1.1.tar.gz",
-            .hash = "testingx-0.1.1-ib95-6ivAgB3rCWLHww0C7edG1NLC71y1p1wogPV0Djf",
+            .url = "https://baskingspot.dev/testingx/v0.4.0.tar.gz",
+            .hash = "testingx-0.4.0-ib95-2JkAwDVM639ma-akYafT4bdewLfpFaAEnLBzQXG",
             .lazy = true,
         },
     },

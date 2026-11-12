@@ -205,7 +205,7 @@ pub const Cache = struct {
             .id = request.packet.header.id,
             .bits = (request.packet.header.bits & wire.request_flags_mask) |
                 wire.Flag.mask(&.{ .response, .recursion_available }) |
-                @intFromEnum(wire.Rcode.servfail),
+                @backingInt(wire.Rcode.servfail),
         };
         const encoder = &workspace.rewrite.encoder;
         try encoder.init(&failure, &header);
@@ -270,7 +270,7 @@ fn localFailure(
         .id = request.packet.header.id,
         .bits = (request.packet.header.bits & wire.request_flags_mask) |
             wire.Flag.mask(&.{ .response, .recursion_available }) |
-            @intFromEnum(wire.Rcode.servfail),
+            @backingInt(wire.Rcode.servfail),
     };
     try encoder.init(output, &header);
     try encoder.question(&request.name, request.kind, request.class);
@@ -558,8 +558,8 @@ const ResolverTestsCache = struct {
         var fixture: test_fixture.Fixture = undefined;
         try fixture.init(testing.allocator, &test_fixture.zone);
         defer fixture.cache.deinit();
-        const first_cookie = .{ 0, 10, 0, 8 } ++ .{1} ** 8;
-        const next_cookie = .{ 0, 10, 0, 8 } ++ .{2} ** 8;
+        const first_cookie = .{ 0, 10, 0, 8 } ++ @as([8]u8, @splat(1));
+        const next_cookie = .{ 0, 10, 0, 8 } ++ @as([8]u8, @splat(2));
         try fixture.client.edns(&first_cookie);
         try fixture.response(0x8500);
         try fixture.record(1, .answer, 60, 0);
@@ -759,7 +759,7 @@ const ResolverTestsCacheRcode = struct {
                         fixture.client.request.name.wire(),
                         name.wire(),
                     );
-                    try testing.expectEqual(@as(u16, 28), @intFromEnum(question.kind));
+                    try testing.expectEqual(@as(u16, 28), @backingInt(question.kind));
                     try testing.expectEqual(@as(u16, 3), question.class);
                     try testing.expectEqual(null, try fixture.lookup(0));
                 }
@@ -812,7 +812,7 @@ const ResolverTestsCacheRcode = struct {
             var fixture: test_fixture.Fixture = undefined;
             try fixture.init(testing.allocator, &zone);
             defer fixture.cache.deinit();
-            const cookie = .{ 0, 10, 0, 8 } ++ .{42} ** 8;
+            const cookie = .{ 0, 10, 0, 8 } ++ @as([8]u8, @splat(42));
             try fixture.client.edns(&cookie);
             for ([_]u8{ 1, 255 }) |extended| {
                 for ([_]u16{ 0, 2, 3 }) |low| {
@@ -820,7 +820,7 @@ const ResolverTestsCacheRcode = struct {
                     const edns: wire.rewrite.Edns = .{
                         .payload_bytes = 1232,
                         .extended_rcode = extended,
-                        .options = &(.{ 0, 10, 0, 8 } ++ .{99} ** 8),
+                        .options = &(.{ 0, 10, 0, 8 } ++ @as([8]u8, @splat(99))),
                     };
                     try wire.rewrite.writeOpt(&fixture.encoder, &edns);
                     const result = try fixture.forward(0);
@@ -1064,7 +1064,7 @@ const ResolverTestsCachePackets = struct {
         try fixture.response(0x8500);
         const offset = try fixture.encoder.beginRecord(&fixture.client.request.name, &.{
             .owner = 0,
-            .kind = @enumFromInt(65280),
+            .kind = @fromBackingInt(@intCast(65280)),
             .class = 1,
             .ttl_s = 60,
             .data_start = 0,
@@ -1118,7 +1118,7 @@ const ResolverTestsCacheDname = struct {
         try destination.fromText(target);
         const record: wire.Record = .{
             .owner = 0,
-            .kind = @enumFromInt(kind),
+            .kind = @fromBackingInt(@intCast(kind)),
             .class = 1,
             .ttl_s = 60,
             .data_start = 0,
@@ -1237,7 +1237,7 @@ const ResolverTestsCacheBoundaries = struct {
         try fixture.init(testing.allocator, &test_fixture.zone);
         defer fixture.cache.deinit();
         try fixture.client.init("a.example.", 1, 3);
-        const cookie = .{ 0, 10, 0, 40 } ++ .{42} ** 40;
+        const cookie = .{ 0, 10, 0, 40 } ++ @as([40]u8, @splat(42));
         try fixture.client.edns(&cookie);
         fixture.client.query.records[fixture.client.query.opt.?].ttl_s = 0;
         try fixture.response(0x8500);
@@ -1331,7 +1331,7 @@ const ResolverTestsCacheStress = struct {
 
     fn identity(fixture: *test_fixture.Fixture, key: u16, id: u16) !void {
         var text: [64]u8 = undefined;
-        const name = try std.fmt.bufPrint(&text, "key{d}.stress.example.", .{key / 8});
+        const name = try std.mem.print(&text, "key{d}.stress.example.", .{key / 8});
         try fixture.client.init(name, if (key & 1 == 0) 1 else 255, if (key & 2 == 0) 1 else 3);
         if (key & 4 != 0) try fixture.client.edns(&.{});
         fixture.client.query.header.id = id;

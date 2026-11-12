@@ -32,7 +32,7 @@ pub const Capture = struct {
     }
 
     pub fn contains(self: *const Capture, needle: []const u8) !void {
-        try testing.expect(std.mem.indexOf(u8, self.bytes(), needle) != null);
+        try testing.expect(std.mem.find(u8, self.bytes(), needle) != null);
     }
 
     pub fn client(self: *const Capture, descriptor: std.c.fd_t, protocol: log.Protocol) !void {
@@ -40,7 +40,7 @@ pub const Capture = struct {
         var length: std.c.socklen_t = @sizeOf(std.c.sockaddr.storage);
         try testing.expectEqual(0, std.c.getsockname(descriptor, @ptrCast(&address), &length));
         var buffer: [128]u8 = undefined;
-        const expected = try std.fmt.bufPrint(&buffer, "proto={s} client={f} ", .{
+        const expected = try std.mem.print(&buffer, "proto={s} client={f} ", .{
             @tagName(protocol), log.peer(&address, length).?,
         });
         try self.contains(expected);
@@ -50,7 +50,7 @@ pub const Capture = struct {
 fn request(output: []u8, name: *const wire.Name, kind: u16) ![]const u8 {
     var encoder: wire.Encoder = undefined;
     try encoder.init(output, &.{ .id = 42, .bits = 0x100 });
-    try encoder.question(name, @enumFromInt(kind), 1);
+    try encoder.question(name, @fromBackingInt(@intCast(kind)), 1);
     return encoder.finish();
 }
 
@@ -118,12 +118,12 @@ test "logging formatter hostile maximum name and local source has no upstream" {
         .protocol = .dot,
         .tls_name = "unused.example",
     }, .{ .unix_ms = 0, .finished_ns = 0 });
-    try testing.expect(std.mem.indexOf(u8, bytes, "\\x0a\\x0d\\x00\\x2e\\x22\\x5c\\xff") != null);
+    try testing.expect(std.mem.find(u8, bytes, "\\x0a\\x0d\\x00\\x2e\\x22\\x5c\\xff") != null);
     try testing.expectEqual(1, std.mem.count(u8, bytes, "\n"));
-    try testing.expect(std.mem.indexOfScalar(u8, bytes, 0x1b) == null);
-    try testing.expect(std.mem.indexOf(u8, bytes, "upstream") == null);
-    try testing.expect(std.mem.indexOf(u8, bytes, "client=[::1]:1234") != null);
-    try testing.expect(std.mem.indexOf(u8, bytes, "duration_ms=0.000 src=cache") != null);
+    try testing.expect(std.mem.findScalar(u8, bytes, 0x1b) == null);
+    try testing.expect(std.mem.find(u8, bytes, "upstream") == null);
+    try testing.expect(std.mem.find(u8, bytes, "client=[::1]:1234") != null);
+    try testing.expect(std.mem.find(u8, bytes, "duration_ms=0.000 src=cache") != null);
     const hostile_tls: [253]u8 = @splat(0x1b);
     const forwarded = try log.format(&buffer, packet, &.{
         .client = try std.Io.net.IpAddress.parse("::1", 65535),
@@ -136,7 +136,7 @@ test "logging formatter hostile maximum name and local source has no upstream" {
     }, .{ .unix_ms = 0, .finished_ns = std.math.maxInt(u64) });
     try testing.expect(forwarded.len < log.line_bytes_max);
     try testing.expectEqual(1, std.mem.count(u8, forwarded, "\n"));
-    try testing.expect(std.mem.indexOfScalar(u8, forwarded, 0x1b) == null);
+    try testing.expect(std.mem.findScalar(u8, forwarded, 0x1b) == null);
 }
 
 // SPEC §§1.10, 4: sequential log events retain storage but expose only the current line.
@@ -199,7 +199,7 @@ test "logging malformed query reply and failed capture sink" {
         null,
         .{ .unix_ms = 0, .finished_ns = 0 },
     );
-    try testing.expect(std.mem.indexOf(u8, bytes, "qtype=unknown qname=unknown rcode=1") != null);
+    try testing.expect(std.mem.find(u8, bytes, "qtype=unknown qname=unknown rcode=1") != null);
     const broken = try log.format(
         &buffer,
         packet,
@@ -209,7 +209,7 @@ test "logging malformed query reply and failed capture sink" {
         null,
         .{ .unix_ms = -1, .finished_ns = 0 },
     );
-    try testing.expect(std.mem.indexOf(u8, broken, "rcode=unknown") != null);
+    try testing.expect(std.mem.find(u8, broken, "rcode=unknown") != null);
     var capture: Capture = .{ .mode = .fail };
     var logger: log.Logger = .{ .sink = capture.sink() };
     log.completed(&logger, testing.io, packet, &observation, &malformed, &result, null, 0);
@@ -224,14 +224,14 @@ test "log queue drop-oldest saturation wraparound and drain order" {
     var logger: log.Logger = .{};
     var line: [32]u8 = undefined;
     for (0..70) |index| {
-        const bytes = try std.fmt.bufPrint(&line, "line-{d:0>3}\n", .{index});
+        const bytes = try std.mem.print(&line, "line-{d:0>3}\n", .{index});
         logger.enqueue(bytes);
     }
     try testing.expectEqual(@as(u64, 70), logger.enqueued);
     try testing.expectEqual(@as(u64, 6), logger.delivered);
     var expected: u64 = 6;
     while (logger.beginWrite()) |slice| {
-        const bytes = try std.fmt.bufPrint(&line, "line-{d:0>3}\n", .{expected});
+        const bytes = try std.mem.print(&line, "line-{d:0>3}\n", .{expected});
         try testing.expectEqualStrings(bytes, slice);
         logger.writeAdvanced(slice.len);
         expected += 1;
@@ -264,7 +264,7 @@ test "log queue executing exemption stall failure and cancellation" {
     var logger: log.Logger = .{};
     var line: [16]u8 = undefined;
     for (0..log.queue_slots_max) |index| {
-        const bytes = try std.fmt.bufPrint(&line, "l{d:0>3}\n", .{index});
+        const bytes = try std.mem.print(&line, "l{d:0>3}\n", .{index});
         logger.enqueue(bytes);
     }
     // The kernel owns the executing line, so a full queue drops the arrival.

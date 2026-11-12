@@ -40,6 +40,9 @@ pub const Answer = struct {
 
 const Local = enum { loopback, reverse, empty };
 
+// RFC 4291 §2.5.3: the IPv6 loopback address in wire order.
+const ipv6_loopback: [16]u8 = .{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1 };
+
 /// A returned answer bypasses cache, NODATA, hosts, forward, and rotation.
 /// null means the runtime must try its per-zone cache next.
 pub fn beforeCache(
@@ -52,7 +55,7 @@ pub fn beforeCache(
     switch (local) {
         .loopback => switch (request.kind) {
             .a => try address(encoder, &request.name, .a, &.{ 127, 0, 0, 1 }),
-            .aaaa => try address(encoder, &request.name, .aaaa, &(.{0} ** 15 ++ .{1})),
+            .aaaa => try address(encoder, &request.name, .aaaa, &ipv6_loopback),
             else => {},
         },
         .reverse => {
@@ -158,7 +161,7 @@ fn start(
         .id = request.packet.header.id,
         .bits = (request.packet.header.bits & wire.request_flags_mask) |
             wire.Flag.mask(&.{ .response, .authoritative }) |
-            @intFromEnum(rcode),
+            @backingInt(rcode),
     };
     try encoder.init(output, &header);
     try encoder.question(&request.name, request.kind, request.class);
@@ -252,7 +255,7 @@ const ResolverTestsSynthetic = struct {
                     const expected: []const u8 = if (kind == 1)
                         &.{ 127, 0, 0, 1 }
                     else
-                        &(.{0} ** 15 ++ .{1});
+                        &ipv6_loopback;
                     try testing.expectEqualSlices(
                         u8,
                         expected,
@@ -465,7 +468,7 @@ const ResolverTestsSynthetic = struct {
     test "NODATA echoes a maximum length server COOKIE" {
         var fixture: test_fixture.Fixture = undefined;
         try fixture.init("example.", 28, 1);
-        const cookie = .{ 0, 10, 0, 40 } ++ .{0xaa} ** 40;
+        const cookie = .{ 0, 10, 0, 40 } ++ @as([40]u8, @splat(0xaa));
         try fixture.edns(&cookie);
         const answer = (try fixture.after(&test_fixture.zone, null)).?;
         try fixture.check(&answer, 0);

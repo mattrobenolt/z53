@@ -251,7 +251,7 @@ const WireTestsNames = struct {
         builder.init();
         builder.question(&long, 1, 1);
         try testing.expectError(error.NameTooLong, packet.parse(try builder.finish()));
-        try testing.expectError(error.LabelTooLong, name.fromText("a" ** 64));
+        try testing.expectError(error.LabelTooLong, name.fromText(&@as([64]u8, @splat('a'))));
         try testing.expectError(error.InvalidName, name.fromText("a..b"));
         try testing.expectError(error.InvalidName, name.fromText(""));
     }
@@ -452,7 +452,7 @@ const WireTestsOpaque = struct {
         var builder: fixture.Builder = undefined;
         var packet: wire.Packet = undefined;
         builder.init();
-        builder.record("\x00", 65400, .answer, "\x40" ++ "a" ** 64 ++ "\x00");
+        builder.record("\x00", 65400, .answer, "\x40" ++ @as([64]u8, @splat('a')) ++ "\x00");
         pointerRecord(&builder, 23);
         try testing.expectError(error.LabelTooLong, packet.parse(try builder.finish()));
         var name: wire.Name = undefined;
@@ -475,7 +475,7 @@ const WireTestsOpaque = struct {
         const Case = struct { kind: u16, data: []const u8, offset: u16 = 0 };
         const cases = [_]Case{
             .{ .kind = 1, .data = "\x01x\x00\x00" },
-            .{ .kind = 28, .data = "\x01x\x00" ++ "\x00" ** 13 },
+            .{ .kind = 28, .data = "\x01x\x00" ++ @as([13]u8, @splat(0)) },
             .{ .kind = 13, .data = "\x03\x01x\x00\x00", .offset = 1 },
             .{ .kind = 16, .data = "\x03\x01x\x00", .offset = 1 },
             .{ .kind = 99, .data = "\x03\x01x\x00", .offset = 1 },

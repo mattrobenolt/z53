@@ -131,10 +131,10 @@ const RuntimeUnitTests = struct {
             try testing.expectEqual(cap, runtime.udp.limit(cap + 1, family));
             for (0..2) |extra| {
                 try fixture.encoder.init(&fixture.input, &.{ .bits = 0x8000 });
-                try fixture.encoder.question(&name, @enumFromInt(65400), 1);
+                try fixture.encoder.question(&name, @fromBackingInt(@intCast(65400)), 1);
                 const record: wire.Record = .{
                     .owner = 0,
-                    .kind = @enumFromInt(65400),
+                    .kind = @fromBackingInt(@intCast(65400)),
                     .class = 1,
                     .ttl_s = 30,
                     .data_start = 0,

@@ -1,9 +1,10 @@
 const std = @import("std");
-const wire = @import("src/build/wire.zig");
+
 const benchmark = @import("src/build/benchmark.zig");
 const config = @import("src/build/config.zig");
 const resolver = @import("src/build/resolver.zig");
 const runtime = @import("src/build/runtime.zig");
+const wire = @import("src/build/wire.zig");
 
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
@@ -40,7 +41,7 @@ pub fn build(b: *std.Build) void {
     const executable = b.addExecutable(executable_options);
     b.installArtifact(executable);
     const run = b.addRunArtifact(executable);
-    if (b.args) |args| run.addArgs(args);
+    run.addPassthruArgs();
     b.step("run", "Run z53 with a configuration file").dependOn(&run.step);
     b.step("check", "Check compilation without linking").dependOn(
         &b.addExecutable(executable_options).step,
@@ -56,7 +57,7 @@ fn addTests(
 ) void {
     const test_step = b.step("test", "Run every unit test suite");
     const test_compile = b.step("test-compile", "Check unit test compilation without linking");
-    const testingx = b.lazyDependency("testingx", .{}) orelse return;
+    const testingx = b.dependencyLazy("testingx", .{}) catch return;
     const target = executable.root_module.resolved_target.?;
     const unit_step = b.step("test-unit", "Run dependency API and startup tests");
     test_step.dependOn(unit_step);

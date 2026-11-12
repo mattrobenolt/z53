@@ -40,7 +40,7 @@ pub const Builder = struct {
         self.number(u32, 30);
         self.number(u16, @intCast(data.len));
         self.append(data);
-        self.header.counts[@intFromEnum(section)] += 1;
+        self.header.counts[@backingInt(section)] += 1;
     }
 
     pub fn finish(self: *Builder) wire.Error![]u8 {
@@ -51,7 +51,7 @@ pub const Builder = struct {
 
 pub fn maxName(target: *wire.Name) wire.Error!void {
     target.length = 0;
-    const label = [_]u8{'a'} ** 63;
+    const label: [63]u8 = @splat('a');
     for ([_]u8{ 63, 63, 63, 61 }) |length| {
         try target.append(&.{length});
         try target.append(label[0..length]);

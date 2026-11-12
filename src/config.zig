@@ -31,30 +31,30 @@ pub const Error = error{InvalidConfig};
 
 pub const QueryType = union(enum(u16)) {
     number: u16 = 0,
-    A: void = @intFromEnum(RecordType.a),
-    NS: void = @intFromEnum(RecordType.ns),
-    CNAME: void = @intFromEnum(RecordType.cname),
-    SOA: void = @intFromEnum(RecordType.soa),
-    PTR: void = @intFromEnum(RecordType.ptr),
-    MX: void = @intFromEnum(RecordType.mx),
-    TXT: void = @intFromEnum(RecordType.txt),
-    AAAA: void = @intFromEnum(RecordType.aaaa),
-    SRV: void = @intFromEnum(RecordType.srv),
-    NAPTR: void = @intFromEnum(RecordType.naptr),
-    DS: void = @intFromEnum(RecordType.ds),
-    RRSIG: void = @intFromEnum(RecordType.rrsig),
-    NSEC: void = @intFromEnum(RecordType.nsec),
-    DNSKEY: void = @intFromEnum(RecordType.dnskey),
-    NSEC3: void = @intFromEnum(RecordType.nsec3),
-    TLSA: void = @intFromEnum(RecordType.tlsa),
-    SVCB: void = @intFromEnum(RecordType.svcb),
-    HTTPS: void = @intFromEnum(RecordType.https),
-    ANY: void = @intFromEnum(RecordType.any),
+    A: void = @backingInt(RecordType.a),
+    NS: void = @backingInt(RecordType.ns),
+    CNAME: void = @backingInt(RecordType.cname),
+    SOA: void = @backingInt(RecordType.soa),
+    PTR: void = @backingInt(RecordType.ptr),
+    MX: void = @backingInt(RecordType.mx),
+    TXT: void = @backingInt(RecordType.txt),
+    AAAA: void = @backingInt(RecordType.aaaa),
+    SRV: void = @backingInt(RecordType.srv),
+    NAPTR: void = @backingInt(RecordType.naptr),
+    DS: void = @backingInt(RecordType.ds),
+    RRSIG: void = @backingInt(RecordType.rrsig),
+    NSEC: void = @backingInt(RecordType.nsec),
+    DNSKEY: void = @backingInt(RecordType.dnskey),
+    NSEC3: void = @backingInt(RecordType.nsec3),
+    TLSA: void = @backingInt(RecordType.tlsa),
+    SVCB: void = @backingInt(RecordType.svcb),
+    HTTPS: void = @backingInt(RecordType.https),
+    ANY: void = @backingInt(RecordType.any),
 
     pub fn code(self: QueryType) RecordType {
         return switch (self) {
-            .number => |number| @enumFromInt(number),
-            else => @enumFromInt(@intFromEnum(self)),
+            .number => |number| @fromBackingInt(@intCast(number)),
+            else => @fromBackingInt(@intCast(@backingInt(self))),
         };
     }
 };
@@ -164,22 +164,30 @@ pub fn parse(
     const memory = workspace[0..@min(workspace.len, workspace_bytes_max)];
     var fixed: std.heap.FixedBufferAllocator = .init(memory);
     const allocator = fixed.allocator();
-    var diagnostics: std.zon.parse.Diagnostics = .{};
-    target.* = std.zon.parse.fromSliceAlloc(
-        Config,
-        allocator,
-        source,
-        &diagnostics,
-        .{},
-    ) catch |err| {
+    // Ast and Zoir stay alive for the whole call because validation reads their
+    // node positions. The parse results outlive them only as workspace bytes.
+    var ast = std.zig.Ast.parse(allocator, source, .{ .mode = .zon }) catch {
+        return diagnostic.set("configuration workspace exhausted");
+    };
+    defer ast.deinit(allocator);
+    var zoir = std.zig.ZonGen.generate(allocator, ast, .{ .parse_str_lits = false }) catch {
+        return diagnostic.set("configuration workspace exhausted");
+    };
+    defer zoir.deinit(allocator);
+    var diagnostics: std.zon.parse.Diagnostics = undefined;
+    target.* = std.zon.parse.fromZoir(Config, .{
+        .arena = allocator,
+        .ast = &ast,
+        .zoir = &zoir,
+        .diagnostics = &diagnostics,
+    }) catch |err| {
         if (err == error.OutOfMemory) return diagnostic.set("configuration workspace exhausted");
-        var errors = diagnostics.iterateErrors();
-        if (errors.next()) |failure| {
-            const location = failure.getLocation(&diagnostics);
-            diagnostic.line = @intCast(location.line + 1);
-            diagnostic.column = @intCast(location.column + 1);
+        if (diagnostics.errors.len > 0) {
+            const failure = diagnostics.errors[0];
+            diagnostic.line = @intCast(failure.loc.line + 1);
+            diagnostic.column = @intCast(failure.loc.column + 1);
             var writer: Io.Writer = .fixed(&diagnostic.reason);
-            writer.print("{f}", .{failure.fmtMessage(&diagnostics)}) catch {
+            writer.print("{s}", .{failure.msg}) catch {
                 // The fixed diagnostic retains the available prefix of an oversized message.
                 assert(writer.end <= diagnostic.reason.len);
             };
@@ -187,7 +195,11 @@ pub fn parse(
         }
         return error.InvalidConfig;
     };
-    var context: validation.Context = .{ .diagnostics = &diagnostics, .diagnostic = diagnostic };
+    var context: validation.Context = .{
+        .ast = &ast,
+        .zoir = &zoir,
+        .diagnostic = diagnostic,
+    };
     try context.validate(allocator, target);
 }
 
@@ -265,13 +277,13 @@ fn preflight(source: [:0]const u8, diagnostic: *Diagnostic) Error!void {
 
 /// Query names retain wire label framing, including literal dots inside labels.
 /// Routing does not allocate and returns null when the resolver must answer REFUSED.
-pub fn route(config: *const Config, name: *const names.Name) ?u16 {
+pub fn route(config: *const Config, name: *const Name) ?u16 {
     name.validate() catch return null;
     var selected: ?u16 = null;
     var length: usize = 0;
     for (config.zones, 0..) |*zone, index| {
         if (zone.suffix.len <= length) continue;
-        var suffix: names.Name = .{};
+        var suffix: Name = .{};
         suffix.fromText(zone.suffix) catch unreachable;
         if (matches(name, &suffix)) {
             selected = @intCast(index);
@@ -281,7 +293,7 @@ pub fn route(config: *const Config, name: *const names.Name) ?u16 {
     return selected;
 }
 
-fn matches(name: *const names.Name, suffix: *const names.Name) bool {
+fn matches(name: *const Name, suffix: *const Name) bool {
     var offset: usize = 0;
     while (offset < name.length) {
         if (std.ascii.eqlIgnoreCase(name.wire()[offset..], suffix.wire())) return true;
@@ -337,7 +349,7 @@ const ConfigTests = struct {
 
         fn rejects(self: *Harness, source: [:0]const u8, reason: []const u8) !void {
             try testing.expectError(error.InvalidConfig, self.parse(source));
-            if (std.mem.indexOf(u8, self.diagnostic.message(), reason) == null) {
+            if (std.mem.find(u8, self.diagnostic.message(), reason) == null) {
                 std.debug.print("expected reason containing '{s}', got: {f}", .{
                     reason, &self.diagnostic,
                 });
@@ -404,7 +416,7 @@ const ConfigTests = struct {
                 try equal(853, endpoint.port);
             }
             try testing.expectEqualDeep(test_config.Hosts{}, root.hosts.?);
-            try equal(28, @intFromEnum(root.nodata[0].code()));
+            try equal(28, @backingInt(root.nodata[0].code()));
             try equal(1, root.nodata.len);
             try equal(1, root.max_fails);
             try equal(5, root.health_check_interval_s);
@@ -460,7 +472,7 @@ const ConfigTests = struct {
         try strings("/tmp/hosts", zone.hosts.?.path);
         try equal(42, zone.hosts.?.ttl);
         try equal(0, zone.hosts.?.reload_s);
-        try equal(65280, @intFromEnum(zone.nodata[2].code()));
+        try equal(65280, @backingInt(zone.nodata[2].code()));
         try equal(1, zone.max_depth.?);
         var endpoint: test_config.Endpoint = undefined;
         zone.upstreams[0].endpoint(&endpoint);
@@ -651,10 +663,27 @@ const ConfigTests = struct {
             &harness.diagnostic,
         ));
         try strings("configuration workspace exhausted", harness.diagnostic.message());
-        try harness.rejects(".{" ** 17 ++ "}" ** 17, "nesting exceeds 16");
-        try harness.rejects(" " ++ "0," ** 4097, "exceeds 8192 tokens");
-        try harness.rejects("- " ** 8190 ++ "1", "repeated negation");
-        try harness.rejects("!" ** 8190 ++ "true", "token is not valid in ZON");
+        try harness.rejects(repeat(".{", 17) ++ repeat("}", 17), "nesting exceeds 16");
+        try harness.rejects(" " ++ repeat("0,", 4097), "exceeds 8192 tokens");
+        try harness.rejects(repeat("- ", 8190) ++ "1", "repeated negation");
+        try harness.rejects(repeat("!", 8190) ++ "true", "token is not valid in ZON");
+    }
+
+    /// Zig 0.17 removed array multiplication, so a fixture that repeats a whole
+    /// pattern names the count here instead of spelling the bytes twice. The
+    /// sentinel keeps the result usable where the parser wants a terminated source.
+    fn repeat(
+        comptime pattern: []const u8,
+        comptime count: usize,
+    ) *const [pattern.len * count:0]u8 {
+        const result: [pattern.len * count:0]u8 = comptime blk: {
+            @setEvalBranchQuota(count + 1000);
+            var bytes: [pattern.len * count:0]u8 = undefined;
+            for (0..count) |index| @memcpy(bytes[index * pattern.len ..][0..pattern.len], pattern);
+            bytes[pattern.len * count] = 0;
+            break :blk bytes;
+        };
+        return &result;
     }
 
     fn listSource(
@@ -664,7 +693,7 @@ const ConfigTests = struct {
         count: u16,
         suffix: []const u8,
     ) ![:0]const u8 {
-        var writer: std.Io.Writer = .fixed(buffer);
+        var writer: Io.Writer = .fixed(buffer);
         try writer.writeAll(prefix);
         for (0..count) |_| try writer.writeAll(item);
         try writer.writeAll(suffix);
@@ -706,7 +735,7 @@ const ConfigTests = struct {
     }
 
     fn zonesSource(buffer: []u8, count: u16, cache: []const u8) ![:0]const u8 {
-        var writer: std.Io.Writer = .fixed(buffer);
+        var writer: Io.Writer = .fixed(buffer);
         try writer.writeAll(".{ .zones = .{");
         for (0..count) |index| {
             try writer.print(".{{ .suffix = \"z{d}\", .cache = {s}, .upstreams = .{{{s}}} }},", .{
@@ -767,11 +796,15 @@ const ConfigTests = struct {
         defer harness.deinit();
         const prefix = ".{ .zones = .{ .{ .suffix = \"";
         const suffix = "\", .upstreams = .{" ++ upstream ++ "} } } }";
-        const maximum = "a" ** 63 ++ "." ++ "b" ** 63 ++ "." ++ "c" ** 63 ++ "." ++ "d" ** 61;
+        const maximum = repeat("a", 63) ++ "." ++ repeat("b", 63) ++ "." ++
+            repeat("c", 63) ++ "." ++ repeat("d", 61);
         try harness.parse(prefix ++ maximum ++ suffix);
         try equal(254, harness.parsed.zones[0].suffix.len);
         try harness.parse(prefix ++ maximum ++ "." ++ suffix);
-        const invalid = .{ "", "..", ".ts.net", "ts..net", "ts.net..", "a" ** 64, maximum ++ "d" };
+        const invalid = .{
+            "",              "..",           ".ts.net", "ts..net", "ts.net..",
+            repeat("a", 64), maximum ++ "d",
+        };
         inline for (invalid) |name| try harness.rejects(
             prefix ++ name ++ suffix,
             "invalid DNS suffix",
@@ -813,10 +846,10 @@ const ConfigTests = struct {
             );
         }
         try harness.parse(
-            zone_start ++ ".hosts = .{ .path = \"" ++ "x" ** 4096 ++ "\" }" ++ zone_end,
+            zone_start ++ ".hosts = .{ .path = \"" ++ repeat("x", 4096) ++ "\" }" ++ zone_end,
         );
         try harness.rejects(
-            zone_start ++ ".hosts = .{ .path = \"" ++ "x" ** 4097 ++ "\" }" ++ zone_end,
+            zone_start ++ ".hosts = .{ .path = \"" ++ repeat("x", 4097) ++ "\" }" ++ zone_end,
             "path exceeds 4096",
         );
     }

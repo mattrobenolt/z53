@@ -41,7 +41,7 @@ pub const Fixture = struct {
     ) !void {
         const value: wire.Record = .{
             .owner = 0,
-            .kind = @enumFromInt(kind),
+            .kind = @fromBackingInt(@intCast(kind)),
             .class = self.client.request.class,
             .ttl_s = ttl_s,
             .data_start = 0,

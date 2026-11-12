@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SPEC §9.3: Zig 0.16 can report fuzz crashes with a zero exit code.
+# SPEC §9.3: the toolchain can report a fuzz crash with a zero exit code.
 set -euo pipefail
 iterations=${1:-20000}
 if [[ ! $iterations =~ ^[1-9][0-9]{0,8}$ ]]; then

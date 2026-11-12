@@ -281,7 +281,7 @@ pub const Pipeline = struct {
             .id = request.packet.header.id,
             .bits = (request.packet.header.bits & wire.request_flags_mask) |
                 wire.Flag.mask(&.{.response}) |
-                @intFromEnum(rcode),
+                @backingInt(rcode),
         };
         try encoder.init(output, &header);
         try encoder.question(&request.name, request.kind, request.class);
@@ -320,7 +320,7 @@ const RuntimeUnitTests = struct {
         var path_buffer: [128]u8 = undefined;
         const path = try hostsPath(&temporary, &path_buffer);
         var missing_buffer: [160]u8 = undefined;
-        const missing = try std.fmt.bufPrint(&missing_buffer, "{s}.missing", .{path});
+        const missing = try std.mem.print(&missing_buffer, "{s}.missing", .{path});
         try testing.expectError(error.HostsLoadFailed, allocate(testing.allocator, path, missing));
     }
 
@@ -329,7 +329,7 @@ const RuntimeUnitTests = struct {
             .sub_path = "hosts",
             .data = "192.0.2.1 entry.example\n",
         });
-        return std.fmt.bufPrint(buffer, ".zig-cache/tmp/{s}/hosts", .{temporary.sub_path});
+        return std.mem.print(buffer, ".zig-cache/tmp/{s}/hosts", .{temporary.sub_path});
     }
 
     fn allocate(allocator: Allocator, first_path: []const u8, second_path: []const u8) !void {
@@ -428,7 +428,7 @@ const RuntimeUnitTests = struct {
             .data = "192.0.2.9 deep.entry.example\n",
         });
         var path_buffer: [128]u8 = undefined;
-        const path = try std.fmt.bufPrint(
+        const path = try std.mem.print(
             &path_buffer,
             ".zig-cache/tmp/{s}/hosts",
             .{temporary.sub_path},

@@ -178,7 +178,7 @@ pub fn peer(
 
 pub fn completed(
     logger: *Logger,
-    io: std.Io,
+    io: Io,
     packet: *wire.Packet,
     query: *const Query,
     input: []const u8,
@@ -216,7 +216,7 @@ pub fn format(
     try question(&writer, packet, input);
     try writer.writeAll(" rcode=");
     if (packet.parse(answer.bytes)) |_| {
-        var rcode: u16 = @intFromEnum(packet.header.rcode());
+        var rcode: u16 = @backingInt(packet.header.rcode());
         if (packet.opt) |index| {
             const extended: u16 = @intCast(packet.records[index].ttl_s >> wire.edns_rcode_shift);
             rcode |= extended << @bitSizeOf(wire.Rcode);
@@ -248,7 +248,7 @@ fn question(
         return writer.writeAll(" qtype=unknown qname=unknown");
     var name: wire.Name = undefined;
     packet.name(&name, value.name) catch return writer.writeAll(" qtype=unknown qname=unknown");
-    try writer.print(" qtype={d} qname=\"", .{@intFromEnum(value.kind)});
+    try writer.print(" qtype={d} qname=\"", .{@backingInt(value.kind)});
     var offset: u16 = 0;
     while (offset < name.length) {
         const length = name.bytes[offset];

@@ -1,5 +1,6 @@
 const std = @import("std");
-const Index = std.zig.Zoir.Node.Index;
+const zig = std.zig;
+const Index = zig.Zoir.Node.Index;
 const Allocator = std.mem.Allocator;
 
 const config = @import("../config.zig");
@@ -7,7 +8,8 @@ const names = @import("../wire/name.zig");
 const endpoint = @import("endpoint.zig");
 
 pub const Context = struct {
-    diagnostics: *const std.zon.parse.Diagnostics,
+    ast: *const zig.Ast,
+    zoir: *const zig.Zoir,
     diagnostic: *config.Diagnostic,
 
     pub fn validate(
@@ -114,7 +116,7 @@ pub const Context = struct {
         const path_node = self.field(node, "path");
         if (hosts.path.len == 0) return self.fail(path_node, "hosts path must not be empty");
         if (hosts.path.len > 4096) return self.fail(path_node, "hosts path exceeds 4096 bytes");
-        if (std.mem.indexOfScalar(u8, hosts.path, 0) != null) {
+        if (std.mem.findScalar(u8, hosts.path, 0) != null) {
             return self.fail(path_node, "hosts path contains NUL");
         }
     }
@@ -181,10 +183,10 @@ pub const Context = struct {
     }
 
     fn field(self: *const Context, parent: Index, name: []const u8) Index {
-        switch (parent.get(self.diagnostics.zoir)) {
+        switch (parent.get(self.zoir)) {
             .struct_literal => |literal| {
                 for (literal.names, 0..) |key, index| {
-                    if (std.mem.eql(u8, key.get(self.diagnostics.zoir), name)) {
+                    if (std.mem.eql(u8, key.get(self.zoir), name)) {
                         return literal.vals.at(@intCast(index));
                     }
                 }
@@ -196,16 +198,15 @@ pub const Context = struct {
     }
 
     fn element(self: *const Context, parent: Index, index: usize) Index {
-        return switch (parent.get(self.diagnostics.zoir)) {
+        return switch (parent.get(self.zoir)) {
             .array_literal => |array| array.at(@intCast(index)),
             else => parent,
         };
     }
 
     fn fail(self: *Context, node: Index, reason: []const u8) config.Error {
-        const ast = &self.diagnostics.ast;
-        const token = ast.firstToken(node.getAstNode(self.diagnostics.zoir));
-        const location = ast.tokenLocation(0, token);
+        const token = self.ast.firstToken(node.getAstNode(self.zoir));
+        const location = self.ast.tokenLocation(0, token);
         self.diagnostic.line = @intCast(location.line + 1);
         self.diagnostic.column = @intCast(location.column + 1);
         return self.diagnostic.set(reason);

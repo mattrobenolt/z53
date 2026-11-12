@@ -70,7 +70,7 @@ pub const Table = struct {
     }
 
     fn line(self: *Table, text: []const u8) Error!void {
-        const end = std.mem.indexOfScalar(u8, text, '#') orelse text.len;
+        const end = std.mem.findScalar(u8, text, '#') orelse text.len;
         var tokens = std.mem.tokenizeAny(u8, text[0..end], " \t\r");
         const literal = tokens.next() orelse return;
         var address: Address = undefined;
@@ -79,7 +79,7 @@ pub const Table = struct {
         } else |_| {
             const value = Io.net.Ip6Address.parse(literal, 0) catch return;
             // A scoped address cannot be represented in DNS AAAA RDATA.
-            if (std.mem.indexOfScalar(u8, literal, '%') != null) return;
+            if (std.mem.findScalar(u8, literal, '%') != null) return;
             address = .{ .ipv6 = value.bytes };
         }
         const aliases = tokens;
@@ -214,7 +214,7 @@ fn reverseName(target: *wire.Name, address: *const Address) void {
     var text: [80]u8 = undefined;
     switch (address.*) {
         .ipv4 => |bytes| {
-            const value = std.fmt.bufPrint(&text, "{d}.{d}.{d}.{d}.in-addr.arpa.", .{
+            const value = std.mem.print(&text, "{d}.{d}.{d}.{d}.in-addr.arpa.", .{
                 bytes[3], bytes[2], bytes[1], bytes[0],
             }) catch unreachable;
             target.fromText(value) catch unreachable;
@@ -267,7 +267,7 @@ const ResolverTestsHosts = struct {
         try testing.expect(snapshot.store.table().entries()[0].name.eql(&name));
         var long: [64]u8 = @splat('a');
         var source: [128]u8 = undefined;
-        const invalid = try std.fmt.bufPrint(&source, "127.0.0.1 valid {s}\n", .{&long});
+        const invalid = try std.mem.print(&source, "127.0.0.1 valid {s}\n", .{&long});
         try snapshot.store.replace(invalid, 2);
         try testing.expectEqual(@as(usize, 0), snapshot.store.table().entries().len);
     }
@@ -409,7 +409,7 @@ const ResolverTestsHosts = struct {
         const source = try testing.allocator.alloc(u8, hosts.source_bytes_max);
         defer testing.allocator.free(source);
         @memset(source, '\n');
-        var writer: std.Io.Writer = .fixed(source);
+        var writer: Io.Writer = .fixed(source);
         for (0..hosts.entries_max) |index| try writer.print("2001:db8::{x} same\n", .{index});
         var store: hosts.Store = undefined;
         store.init(first, second);
@@ -431,7 +431,7 @@ const ResolverTestsHosts = struct {
         const source = try testing.allocator.alloc(u8, hosts.source_bytes_max);
         defer testing.allocator.free(source);
         @memset(source, '\n');
-        var writer: std.Io.Writer = .fixed(source);
+        var writer: Io.Writer = .fixed(source);
         for (0..7000) |index|
             try writer.print("192.0.2.1 host{d}.example host{d}\n", .{ index, index });
         try writer.writeAll("192.0.2.1 host6999.example host6999\n");
@@ -480,7 +480,7 @@ const ResolverTestsReload = struct {
     const hosts = test_fixture.resolver.hosts;
     const testing = std.testing;
 
-    fn write(directory: std.Io.Dir, source: []const u8, seconds: i64) !void {
+    fn write(directory: Io.Dir, source: []const u8, seconds: i64) !void {
         try directory.writeFile(testing.io, .{ .sub_path = "hosts", .data = source });
         const file = try directory.openFile(testing.io, "hosts", .{});
         defer file.close(testing.io);
@@ -578,8 +578,8 @@ const ResolverTestsReload = struct {
 
         fn changed(
             userdata: ?*anyopaque,
-            file: std.Io.File,
-        ) std.Io.File.StatError!std.Io.File.Stat {
+            file: Io.File,
+        ) Io.File.StatError!Io.File.Stat {
             var result = try testing.io.vtable.fileStat(userdata, file);
             calls += 1;
             if (calls == 2) result.mtime.nanoseconds += std.time.ns_per_s;
@@ -588,10 +588,10 @@ const ResolverTestsReload = struct {
 
         fn unreadable(
             _: ?*anyopaque,
-            _: std.Io.File,
+            _: Io.File,
             _: []const []u8,
             _: u64,
-        ) std.Io.File.ReadPositionalError!usize {
+        ) Io.File.ReadPositionalError!usize {
             return error.InputOutput;
         }
     };
@@ -611,7 +611,7 @@ const ResolverTestsReload = struct {
         try write(temporary.dir, "192.0.2.2 new\n", 100);
         var vtable = testing.io.vtable.*;
         vtable.fileStat = Fault.changed;
-        const io: std.Io = .{ .userdata = testing.io.userdata, .vtable = &vtable };
+        const io: Io = .{ .userdata = testing.io.userdata, .vtable = &vtable };
         Fault.calls = 0;
         try testing.expectError(error.FileChanged, store.load(io, temporary.dir, "hosts", source));
         try testing.expect(active == store.table());

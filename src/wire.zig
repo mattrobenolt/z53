@@ -133,7 +133,7 @@ pub const Flag = enum(u16) {
     pub fn mask(comptime flags: []const Flag) u16 {
         return comptime bits: {
             var value: u16 = 0;
-            for (flags) |flag| value |= @intFromEnum(flag);
+            for (flags) |flag| value |= @backingInt(flag);
             break :bits value;
         };
     }
@@ -168,11 +168,11 @@ pub const Header = struct {
     }
 
     pub fn rcode(self: *const Header) Rcode {
-        return @enumFromInt(@as(u4, @truncate(self.bits)));
+        return @fromBackingInt(@intCast(@as(u4, @truncate(self.bits))));
     }
 
     pub fn has(self: *const Header, flag: Flag) bool {
-        return self.bits & @intFromEnum(flag) != 0;
+        return self.bits & @backingInt(flag) != 0;
     }
 };
 
@@ -219,7 +219,7 @@ pub const Packet = struct {
         for (0..header.counts[0]) |_| _ = try target.readQuestion(&cursor);
         target.question_end = @intCast(cursor);
         for ([_]Section{ .answer, .authority, .additional }) |section| {
-            for (0..header.counts[@intFromEnum(section)]) |_| {
+            for (0..header.counts[@backingInt(section)]) |_| {
                 const record = &target.records[target.record_count];
                 try target.readRecord(record, &cursor, section);
                 var parts: rdata.Parts = undefined;
@@ -245,7 +245,7 @@ pub const Packet = struct {
         const fields = try take(self.bytes, cursor, question_fields_bytes);
         return .{
             .name = @intCast(start),
-            .kind = @enumFromInt(integer(u16, fields[0..2])),
+            .kind = @fromBackingInt(@intCast(integer(u16, fields[0..2]))),
             .class = integer(u16, fields[2..4]),
         };
     }
@@ -266,7 +266,7 @@ pub const Packet = struct {
         _ = try take(self.bytes, cursor, integer(u16, fields[8..10]));
         record.* = .{
             .owner = @intCast(owner),
-            .kind = @enumFromInt(integer(u16, fields[0..2])),
+            .kind = @fromBackingInt(@intCast(integer(u16, fields[0..2]))),
             .class = integer(u16, fields[2..4]),
             .ttl_s = integer(u32, fields[4..8]),
             .data_start = @intCast(start),
@@ -344,7 +344,7 @@ pub fn query(target: *Packet, bytes: []const u8) Query {
     if (target.header.opcode() != 0) {
         var header = target.header;
         header.bits = (header.bits & (opcode_mask | request_flags_mask)) |
-            Flag.mask(&.{.response}) | @intFromEnum(Rcode.notimp);
+            Flag.mask(&.{.response}) | @backingInt(Rcode.notimp);
         header.counts = @splat(0);
         return .{ .reply = header };
     }
@@ -356,7 +356,7 @@ pub fn query(target: *Packet, bytes: []const u8) Query {
 pub fn malformed(bytes: []const u8) Malformed {
     var header = Header.decode(bytes) catch return .drop;
     header.bits = (header.bits & (opcode_mask | Flag.mask(&.{.recursion_desired}))) |
-        Flag.mask(&.{.response}) | @intFromEnum(Rcode.formerr);
+        Flag.mask(&.{.response}) | @backingInt(Rcode.formerr);
     header.counts = @splat(0);
     return .{ .formerr = header };
 }
@@ -552,7 +552,7 @@ const WireTestsLimits = struct {
         var builder: fixture.Builder = undefined;
         builder.init();
         builder.question("\x01x\x00", 1, 1);
-        builder.record("\xc0\x0c", 6, .authority, "\xc0\x0c\xc0\x0c" ++ "\x00" ** 20);
+        builder.record("\xc0\x0c", 6, .authority, "\xc0\x0c\xc0\x0c" ++ @as([20]u8, @splat(0)));
         const bytes = try builder.finish();
         var packet: wire.Packet = undefined;
         for (0..bytes.len) |length| {
@@ -640,7 +640,9 @@ const WireTestsLimits = struct {
         var builder: fixture.Builder = undefined;
         builder.init();
         builder.question(name.wire(), 33, 1);
-        for (0..300) |_| builder.record("\xc0\x0c", 33, .answer, "\x00" ** 6 ++ "\xc0\x0c");
+        for (0..300) |_| {
+            builder.record("\xc0\x0c", 33, .answer, @as([6]u8, @splat(0)) ++ "\xc0\x0c");
+        }
         var packet: wire.Packet = undefined;
         try packet.parse(try builder.finish());
         try testing.expectEqual(6271, packet.bytes.len);
@@ -702,7 +704,7 @@ const WireTestsTypes = struct {
             try packet.parse(&input);
             var cursor: usize = 12;
             const question = try packet.readQuestion(&cursor);
-            try testing.expectEqual(@as(u16, @intCast(code)), @intFromEnum(question.kind));
+            try testing.expectEqual(@as(u16, @intCast(code)), @backingInt(question.kind));
             try packet.name(&name, question.name);
             try encoder.init(&output, &packet.header);
             try encoder.question(&name, question.kind, question.class);
@@ -717,7 +719,7 @@ const WireTestsTypes = struct {
         try testing.expectEqual(@as(u16, 0x8080), Flag.mask(&.{ .response, .recursion_available }));
         for (0..16) |code| {
             const header: Header = .{ .bits = 0xaef0 | @as(u16, @intCast(code)) };
-            try testing.expectEqual(@as(u4, @intCast(code)), @intFromEnum(header.rcode()));
+            try testing.expectEqual(@as(u4, @intCast(code)), @backingInt(header.rcode()));
         }
     }
 };
@@ -731,12 +733,14 @@ const FuzzTests = struct {
 
     // SPEC §9.3: bounded Smith storage follows the pinned tls fuzz pattern.
     test "fuzz DNS decoder and safe rewrites" {
-        try testing.fuzz({}, fuzzOne, .{ .corpus = &.{ "\x00" ** 12, "\xff" ** 32 } });
+        try testing.fuzz({}, fuzzOne, .{
+            .corpus = &.{ &@as([12]u8, @splat(0)), &@as([32]u8, @splat(0xff)) },
+        });
     }
 
     // SPEC §9.3 and RFC 3597 §4: mutate structured packets to reach RDATA and movement.
     test "fuzz structured DNS record relocation" {
-        try testing.fuzz({}, fuzzStructured, .{ .corpus = &.{ "", "\x00" ** 32 } });
+        try testing.fuzz({}, fuzzStructured, .{ .corpus = &.{ "", &@as([32]u8, @splat(0)) } });
     }
 
     // Unexpected outcomes panic: they remain visible with fuzz error tracing disabled.
@@ -760,7 +764,7 @@ const FuzzTests = struct {
         var owner: [2]u8 = undefined;
         wire.put(u16, &owner, 0xc000 | target);
         builder.record(&owner, 1, .answer, &.{ 127, 0, 0, 1 });
-        builder.record("\xc0\x0c", 6, .authority, "\xc0\x0c\xc0\x0c" ++ "\x00" ** 20);
+        builder.record("\xc0\x0c", 6, .authority, "\xc0\x0c\xc0\x0c" ++ @as([20]u8, @splat(0)));
         const bytes = builder.finish() catch @panic("fixture header failed");
         if (length >= 3) {
             const offset: usize = wire.integer(u16, mutations[0..2]);

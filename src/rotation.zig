@@ -22,7 +22,7 @@ pub const Source = enum {
 
     /// Normalize forward flags before cache insertion as well as client delivery.
     pub fn responseBits(self: Source, bits: u16) u16 {
-        return if (self == .forward) bits | @intFromEnum(wire.Flag.recursion_available) else bits;
+        return if (self == .forward) bits | @backingInt(wire.Flag.recursion_available) else bits;
     }
 
     pub fn rotatable(self: Source) bool {
@@ -117,7 +117,7 @@ const ResolverTestsRotation = struct {
         try name.fromText("alias.example.");
         const value: wire.Record = .{
             .owner = 0,
-            .kind = @enumFromInt(kind),
+            .kind = @fromBackingInt(@intCast(kind)),
             .class = 1,
             .ttl_s = marker,
             .data_start = 0,
@@ -127,7 +127,11 @@ const ResolverTestsRotation = struct {
         const offset = try encoder.beginRecord(&name, &value);
         switch (kind) {
             1 => try encoder.bytes(&.{ 192, 0, 2, marker }),
-            28 => try encoder.bytes(&(.{0} ** 15 ++ .{marker})),
+            28 => {
+                var address: [16]u8 = @splat(0);
+                address[15] = marker;
+                try encoder.bytes(&address);
+            },
             5, 2 => try encoder.name(&name, .allowed),
             15 => {
                 try encoder.number(u16, marker);
@@ -162,12 +166,12 @@ const ResolverTestsRotation = struct {
         try init(&fixture);
         var order: [wire.records_max]u16 = undefined;
         var random = std.Random.DefaultPrng.init(42);
-        var seen_addresses = std.StaticBitSet(9).initEmpty();
-        var seen_mail = std.StaticBitSet(9).initEmpty();
+        var seen_addresses = std.bit_set.Static(9).empty;
+        var seen_mail = std.bit_set.Static(9).empty;
         for (0..64) |_| {
             rotation.makeOrder(&order, &fixture.query, .forward, .rotate, random.random());
             try testing.expectEqualSlices(u16, &.{ 3, 7, 2, 8 }, order[0..4]);
-            var seen = std.StaticBitSet(wire.records_max).initEmpty();
+            var seen = std.bit_set.Static(wire.records_max).empty;
             for (order[0..fixture.query.record_count]) |index| {
                 try testing.expect(!seen.isSet(index));
                 seen.set(index);
@@ -180,7 +184,7 @@ const ResolverTestsRotation = struct {
             for (order[7..9]) |index| {
                 try testing.expectEqual(
                     @as(u16, 15),
-                    @intFromEnum(fixture.query.records[index].kind),
+                    @backingInt(fixture.query.records[index].kind),
                 );
             }
             try testing.expectEqualSlices(u16, &.{ 9, 10, 11 }, order[9..12]);
@@ -296,7 +300,7 @@ const ResolverTestsRotation = struct {
         try init(&fixture);
         var workspace: rotation.Workspace = undefined;
         var random = std.Random.DefaultPrng.init(42);
-        var seen = std.StaticBitSet(9).initEmpty();
+        var seen = std.bit_set.Static(9).empty;
         for (0..64) |_| {
             _ = try workspace.finish(
                 &fixture.query,

@@ -141,7 +141,7 @@ const Fixture = struct {
 };
 
 fn label(output: []u8, index: u32) ![]const u8 {
-    return std.fmt.bufPrint(output, "host{d:0>6}.bench.example.", .{index});
+    return std.mem.print(output, "host{d:0>6}.bench.example.", .{index});
 }
 
 fn encode(

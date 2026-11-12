@@ -124,7 +124,7 @@ pub const Encoder = struct {
     ) wire.Error!void {
         if (self.section != .question) return error.InvalidOrder;
         try self.name(value, .allowed);
-        try self.number(u16, @intFromEnum(kind));
+        try self.number(u16, @backingInt(kind));
         try self.number(u16, class);
         self.header.counts[0] += 1;
     }
@@ -136,15 +136,15 @@ pub const Encoder = struct {
         value: *const wire.Record,
     ) wire.Error!usize {
         if (value.section == .question) return error.InvalidOrder;
-        if (@intFromEnum(value.section) < @intFromEnum(self.section)) return error.InvalidOrder;
+        if (@backingInt(value.section) < @backingInt(self.section)) return error.InvalidOrder;
         self.section = value.section;
         try self.name(owner, .allowed);
-        try self.number(u16, @intFromEnum(value.kind));
+        try self.number(u16, @backingInt(value.kind));
         try self.number(u16, value.class);
         try self.number(u32, value.ttl_s);
         const offset = self.writer.constBuffered().len;
         _ = self.writer.reserve(2) catch return error.NoSpace;
-        self.header.counts[@intFromEnum(value.section)] += 1;
+        self.header.counts[@backingInt(value.section)] += 1;
         return offset;
     }
 
@@ -185,8 +185,8 @@ const WireTestsReuse = struct {
     // SPEC §§1.10, 3.9: dirty scratch words remain unavailable after a logical reset.
     test "scratch bitmaps retain backing words and reject stale bits" {
         inline for (.{ wire.records_max, 16384, 65536 }) |capacity| {
-            var bits: wire.names.ScratchSet(capacity) = undefined;
-            bits.bits = .initFull();
+            var bits: names.ScratchSet(capacity) = undefined;
+            bits.bits = .full;
             const original = bits.bits;
             bits.clear();
             for (0..capacity) |index| try testing.expect(!bits.isSet(index));

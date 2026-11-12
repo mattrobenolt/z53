@@ -12,7 +12,7 @@ TLS `server_name` supplies certificate verification and SNI, not address resolut
 
 ## 1. Non-negotiable constraints
 
-1. Language: Zig 0.16.x. The flake pins the exact toolchain revision.
+1. Language: Zig 0.17.x. The flake pins the exact toolchain revision.
 2. Targets: aarch64-linux, x86_64-linux, aarch64-darwin. No other target.
 3. Runtime dependencies: tls and stdx, plus one libcrypto backend. The exact
    tls revision is pinned in `build.zig.zon`.
@@ -788,13 +788,13 @@ These values come from the CoreDNS 1.14.6 source tree:
 
 ### 8.1 Flake
 
-- Inputs: nixpkgs (`nixos-unstable`). Build the binary with the Zig 0.16
+- Inputs: nixpkgs (`nixos-unstable`). Build the binary with the Zig 0.17
   toolchain and OpenSSL, following the tls flake pattern for a Zig package
   that links libcrypto through pkg-config.
   The `zon2nix` input supplies the regeneration tool for `nix/zon-deps.nix` and
   never enters the package build.
 - Outputs: `packages.z53` and `packages.default` for all three systems, plus `nixosModules.default` and `darwinModules.default`.
-- The devshell supplies Zig 0.16, just, dig, ziglint, and OpenSSL through pkg-config.
+- The devshell supplies Zig 0.17, just, dig, ziglint, and OpenSSL through pkg-config.
 - Packages use ReleaseSafe and the baseline CPU target. Each installed output contains only `bin/z53`.
 - Each manifest-pinned dependency, including transitive lazy helpers, has its own fixed-output fetcher in `nix/zon-deps.nix`, generated from `build.zig.zon`.
   Normal sandbox builds use Zig's `--system` mode without network access or a local package cache.

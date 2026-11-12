@@ -89,15 +89,19 @@ fetch:
     echo 'fetch: three attempts failed' >&2
     exit 1
 
-# Refresh the baskingspot pins from main: the build.zig.zon revisions and the
-# per-dependency fetchers in nix/zon-deps.nix.
+# Refresh the baskingspot pins: the release tags in build.zig.zon and the
+# per-dependency fetchers in nix/zon-deps.nix. Edit the three version values
+# below to move to a new release, then run this recipe.
 # Requires network access: zon2nix downloads every dependency to compute its
 # Nix hash. Safe to rerun.
 [doc('Refresh the tls, stdx, and testingx pins across build.zig.zon and nix/zon-deps.nix.')]
 [group('deps')]
 bump-deps:
-    zig fetch --save git+https://github.com/baskingspot/tls#main
-    zig fetch --save git+https://github.com/baskingspot/stdx#main
-    zig fetch --save https://github.com/baskingspot/testingx/archive/refs/tags/v0.1.1.tar.gz
+    tls_version=v0.4.1
+    stdx_version=v0.4.0
+    testingx_version=v0.4.0
+    zig fetch --save "https://baskingspot.dev/tls/$tls_version.tar.gz"
+    zig fetch --save "https://baskingspot.dev/stdx/$stdx_version.tar.gz"
+    zig fetch --save "https://baskingspot.dev/testingx/$testingx_version.tar.gz"
     nix run .#zon2nix -- --nix=nix/zon-deps.nix build.zig.zon
     nix build .#z53
