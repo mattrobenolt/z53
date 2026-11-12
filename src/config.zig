@@ -110,6 +110,9 @@ pub const Zone = struct {
 pub const Config = struct {
     listen: []const []const u8 = &.{"127.0.0.1:53"},
     zones: []Zone,
+    /// Wire names parsed from the canonical zone suffixes, parallel to zones.
+    /// parse builds them once; a hand-built Config leaves them absent.
+    routes: ?[]const Name = null,
 };
 
 pub const Diagnostic = struct {
@@ -201,6 +204,16 @@ pub fn parse(
         .diagnostic = diagnostic,
     };
     try context.validate(allocator, target);
+    // Validation leaves every suffix canonical, so route() can compare wire
+    // names instead of reparsing the text for each query.
+    const routes = allocator.alloc(Name, target.zones.len) catch {
+        return diagnostic.set("configuration workspace exhausted");
+    };
+    for (target.zones, routes) |*zone, *route_name| {
+        route_name.* = .{};
+        route_name.fromText(zone.suffix) catch unreachable;
+    }
+    target.routes = routes;
 }
 
 /// Caller provides source_bytes_max + 2 bytes for the oversize check and sentinel.
@@ -279,13 +292,24 @@ fn preflight(source: [:0]const u8, diagnostic: *Diagnostic) Error!void {
 /// Routing does not allocate and returns null when the resolver must answer REFUSED.
 pub fn route(config: *const Config, name: *const Name) ?u16 {
     name.validate() catch return null;
+    if (config.routes) |routes| {
+        assert(config.zones.len <= routes.len);
+        return routeSelected(config, name, true);
+    }
+    return routeSelected(config, name, false);
+}
+
+fn routeSelected(config: *const Config, name: *const Name, comptime parsed: bool) ?u16 {
     var selected: ?u16 = null;
     var length: usize = 0;
     for (config.zones, 0..) |*zone, index| {
         if (zone.suffix.len <= length) continue;
         var suffix: Name = .{};
-        suffix.fromText(zone.suffix) catch unreachable;
-        if (matches(name, &suffix)) {
+        const target = if (parsed) &config.routes.?[index] else suffix: {
+            suffix.fromText(zone.suffix) catch unreachable;
+            break :suffix &suffix;
+        };
+        if (matches(name, target)) {
             selected = @intCast(index);
             length = zone.suffix.len;
         }
@@ -612,6 +636,14 @@ const ConfigTests = struct {
             .{ "nots.net.", 1 }, .{ "xts.net.", 1 }, .{ "ts.net.evil.", 1 },
             .{ ".", 1 },
         };
+        // The suffix text fallback selects the same zone as the parsed table.
+        const routes = harness.parsed.routes;
+        harness.parsed.routes = null;
+        inline for (cases) |case| {
+            try name.fromText(case[0]);
+            try equal(@as(?u16, case[1]), test_config.route(&harness.parsed, &name));
+        }
+        harness.parsed.routes = routes;
         inline for (cases) |case| {
             try name.fromText(case[0]);
             try equal(@as(?u16, case[1]), test_config.route(&harness.parsed, &name));

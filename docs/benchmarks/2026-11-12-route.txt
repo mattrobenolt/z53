@@ -1,0 +1,31 @@
+# Zone routing with a parsed wire table
+
+Environment: aarch64-linux, Neoverse-V3, Zig 0.17.1, ReleaseSafe, native CPU,
+stdx v0.4.0.
+
+Method: one tree, one benchmark binary per side, only the `routes` field of the
+benchmark's `Config` changed between them. `zig build bench -- route`, three
+runs per side, 100 ms per trial, 64 configured zones and two alternating query
+names. The fallback side rebuilds a `wire.Name` from each zone's suffix text
+inside `route`; the table side compares against names parsed once by
+`config.parse`.
+
+## Fallback (suffix text parsed per zone per query)
+
+```text
+BenchmarkLongestSuffix64   83402   1440 ns/op   0 B/op   0 allocs/op
+BenchmarkLongestSuffix64   83122   1442 ns/op   0 B/op   0 allocs/op
+BenchmarkLongestSuffix64   83383   1440 ns/op   0 B/op   0 allocs/op
+```
+
+## Parsed wire table
+
+```text
+BenchmarkLongestSuffix64   262974   469.0 ns/op   0 B/op   0 allocs/op
+BenchmarkLongestSuffix64   265358   452.0 ns/op   0 B/op   0 allocs/op
+BenchmarkLongestSuffix64   266660   451.0 ns/op   0 B/op   0 allocs/op
+```
+
+Both sides allocate nothing and iterate the same 64 zones. The 3.2x difference
+is the per-query `Name.fromText` of every zone suffix, which the parsed table
+moves to config load.

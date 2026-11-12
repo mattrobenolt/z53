@@ -101,7 +101,12 @@ fn route(timer: *testingx.B) !void {
     }
     zones[0].suffix = ".";
     zones[1].suffix = "example.";
-    const settings: config.Config = .{ .zones = &zones };
+    var routes: [64]wire.Name = undefined;
+    for (&zones, &routes) |*zone, *route_name| {
+        route_name.* = .{};
+        try route_name.fromText(zone.suffix);
+    }
+    const settings: config.Config = .{ .zones = &zones, .routes = &routes };
     var names: [2]wire.Name = undefined;
     try names[0].fromText("host.ZONE63.Example.");
     try names[1].fromText("other.zone62.example.");
